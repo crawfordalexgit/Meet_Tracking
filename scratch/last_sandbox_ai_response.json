@@ -1,0 +1,522 @@
+{
+  "dna": {
+    "bio": {
+      "name": "Hooker, Dylan",
+      "squad": "GOLD DEVELOPMENT",
+      "age": 11,
+      "current_date": "14 May 2026",
+      "pathway_level": "Development",
+      "performance_momentum": "Stable",
+      "momentum_slope": 0
+    },
+    "pathway_gap_analysis": {
+      "scientific_stage": "Train to Train (Early)",
+      "scientific_recommendation": "8-12 pool hours",
+      "scientific_focus": [
+        "Stroke development",
+        "Discipline"
+      ],
+      "current_squad_target": "0 hours",
+      "gap_magnitude": "-8.0",
+      "is_under_recommended": true,
+      "is_over_recommended": false,
+      "status": "UNDER_VOLUME"
+    },
+    "development": {
+      "stage": "SwimSkills (Learning to Train)",
+      "stage_focus": "Technical Skill Acquisition",
+      "stage_description": "The most important stage for developing fine motor control. Swimmers should race all strokes and distances.",
+      "technical_priorities": [
+        "Underwater Phase",
+        "Turns",
+        "Stroke Efficiency",
+        "IM Versatility"
+      ],
+      "target_hours": "3-6",
+      "versatility": {
+        "strokes_raced": [
+          "Butterfly",
+          "Backstroke",
+          "Freestyle",
+          "Breaststroke",
+          "IM"
+        ],
+        "unique_stroke_count": 5,
+        "distance_count": 0,
+        "score": 60
+      }
+    },
+    "current_pbs": {
+      "50 Butterfly_SC": {
+        "time": "40.07",
+        "date": "2025-12-16",
+        "wa": 150,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "50 Backstroke_SC": {
+        "time": "41.57",
+        "date": "2026-02-28",
+        "wa": 150,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "400 Freestyle_SC": {
+        "time": "6:08.41",
+        "date": "2025-10-09",
+        "wa": 191,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "100 Breaststroke_SC": {
+        "time": "1:43.06",
+        "date": "2026-03-21",
+        "wa": 154,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Breaststroke_SC": {
+        "time": "3:57.44",
+        "date": "2025-07-05",
+        "wa": 129,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Individual Medley_SC": {
+        "time": "3:17.15",
+        "date": "2025-12-18",
+        "wa": 168,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "50 Freestyle_SC": {
+        "time": "35.44",
+        "date": "2025-07-20",
+        "wa": 177,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "50 Breaststroke_SC": {
+        "time": "48.58",
+        "date": "2025-12-16",
+        "wa": 135,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "50 Backstroke_LC": {
+        "time": "46.47",
+        "date": "2025-09-13",
+        "wa": 130,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Freestyle_LC": {
+        "time": "3:00.95",
+        "date": "2025-09-20",
+        "wa": 179,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "50 Breaststroke_LC": {
+        "time": "49.41",
+        "date": "2026-01-24",
+        "wa": 144,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Breaststroke_LC": {
+        "time": "3:49.89",
+        "date": "2025-09-20",
+        "wa": 162,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Individual Medley_LC": {
+        "time": "3:24.83",
+        "date": "2026-01-24",
+        "wa": 166,
+        "splits": {
+          "50": {
+            "cumulative": "46.09",
+            "incremental": null
+          },
+          "100": {
+            "cumulative": "1:39.88",
+            "incremental": "53.79"
+          },
+          "150": {
+            "cumulative": "2:40.35",
+            "incremental": "1:00.47"
+          },
+          "200": {
+            "cumulative": "3:24.83",
+            "incremental": "44.48"
+          }
+        },
+        "pathway_gap": null
+      },
+      "800 Freestyle_SC": {
+        "time": "13:14.29",
+        "date": "2025-11-06",
+        "wa": 170,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Freestyle_SC": {
+        "time": "2:52.27",
+        "date": "2026-01-03",
+        "wa": 187,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "400 Individual Medley_SC": {
+        "time": "7:06.26",
+        "date": "2025-12-11",
+        "wa": 167,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "100 Freestyle_SC": {
+        "time": "1:20.67",
+        "date": "2025-12-16",
+        "wa": 171,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Backstroke_SC": {
+        "time": "3:23.97",
+        "date": "2025-12-18",
+        "wa": 138,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "100 Butterfly_SC": {
+        "time": "1:35.31",
+        "date": "2026-01-03",
+        "wa": 125,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Butterfly_SC": {
+        "time": "3:43.65",
+        "date": "2026-01-03",
+        "wa": 109,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "200 Butterfly_LC": {
+        "time": "3:54.74",
+        "date": "2026-01-24",
+        "wa": 103,
+        "splits": {
+          "50": {
+            "cumulative": "46.87",
+            "incremental": null
+          },
+          "100": {
+            "cumulative": "1:47.64",
+            "incremental": "1:00.77"
+          },
+          "150": {
+            "cumulative": "2:53.65",
+            "incremental": "1:06.01"
+          },
+          "200": {
+            "cumulative": "3:54.74",
+            "incremental": "1:01.09"
+          }
+        },
+        "pathway_gap": null
+      },
+      "400 Freestyle_LC": {
+        "time": "6:00.33",
+        "date": "2026-01-24",
+        "wa": 227,
+        "splits": {
+          "50": {
+            "cumulative": "39.36",
+            "incremental": null
+          },
+          "100": {
+            "cumulative": "1:24.51",
+            "incremental": "45.15"
+          },
+          "150": {
+            "cumulative": "2:10.75",
+            "incremental": "46.24"
+          },
+          "200": {
+            "cumulative": "2:57.95",
+            "incremental": "47.20"
+          },
+          "250": {
+            "cumulative": "3:44.72",
+            "incremental": "46.77"
+          },
+          "300": {
+            "cumulative": "4:32.01",
+            "incremental": "47.29"
+          },
+          "350": {
+            "cumulative": "5:18.21",
+            "incremental": "46.20"
+          },
+          "400": {
+            "cumulative": "6:00.33",
+            "incremental": "42.12"
+          }
+        },
+        "pathway_gap": null
+      },
+      "100 Breaststroke_LC": {
+        "time": "1:46.88",
+        "date": "2026-01-24",
+        "wa": 150,
+        "splits": {
+          "50": {
+            "cumulative": "50.65",
+            "incremental": null
+          },
+          "100": {
+            "cumulative": "1:46.88",
+            "incremental": "56.23"
+          }
+        },
+        "pathway_gap": null
+      },
+      "50 Freestyle_LC": {
+        "time": "35.32",
+        "date": "2026-01-31",
+        "wa": 207,
+        "splits": null,
+        "pathway_gap": null
+      },
+      "100 Butterfly_LC": {
+        "time": "1:37.14",
+        "date": "2026-01-31",
+        "wa": 131,
+        "splits": {
+          "50": {
+            "cumulative": "45.80",
+            "incremental": null
+          },
+          "100": {
+            "cumulative": "1:37.14",
+            "incremental": "51.34"
+          }
+        },
+        "pathway_gap": null
+      },
+      "50 Butterfly_LC": {
+        "time": "40.84",
+        "date": "2026-01-31",
+        "wa": 162,
+        "splits": null,
+        "pathway_gap": null
+      }
+    },
+    "training": {
+      "analysis_period": 365,
+      "consistency_pct": 6,
+      "volume_pct": 41,
+      "recent_workload_last_4_weeks": [
+        {
+          "date": "W-2026-05-04",
+          "hours": 2
+        },
+        {
+          "date": "W-2026-04-27",
+          "hours": 3
+        },
+        {
+          "date": "W-2026-04-20",
+          "hours": 4
+        },
+        {
+          "date": "W-2026-04-13",
+          "hours": 1
+        }
+      ]
+    },
+    "technical": {
+      "peak_wa": 227,
+      "meet_temperament": {
+        "l1_avg_wa": null,
+        "l3_avg_wa": 148
+      },
+      "drop_off_ratios": {}
+    },
+    "historical_context": [],
+    "history": [
+      {
+        "date": "2026-01-03",
+        "event": "200 Butterfly",
+        "course": "SC",
+        "level": "L3",
+        "wa": 109,
+        "velocity_ms": "0.894",
+        "meet": "7th Kent Weald Last Chance County Qualifier 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-03",
+        "event": "100 Breaststroke",
+        "course": "SC",
+        "level": "L3",
+        "wa": 153,
+        "velocity_ms": "0.969",
+        "meet": "7th Kent Weald Last Chance County Qualifier 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-03",
+        "event": "200 Freestyle",
+        "course": "SC",
+        "level": "L3",
+        "wa": 187,
+        "velocity_ms": "1.161",
+        "meet": "7th Kent Weald Last Chance County Qualifier 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-24",
+        "event": "50 Breaststroke",
+        "course": "LC",
+        "level": "L1",
+        "wa": 144,
+        "velocity_ms": "1.012",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-24",
+        "event": "200 Butterfly",
+        "course": "LC",
+        "level": "L1",
+        "wa": 103,
+        "velocity_ms": "0.852",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-24",
+        "event": "400 Freestyle",
+        "course": "LC",
+        "level": "L1",
+        "wa": 227,
+        "velocity_ms": "1.110",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-24",
+        "event": "200 Individual Medley",
+        "course": "LC",
+        "level": "L1",
+        "wa": 166,
+        "velocity_ms": "0.976",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-24",
+        "event": "100 Breaststroke",
+        "course": "LC",
+        "level": "L1",
+        "wa": 150,
+        "velocity_ms": "0.936",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-31",
+        "event": "50 Freestyle",
+        "course": "LC",
+        "level": "L1",
+        "wa": 207,
+        "velocity_ms": "1.416",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-31",
+        "event": "100 Butterfly",
+        "course": "LC",
+        "level": "L1",
+        "wa": 131,
+        "velocity_ms": "1.029",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-01-31",
+        "event": "50 Butterfly",
+        "course": "LC",
+        "level": "L1",
+        "wa": 162,
+        "velocity_ms": "1.224",
+        "meet": "Kent County Championships 2026",
+        "is_pb": false
+      },
+      {
+        "date": "2026-02-14",
+        "event": "50 Butterfly",
+        "course": "SC",
+        "level": "L4",
+        "wa": 129,
+        "velocity_ms": "1.185",
+        "meet": "Tudor League",
+        "is_pb": false
+      },
+      {
+        "date": "2026-02-28",
+        "event": "50 Backstroke",
+        "course": "SC",
+        "level": "L4",
+        "wa": 150,
+        "velocity_ms": "1.203",
+        "meet": "Tudor League",
+        "is_pb": false
+      },
+      {
+        "date": "2026-03-21",
+        "event": "100 Breaststroke",
+        "course": "SC",
+        "level": "L4",
+        "wa": 154,
+        "velocity_ms": "0.970",
+        "meet": "Kent Junior League 2026 Round 1",
+        "is_pb": false
+      },
+      {
+        "date": "2026-03-21",
+        "event": "50 Butterfly",
+        "course": "SC",
+        "level": "L4",
+        "wa": 137,
+        "velocity_ms": "1.211",
+        "meet": "Kent Junior League 2026 Round 1",
+        "is_pb": false
+      }
+    ]
+  },
+  "result": {
+    "headline": "Technical Development Audit: Dylan Hooker (11) - Critical Under-Volume Risk",
+    "overview": "Dylan is currently in the 'SwimSkills/Learn to Train' stage, which requires 3-6 hours of pool time for technical consolidation. His actual engagement is significantly below the minimum threshold (6% consistency, ~2.5 hrs/week average), creating a widening gap between his biological development and technical proficiency.",
+    "technical_deep_dive": "Dylan shows high versatility by racing all five strokes, which is excellent for an 11-year-old. However, his performance metrics (World Aquatics scores) are plateaued or regressing across all disciplines. The lack of consistent pool time is preventing the 'fine motor control' required for effective underwater phases and turns. His pacing in the 400m Freestyle shows a 'U-shaped' effort curve with a late-race fade, indicating a lack of the aerobic foundation necessary to maintain technical integrity under fatigue.",
+    "swot_analysis": {
+      "strengths": "High natural versatility (races all strokes + IM); active participation in a wide range of events across both SC and LC.",
+      "weaknesses": "Severely inconsistent training attendance (6% consistency); lack of aerobic base; poor technical maintenance due to insufficient training hours.",
+      "opportunities": "Alignment with the 'Train to Train' volume targets would immediately boost technical motor learning and aerobic endurance; focusing on IM transitions could improve all four strokes simultaneously.",
+      "threats": "Risk of early-stage 'technical burnout' or frustration due to stagnant times; plateauing development due to missing the critical window for stroke efficiency acquisition."
+    },
+    "action_items": [
+      "Establish a consistent 3-session-per-week attendance baseline to meet 'Learn to Train' minimums.",
+      "Prioritize 'technique-only' sessions over race-pace intensity until consistency improves.",
+      "Implement turn and underwater phase drills during all sessions to build required technical motor patterns.",
+      "Reduce meet frequency temporarily to dedicate more focus to the training cycle and base building.",
+      "Schedule a 'Technical Review' meeting with coaching staff to align on training volume expectations versus current reality."
+    ],
+    "compliance_rating": "RED"
+  }
+}

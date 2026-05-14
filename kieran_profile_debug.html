@@ -1,0 +1,1863 @@
+
+
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, maximum-scale=1, user-scalable=no">
+    <meta name="description" content="">
+    <meta name="author" content="BPS Designs Limited">
+
+    <title>
+        Tonbridge Swimming Club</title>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+
+    <link rel="stylesheet" href="/Js/sweetalert/sweet-alert.min.css" />
+    <link rel="stylesheet" href="/v7/plugins/bootstrap-datepicker/bootstrap-datepicker3.min.css" />
+    <link rel="stylesheet" href="/v7/css/modern.css">
+
+    <link rel="stylesheet" href="/v7/css/users.min.css?v=7.15.6">
+
+
+
+    <script src="/v7/js/app.js"></script>
+    <script src="/Js/sweetalert/sweet-alert.min.js"></script>
+    <script src="/v7/plugins/bootstrap-datepicker/bootstrap-datepicker.min.js"></script>
+    <script src="/Js/jquery-cookie/jquery.cookie.min.js"></script>
+
+    <script src="/v7/Js/mobile-app-detect.min.js"></script>
+
+    <script src="/v7/Js/users.min.js?v=7.15.6"></script>
+
+    <script>var enchant = enchant || []</script>
+
+    
+
+    
+
+    <script src="/Js/tiny_mce/tinymce/js/tinymce/tinymce.min.js?v=4.9.11"></script>
+    <script src="/Js/jqueryMultiFile/jquery.MultiFile.min.js"></script>
+    <script src="/Js/highcharts.js?v=4.2.5"></script>
+    <script src="/Js/exporting.js?v=4.2.5"></script>
+    <script src="/v7/plugins/jszip/jszip.min.js"></script>
+
+    <script>
+
+        $(document).ready(function () {
+
+            $('#editablePopup').on('shown.bs.modal', function () {
+                $('#editablePopupBody .date-picker').datepicker({
+                    autoclose: true,
+                    todayHighlight: true,
+                    weekStart: 1,
+                    format: 'dd M yyyy'
+                }).on('show', function (e) {
+                    e.stopPropagation();
+                });
+            });
+
+            $('#attachments').MultiFile({
+                STRING: {
+                    file: '<em title="Click to remove" onclick="$(this).parent().prev().click()">$file</em>',
+                    remove: '<i class="fa fa-trash-alt text-danger"></i>'
+                }
+            });
+
+            $('#sendEmail').on('show.bs.collapse', function (e) {
+                tinymce.init({
+                    branding: false, convert_urls: false,
+                    selector: '.editor',
+                    height: 400,
+                    menubar: false,
+                    browser_spellcheck: true,
+                    plugins: [
+                        'advlist autolink lists link image print preview anchor',
+                        'wordcount code fullscreen',
+                        'media nonbreaking table directionality',
+                        'template paste textcolor colorpicker imagetools'
+                    ],
+                    toolbar1: 'undo redo | copy paste | styleselect | forecolor backcolor | bullist numlist outdent indent table | link image | tags fileLinks internalLinks | code fullscreen',
+                    style_formats_merge: true,
+                    style_formats: [
+                        {
+                            title: 'Img Responsive',
+                            selector: 'img',
+                            styles: {
+                                'display': 'block',
+                                'max-width': '100%',
+                                'height': 'auto'
+                            }
+                        }
+                    ],
+                    setup: function (editor) {
+                        editor.addButton('tags', {
+                            type: 'menubutton',
+                            text: 'Insert Tag',
+                            icon: false,
+                            menu: [
+                                {
+                                    text: 'Member ID',
+                                    onclick: function () {
+                                        editor.insertContent('##MEMBERID##');
+                                    }
+                                },
+                                {
+                                    text: 'First Name',
+                                    onclick: function () {
+                                        editor.insertContent('##FIRSTNAME##');
+                                    }
+                                },
+                                {
+                                    text: 'Last Name',
+                                    onclick: function () {
+                                        editor.insertContent('##LASTNAME##');
+                                    }
+                                },
+                                {
+                                    text: 'Login Username',
+                                    onclick: function () {
+                                        editor.insertContent('##USERNAME##');
+                                    }
+                                },
+                                {
+                                    text: 'Club Groups',
+                                    onclick: function () {
+                                        editor.insertContent('##CLUBGROUPS##');
+                                    }
+                                },
+                                {
+                                    text: 'Club Sessions',
+                                    onclick: function () {
+                                        editor.insertContent('##CLUBSESSIONS##');
+                                    }
+                                },
+                                {
+                                    text: 'Membership Renewal Link',
+                                    onclick: function () {
+                                        editor.insertContent('##MEMBERSHIPRENEWAL##');
+                                    }
+                                },
+                                {
+                                    text: 'NEW Member Form Link',
+                                    onclick: function () {
+                                        editor.insertContent('##NEWMEMBERFORM##');
+                                    }
+                                },
+                                {
+                                    text: 'Confirm Details Link',
+                                    onclick: function () {
+                                        editor.insertContent('##CONFIRMDETAILS##');
+                                    }
+                                }
+                            ]
+                        });
+                        editor.addButton('fileLinks', {
+                            icon: 'mce-ico mce-i-link',
+                            tooltip: 'Insert Club Document Link',
+                            onclick: function () {
+                                editor.windowManager.open({
+                                    autoScroll: true,
+                                    title: 'Club Documents',
+                                    url: 'Club-Document-Links.aspx',
+                                    width: 570,
+                                    height: 550
+                                });
+                            }
+                        });
+                        editor.addButton('internalLinks', {
+                            icon: 'mce-ico mce-i-link',
+                            tooltip: 'Insert Internal Link',
+                            onclick: function () {
+                                editor.windowManager.open({
+                                    autoScroll: true,
+                                    title: 'Internal Links',
+                                    url: 'Website-Links.aspx',
+                                    width: 570,
+                                    height: 550
+                                });
+                            }
+                        });
+                        editor.on('keydown', function (e) {
+                            if ((e.keyCode == 8 || e.keyCode == 46)) { // delete & backspace keys
+                                var selectedNode = editor.selection.getNode(); // get the selected node (element) in the editor
+                                if (selectedNode && selectedNode.nodeName == 'IMG') {
+                                    deleteUploadedBlob(selectedNode.src);
+                                }
+                            }
+                        });
+                    },
+                    image_advtab: true,
+                    automatic_uploads: true,
+                    images_upload_url: 'Ajax-Upload-File.ashx',
+                    images_reuse_filename: false,
+                    paste_data_images: false,
+                    file_picker_types: 'image',
+                    file_picker_callback: function (cb, value, meta) {
+                        var input = document.createElement('input');
+                        input.setAttribute('type', 'file');
+                        input.setAttribute('accept', 'image/*');
+                        input.onchange = function () {
+                            var file = this.files[0];
+                            var reader = new FileReader();
+                            reader.readAsDataURL(file);
+                            reader.onload = function () {
+                                var id = 'blobid' + (new Date()).getTime();
+                                var blobCache = tinymce.activeEditor.editorUpload.blobCache;
+                                var blobInfo = blobCache.create(id, file, reader.result);
+                                blobCache.add(blobInfo);
+
+                                // call the callback and populate the Title field with the file name
+                                cb(blobInfo.blobUri(), { title: file.name });
+                            };
+                        };
+
+                        input.click();
+                    }
+                });
+
+                $.ajax({
+                    url: '/Users/ajax/email.ashx?action=getEmailTemplates',
+                    cache: false,
+                    success: function (data) {
+                        $('#EmailTemplates').html(data);
+                        $('#EmailTemplates select').select2({
+                            minimumResultsForSearch: 10,
+                            width: '100%'
+                        });
+                    }
+                });
+
+                $.ajax({
+                    url: '/Users/ajax/members.ashx?action=getUsers&onlyWithEmails=1&multiple=1',
+                    cache: false,
+                    success: function (data) {
+                        $('#CC').html(data);
+                        $('#CC select').select2({
+                            minimumResultsForSearch: 10,
+                            width: '100%'
+                        });
+                    }
+                });
+
+                $("#emailForm").validate();
+
+            })
+
+            $(".nav-link").tooltip({
+                container: 'body'
+            });
+
+        });
+
+
+
+
+        $(document).ready(function () {
+
+            $.ajax({
+                url: '/Users/ajax/users.ashx?action=view-user&tab=basic&id=536151' + '&relays=0',
+                cache: false,
+                success: function (data) {
+
+                    $('#details').html(data);
+
+                    $('#basic').addClass("active");
+
+                    $('#details .date-picker').datepicker({
+                        autoclose: true,
+                        todayHighlight: true,
+                        weekStart: 1,
+                        format: 'dd M yyyy'
+                    }).on('show', function (e) {
+                        e.stopPropagation();
+                    });
+
+                    $("#details #updateUserForm").validate({
+                        rules: {
+                            emergencycontact1: {
+                                lettersonly: true
+                            },
+                            emergencycontact2: {
+                                lettersonly: true
+                            },
+                            homephone: {
+                                numbersonly: true
+                            },
+                            emergencyphone1: {
+                                numbersonly: true
+                            },
+                            emergencyphone2: {
+                                numbersonly: true
+                            },
+                            password: {
+                                required: false,
+                                minlength: 8
+                            },
+                            password2: {
+                                equalTo: "#password"
+                            }
+                        }
+                    });
+
+                    $("#basic-card-footer").removeClass("d-none");
+
+                }
+            });
+
+        });
+
+
+
+        function viewTab(tab) {
+
+            $("#details").fadeTo("fast", 0.1, function () {
+
+                $("#tab-selector a, #tab-selector-desktop a").each(function () {
+                    $(this).removeClass("active");
+                });
+
+                if (tab == "basic") {
+                    $("#basic-card-footer").removeClass("d-none");
+                }
+                else {
+                    $("#basic-card-footer").addClass("d-none");
+                }
+
+                $.ajax({
+                    url: '/Users/ajax/users.ashx?action=view-user&tab=' + tab + '&id=536151', cache: false,
+                    success: function (data) {
+
+                        $('#' + tab).addClass("active");
+                        $('#' + tab + '2').addClass("active");
+
+                        $('#details').html(data);
+
+                        $('#details .date-picker').datepicker({
+                            autoclose: true,
+                            todayHighlight: true,
+                            weekStart: 1,
+                            format: 'dd M yyyy'
+                        }).on('show', function (e) {
+                            e.stopPropagation();
+                        });
+
+                        $('#details select:not(.noselect2)').select2({
+                            minimumResultsForSearch: 10,
+                            width: '100%'
+                        });
+
+                        if (tab == "groups") {
+
+                            var ro = $.cookie('ro');
+
+                            if (ro !== "1") {
+                                $("#details .editable-user-group").click(function (e) {
+
+                                    e.preventDefault();
+                                    var id = $(this).attr("id");
+                                    var content = $(this).text();
+                                    var pk = $(this).attr("data-pk");
+
+                                    if (content == "Empty") {
+                                        content = "";
+                                    }
+
+                                    $.ajax({
+                                        url: '/Users/ajax/editable.ashx?page=view-user&id=' + id + '&content=' + content + '&pk=' + pk,
+                                        cache: false,
+                                        success: function (data) {
+
+                                            $("#editablePopupBody").html(data);
+                                            $("#editablePopup").modal("show");
+
+                                        }
+                                    });
+
+                                });
+
+                            }
+
+                            $('#addNewGroup').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/club-groups.ashx?action=getGroups&userid=536151&multiple=1&coachGroups=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#groupSelect2").html(data);
+                                        $('#groupSelect2 select').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+
+                            $('#addGroup').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/club-groups.ashx?action=getGroups&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#groupSelect").html(data);
+                                        $('#groupSelect select').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+
+                            $('#emailText').on('show.bs.collapse', function (e) {
+
+                                tinymce.init({
+                                    branding: false, convert_urls: false,
+                                    selector: '.email-text',
+                                    height: 150,
+                                    menubar: false,
+                                    browser_spellcheck: true,
+                                    plugins: [
+                                        'advlist autolink lists link image print preview anchor',
+                                        'wordcount code fullscreen',
+                                        'media nonbreaking table directionality',
+                                        'template paste textcolor colorpicker imagetools'
+                                    ],
+                                    toolbar1: 'styleselect | bullist numlist | link  tags ',
+                                    setup: function (editor) {
+                                        editor.addButton('tags', {
+                                            type: 'menubutton',
+                                            text: 'Insert Tag',
+                                            icon: false,
+                                            menu: [
+                                                {
+                                                    text: 'First Name',
+                                                    onclick: function () {
+                                                        editor.insertContent('##FIRSTNAME##');
+                                                    }
+                                                },
+                                                {
+                                                    text: 'Last Name',
+                                                    onclick: function () {
+                                                        editor.insertContent('##LASTNAME##');
+                                                    }
+                                                },
+                                                {
+                                                    text: 'Groups Added To',
+                                                    onclick: function () {
+                                                        editor.insertContent('##CLUBGROUPS##');
+                                                    }
+                                                }
+                                            ]
+                                        });
+                                    }
+                                });
+
+                            });
+
+                        } //groups
+
+                        if (tab == "sessions") {
+
+                            $('#addNewSession').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/sessions.ashx?action=getSessions&userid=536151&multiple=1&coachSessions=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#sessionSelect2").html(data);
+                                        $('#sessionSelect2 select').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+
+                            });
+
+                            $('#addSession').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/sessions.ashx?action=getSessions&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#sessionSelect").html(data);
+                                        $('#sessionSelect select').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+
+                            });
+
+                            $("#details .editable").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            $("#details .editable").click(function (e) {
+
+                                e.preventDefault();
+                                var id = $(this).attr("id");
+                                var content = $(this).text();
+
+                                if (content == "Empty") {
+                                    content = "";
+                                }
+
+                                $.ajax({
+                                    url: '/Users/ajax/editable.ashx?page=view-user&id=' + id + '&content=' + content,
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#editablePopupBody").html(data);
+                                        $("#editablePopup").modal("show");
+
+                                    }
+                                });
+
+                            });
+
+                        } //sessions
+
+                        if (tab == "attendance") {
+
+                            //editable
+                            $("#details .editable").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            $("#details .editable").click(function (e) {
+
+                                e.preventDefault();
+                                var id = $(this).attr("id");
+                                var content = $(this).text();
+                                var type = $(this).attr("data-type");
+                                var pk = $(this).attr("data-pk");
+
+                                if (content == "Empty") {
+                                    content = "";
+                                }
+
+                                $.ajax({
+                                    url: '/Users/ajax/editable.ashx?page=my-swimming&id=' + id + '&content=' + content + '&pk=' + pk,
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#editablePopupBody").html(data);
+                                        $("#editablePopup").modal("show");
+
+                                    }
+                                });
+
+                            });
+
+                            $('#attendance_date').datepicker()
+                                .on("changeDate", function (e) {
+                                    $('#attendanceSessions').html('<p class="mt-1"><i class="fa fa-circle-notch fa-spin"></i> Please wait...</p>');
+                                    $.ajax({
+                                        url: '/Users/ajax/sessions.ashx?action=getSessions&specificDay=' + $('#attendance_date').val() + '&name=session_id',
+                                        cache: false,
+                                        success: function (data) {
+                                            $('#attendanceSessions').html(data);
+                                            $('#attendanceSessions select').select2({
+                                                minimumResultsForSearch: 10,
+                                                width: '100%'
+                                            });
+
+                                        }
+                                    });
+                                });
+
+                            $('#attendanceTable').DataTable({
+                                "order": [],
+                                "pageLength": 50,
+                                "lengthMenu": [[10, 25, 50, 100, 200, 500, -1], [10, 25, 50, 100, 200, 500, "All"]],
+                                "aoColumnDefs": [{
+                                    "bSortable": false,
+                                    "aTargets": ["no-sort"]
+                                }],
+                                "language": {
+                                    "lengthMenu": "_MENU_ rows per page",
+                                    "zeroRecords": "Nothing found - sorry"
+                                    //"info": "Page _PAGE_ of _PAGES_"
+                                }
+                            });
+
+                            $('#editablePopup').on('shown.bs.modal', function () {
+                                $('#editablePopupBody .date-picker').datepicker({
+                                    autoclose: true,
+                                    todayHighlight: true,
+                                    weekStart: 1,
+                                    format: 'dd M yyyy'
+                                }).on('show', function (e) {
+                                    e.stopPropagation();
+                                });
+                            });
+
+                        } //attendance
+
+                        if (tab == "event-attendance") {
+
+                            $('#details .datatable').DataTable({
+                                "order": [],
+                                "pageLength": 10,
+                                "lengthMenu": [[10, 25, 50, 100, 200, 500, -1], [10, 25, 50, 100, 200, 500, "All"]],
+                                "aoColumnDefs": [{
+                                    "bSortable": false,
+                                    "aTargets": ["no-sort"]
+                                }],
+                                "language": {
+                                    "lengthMenu": "_MENU_ rows per page",
+                                    "zeroRecords": "Nothing found - sorry"
+                                    //"info": "Page _PAGE_ of _PAGES_"
+                                }
+                            });
+
+                        } //event-attendance
+
+                        if (tab == "logbook") {
+
+                            $('#addLogbook').on('shown.bs.collapse', function () {
+
+                                $('#details #strokes').select2({
+                                    minimumResultsForSearch: 10,
+                                    width: '100%'
+                                });
+
+                                $("#details #addLogbookForm").validate();
+
+                            });
+
+                        } //logbook
+
+                        if (tab == "fees") {
+
+                            $('#addFee').on('shown.bs.collapse', function () {
+
+                                $.ajax({
+                                    url: '/Users/ajax/fees.ashx?action=getFees&userid=536151&multiple=1&required=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#feeSelect").html(data);
+                                        $('#details #feeid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                        $("#addFeeForm").validate();
+                                    }
+                                });
+
+                            });
+
+                        } //fees
+
+                        if (tab == "invoices") {
+
+                            $('#invoicesTable').DataTable({
+                                //stateSave: true,
+                                //"stateDuration": 86400, //one day in seconds
+                                "bProcessing": true,
+                                "bServerSide": true,
+                                "sAjaxSource": "/Users/data-tables/user-invoices.ashx?id=536151",
+                                dom: "<'row'<'col-sm-6'l><'col-sm-6'f>>tr<'row'<'col-sm-5'i><'col-sm-7'p>>",
+                                "order": [[0, "desc"]],
+                                "pageLength": 50,
+                                "lengthMenu": [[10, 25, 50, 100, 200, 500, -1], [10, 25, 50, 100, 200, 500, "All"]],
+                                "aoColumnDefs": [{
+                                    "bSortable": false,
+                                    "aTargets": ["no-sort"]
+                                }],
+                                "columns": [
+                                    { "data": "invoiceNumber" },
+                                    { "data": "invoiceDate" },
+                                    { "data": "dueDate" },
+                                    { "data": "paid" },
+                                    { "data": "items" },
+                                    {
+                                        data: {
+                                            _: "emailed.display"
+                                        }
+                                    },
+                                    { "data": "totalAmount" },
+                                    { "data": "total" },
+                                    { "data": "invoiceEvents" },
+                                    { "data": "deleteIcon" }
+                                ],
+                                "language": {
+                                    "lengthMenu": "_MENU_ rows per page",
+                                    "zeroRecords": "Nothing found - sorry"
+                                    //"info": "Page _PAGE_ of _PAGES_"
+                                },
+                                "createdRow": function (row, data, index) {
+                                    $('td', row).eq(5).attr('id', data.emailed.id);
+                                    $(row).addClass(data.rowClass);
+                                },
+                                "drawCallback": function (settings) {
+                                    //setupInvoices();
+                                    $(".tt").tooltip({
+                                        container: 'body'
+                                    });
+                                }
+
+                            });
+
+                        } //invoices
+
+                        if (tab == "credit-notes") {
+
+                            $("#details #addCreditNoteForm").validate();
+
+                        } //credit-notes
+
+                        if (tab == "progress-reports") {
+                            $('#addReport').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/Ajax.ashx?action=getProgressReports&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#reportSelect").html(data);
+                                        $('#details #reportid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+                        } //progress-reports
+
+                        if (tab == "awards") {
+                            $('#addAward').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/awards.ashx?action=getAwards&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#awardSelect").html(data);
+                                        $('#details #awardid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+
+                            $("#details .editable").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            $("#details .editable").click(function (e) {
+
+                                e.preventDefault();
+                                var id = $(this).attr("id");
+                                var content = $(this).text();
+                                var pk = $(this).attr("data-pk");
+
+                                if (content == "Empty") {
+                                    content = "";
+                                }
+
+                                $.ajax({
+                                    url: '/Users/ajax/editable.ashx?page=view-user&id=' + id + '&content=' + content + '&pk=' + pk,
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#editablePopupBody").html(data);
+                                        $("#editablePopup").modal("show");
+
+                                    }
+                                });
+
+                            });
+
+                        } //awards
+
+                        if (tab == "skills") {
+
+                            $('#addSkill').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/skills.ashx?action=getSkills&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#details #skillSelect").html(data);
+                                        $('#details #skillid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+
+                        } //skills
+
+                        if (tab == "qualifications") {
+
+                            $('#addQualification').on('shown.bs.collapse', function () {
+                                $('#details #qualificationid').select2({
+                                    minimumResultsForSearch: 10,
+                                    width: '100%'
+                                });
+                            });
+
+                            $("#details .editable").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            $("#details .editable").click(function (e) {
+
+                                e.preventDefault();
+                                var id = $(this).attr("id");
+                                var content = $(this).text();
+                                var pk = $(this).attr("data-pk");
+
+                                if (content == "Empty") {
+                                    content = "";
+                                }
+
+                                $.ajax({
+                                    url: '/Users/ajax/editable.ashx?page=view-user&id=' + id + '&content=' + content + '&pk=' + pk,
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#editablePopupBody").html(data);
+                                        $("#editablePopup").modal("show");
+
+                                    }
+                                });
+
+                            });
+
+                        } //quals
+
+                        if (tab == "roles") {
+
+                            $('#addRole').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/Ajax.ashx?action=getRoles&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#roleSelect").html(data);
+                                        $('#details #roleid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%',
+                                            escapeMarkup: function (text) { return text; }
+                                        });
+                                    }
+                                });
+                            });
+
+                            $("#details .editable").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            $("#details .editable").click(function (e) {
+
+                                e.preventDefault();
+                                var id = $(this).attr("id");
+                                var content = $(this).text();
+                                var pk = $(this).attr("data-pk");
+
+                                if (content == "Empty") {
+                                    content = "";
+                                }
+
+                                $.ajax({
+                                    url: '/Users/ajax/editable.ashx?page=view-user&id=' + id + '&content=' + content + '&pk=' + pk,
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#editablePopupBody").html(data);
+                                        $("#editablePopup").modal("show");
+
+                                    }
+                                });
+
+                            });
+
+                        } //roles
+
+                        if (tab == "safeguarding") {
+
+                            $('#dbsCertificateForm').on('shown.bs.collapse', function () {
+                                $('html,body').animate({ scrollTop: $('#dbsCertificateForm').offset().top }, 300);
+                            });
+
+                            $('#safeguardingCertificateForm').on('shown.bs.collapse', function () {
+                                $('html,body').animate({ scrollTop: $('#safeguardingCertificateForm').offset().top }, 300);
+                            });
+
+                        } //safeguarding
+
+                        if (tab == "customfields") {
+
+                            $("#details .customField").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            $("#details .customField").click(function (e) {
+
+                                e.preventDefault();
+                                var id = $(this).attr("id");
+                                var content = $(this).text();
+                                var pk = $(this).attr("data-pk");
+
+                                if (content == "Empty") {
+                                    content = "";
+                                }
+
+                                $.ajax({
+                                    url: '/Users/ajax/editable.ashx?page=custom-fields&id=' + id + '&content=' + content + '&pk=' + pk + '&user=' + getParameterByName("id"),
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#editablePopupBody").html(data);
+                                        $("#editablePopup").modal("show");
+
+                                    }
+                                });
+
+                            });
+
+                        } //customfields
+
+                        if (tab == "assignedswimmers") {
+
+                            $('#addSwimmer').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/ajax/members.ashx?action=getUsers&userid=536151&multiple=1&swimmers=1&includeNonCompetitive=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#swimmersSelect").html(data);
+                                        $('#details #swimmerid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+
+                        } //assignedswimmers
+
+                        if (tab == "code-of-conduct") {
+
+                            $("#details .editable-code-acknowledged").each(function () {
+                                if ($(this).text() == '') {
+                                    $(this).html('<i>Empty</i>')
+                                }
+                            });
+
+                            var ro = $.cookie('ro');
+
+                            if (ro !== "1") {
+
+                                $("#details .editable-code-acknowledged").click(function (e) {
+
+                                    e.preventDefault();
+                                    var id = $(this).attr("id");
+                                    var content = $(this).text();
+                                    var pk = $(this).attr("data-pk");
+
+                                    if (content == "Empty") {
+                                        content = "";
+                                    }
+
+                                    $.ajax({
+                                        url: '/Users/ajax/editable.ashx?page=view-user&id=' + id + '&content=' + content + '&pk=' + pk + '&user=' + getParameterByName("id"),
+                                        cache: false,
+                                        success: function (data) {
+
+                                            $("#editablePopupBody").html(data);
+                                            $("#editablePopup").modal("show");
+
+                                        }
+                                    });
+
+                                });
+
+                            }
+
+                            $('#addCodeOfConduct').on('shown.bs.collapse', function () {
+                                $.ajax({
+                                    url: '/Users/Ajax.ashx?action=getCodeOfConducts&userid=536151&multiple=1',
+                                    cache: false,
+                                    success: function (data) {
+                                        $("#codeOfConductSelect").html(data);
+                                        $('#details #codeOfConductid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%'
+                                        });
+                                    }
+                                });
+                            });
+
+                        } //code-of-conduct
+
+                        if (tab == "learn-to-swim") {
+
+                            $('#addLesson').on('shown.bs.collapse', function () {
+
+                                $.ajax({
+                                    url: '/Users/Ajax.ashx?action=getLessons&userid=536151&multiple=1&onlyAvailable=1',
+                                    cache: false,
+                                    success: function (data) {
+
+                                        $("#lessonSelect").html(data);
+
+                                        $('#details #lessonid').select2({
+                                            minimumResultsForSearch: 10,
+                                            width: '100%',
+                                            closeOnSelect: false,
+                                            escapeMarkup: function (text) { return text; }
+
+                                        });
+
+                                    }
+                                });
+
+                            });
+
+                        } //learn-to-swim
+                    },
+                    complete: function (data) {
+                        $("#details").fadeTo("fast", 1);
+                    },
+                    error: function (data) {
+                        $("#details").fadeTo("fast", 1);
+                    }
+                });
+
+            }); //fade out/in
+
+        } //view-tab
+
+        function showPasswordAgain() {
+            $("#passwordAgainRow").removeClass("d-none");
+        }
+
+        function checkRemoveParent() {
+            var unchecked = $('#is_a_parent').prop("checked");
+            if (!unchecked) {
+                swal("Please Note", "When you uncheck the \"Parent\" checkbox, the system will automatically remove the assigned swimmers when you click the update button.", "info")
+            }
+        }
+
+        function showAnonymizeWarning() {
+            var checked = $("#anonymize").prop('checked');
+            if (checked) {
+                $('#anonymizeWarning').collapse('show');
+            }
+            else {
+                $('#anonymizeWarning').collapse('hide');
+            }
+        }
+
+        function showDeleteWarning() {
+            var checked = $("#delete").prop('checked');
+            if (checked) {
+                $('#deleteWarning').collapse('show');
+            }
+            else {
+                $('#deleteWarning').collapse('hide');
+            }
+        }
+
+        function showEmailInfo(checked) {
+            if (checked) {
+                $('#emailText').collapse('show');
+            }
+            else {
+                $('#emailText').collapse('hide');
+            }
+        }
+
+        function setReason(id) {
+            var text = $("#edit-" + id + " option:selected").text();
+            $("#editableAttendanceReason").val(text);
+        }
+
+        function checkEmailToMember() {
+            var email = $('#emailToMember').prop("checked");
+            if (email) {
+                $('#downloadStatementButton').html('<i class="fa fa-envelope"></i> Email');
+            }
+            else {
+                $('#downloadStatementButton').html('<i class="fa fa-file-pdf"></i> Download');
+            }
+        }
+
+        function showMoveLessons() {
+            $("#moveLessons").val("1");
+            $("#moveLessonsNotice").removeClass("d-none");
+            $("#addLesson").collapse("show");
+        }
+
+        function cancelLearnToSwimMember(id) {
+            swal({
+                title: "Are you sure?",
+                text: "You are about to REMOVE all LTS lessons (that you have not added attendance for) from this member...",
+                type: "warning",
+                showCancelButton: true,
+                confirmButtonColor: "#62CB31",
+                confirmButtonText: "Yes, do it!",
+                closeOnConfirm: false,
+                showLoaderOnConfirm: true
+            },
+                function () {
+                    $.ajax({
+                        url: '/Users/ajax/learn-to-swim.ashx?action=cancelLearnToSwimMember&id=' + id,
+                        cache: false,
+                        success: function (data) {
+
+                            swal("Success", "Lessons removed", "success");
+
+                            $('#learn-to-swim').click();
+
+                        }
+                    });
+                });
+        }
+
+        function invoicePeriodTitle(val) {
+            if (val !== '0') {
+                $('.newInvoicePeriod').fadeOut();
+            }
+            else {
+                $('.newInvoicePeriod').fadeIn();
+            }
+        }
+
+        function showEmailForm() {
+            $("#sendEmail").collapse("show");
+        }
+
+    </script>
+
+
+</head>
+<body>
+
+    <div class="wrapper">
+
+        <nav id="sidebar" class="sidebar">
+
+            <a class="sidebar-brand" href="/Users/Dashboard.aspx">
+                <img id="systemLogo" class="img-fluid" src="/Img/SCM-Logo-Inside.png" /></a>
+
+            <div class="sidebar-content">
+
+                <div class="sidebar-user">
+                    <img class="img-fluid rounded-circle mb-2" src="https://secure.gravatar.com/avatar/85e4239ff9662bf8296083d98da17677?size=80&amp;default=mm" alt="Avatar" />
+                    <div class="fw-bold">CoachesEye Eye</div>
+                </div>
+
+                <ul class="sidebar-nav">
+
+                    <li class="sidebar-header">Navigation
+                    </li>
+
+                    <li id="dashboard-link" class="sidebar-item">
+                        <a class="sidebar-link" href="/Users/Dashboard.aspx">
+                            <i class="align-middle me-2 fas fa-fw fa-home"></i><span class="align-middle">Dashboard</span>
+                        </a>
+                    </li>
+
+                    <li class="sidebar-item top-level">
+                        <a data-bs-target="#club-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                            <i class="align-middle me-2 fas fa-fw fa-building"></i><span class="align-middle">Club</span>
+                        </a>
+                        <ul id="club-menu" class="sidebar-dropdown list-unstyled collapse" data-bs-parent="#sidebar">
+
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="Club-Awards.aspx"><i class="align-middle me-1 fas fa-fw fa-trophy"></i>Awards</a></li>
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="Club-Kit.aspx"><i class="align-middle me-1 fas fa-fw fa-tags"></i>Club kit</a></li>
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="Documents.aspx"><i class="align-middle me-1 fas fa-fw fa-folder"></i>Documents</a></li>
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="Club-Meets.aspx"><i class="align-middle me-1 fas fa-fw fa-star"></i>Events</a></li>
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="Member-Pages.aspx"><i class="align-middle me-1 fas fa-fw fa-file-alt"></i>Member pages</a></li>
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="Noticeboard.aspx"><i class="align-middle me-1 fas fa-fw fa-clipboard"></i>Noticeboard</a></li>
+                            
+
+                            <li class="sidebar-item"><a class="sidebar-link" href="Whos-Who.aspx"><i class="align-middle me-1 fas fa-fw fa-users"></i>Whos who</a></li>
+
+                        </ul>
+
+                    </li>
+
+                    
+
+                    <li class="sidebar-item top-level">
+                        <a data-bs-target="#finance-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                            <i class="align-middle me-2 fas fa-fw fa-gbp"></i><span class="align-middle">Finances</span>
+                        </a>
+                        <ul id="finance-menu" class="sidebar-dropdown list-unstyled collapse main-drop" data-bs-parent="#sidebar">
+                            
+                            <li class="sidebar-item"><a class="sidebar-link" href="My-Club-Kit-Orders.aspx"><i class="align-middle me-1 fas fa-fw fa-tags"></i>View my club kit orders</a></li>
+                            
+                        </ul>
+
+                    </li>
+
+
+                    
+
+                    <li class="sidebar-item top-level">
+                        <a data-bs-target="#members-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                            <i class="align-middle me-2 fas fa-fw fa-users"></i><span class="align-middle">Members</span>
+                        </a>
+
+                        <ul id="members-menu" class="sidebar-dropdown list-unstyled collapse main-drop" data-bs-parent="#sidebar">
+
+                            
+
+                            <li class="sidebar-item">
+                                <a data-bs-target="#attendance-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                                    <i class="align-middle me-2 fas fa-fw fa-user-check"></i><span class="align-middle">Attendance</span>
+                                </a>
+                                <ul id="attendance-menu" class="sidebar-dropdown list-unstyled collapse ms-3" data-bs-parent="#members-menu">
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Add-Attendance-By-Group.aspx"><i class="align-middle me-1 fas fa-fw fa-users"></i>Add by group</a>
+                                    </li>
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Add-Attendance.aspx"><i class="align-middle me-1 fas fa-fw fa-calendar-check"></i>Add by session</a>
+                                    </li>
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Add-Multiple-Attendance.aspx"><i class="align-middle me-1 fas fa-fw fa-calendar-plus"></i>Add multiple</a>
+                                    </li>
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Attendance-Sheets.aspx"><i class="align-middle me-1 fas fa-fw fa-calendar-alt"></i>Attendance sheets</a>
+                                    </li>
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Bulk-Add-Attendance.aspx"><i class="align-middle me-1 fas fa-fw fa-users-cog"></i>Bulk add</a>
+                                    </li>
+
+                                    
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Add-Learn-To-Swim-Attendance.aspx"><i class="align-middle me-1 fas fa-fw fa-calendar-plus"></i>Learn to swim</a>
+                                    </li>
+                                </ul>
+                            </li>
+
+
+
+                            
+
+                            <li class="sidebar-item">
+                                <a data-bs-target="#view-members-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                                    <i class="align-middle me-2 fas fa-fw fa-users"></i><span class="align-middle">View</span>
+                                </a>
+                                <ul id="view-members-menu" class="sidebar-dropdown list-unstyled collapse ms-3" data-bs-parent="#members-menu">
+
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Users.aspx?coaches=1"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>All coaches</a>
+                                    </li>
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Users.aspx"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>All members</a>
+                                    </li>
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Users.aspx?parents=1"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>All parents</a>
+                                    </li>
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Users.aspx?swimmers=1"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>All swimmers</a>
+                                    </li>
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Users.aspx?teachers=1"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>All teachers</a>
+                                    </li>
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Users.aspx?volunteers=1"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>All volunteers</a>
+                                    </li>
+                                    
+                                </ul>
+
+                            </li>
+
+                            
+                        </ul>
+
+                    </li>
+
+
+                    
+
+                    <li class="sidebar-item top-level">
+                        <a data-bs-target="#reports-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                            <i class="align-middle me-2 fas fa-fw fa-chart-line"></i><span class="align-middle">Reports</span>
+                        </a>
+                        <ul id="reports-menu" class="sidebar-dropdown list-unstyled collapse main-drop" data-bs-parent="#sidebar">
+
+                            
+
+
+                            <li class="sidebar-item">
+                                <a data-bs-target="#members-reports-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                                    <i class="align-middle me-2 fas fa-fw fa-users"></i><span class="align-middle">Members</span>
+                                </a>
+                                <ul id="members-reports-menu" class="sidebar-dropdown list-unstyled collapse ms-3" data-bs-parent="#reports-menu">
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Custom-Reports.aspx"><i class="align-middle me-1 fas fa-fw fa-cog"></i>Custom reports</a>
+                                    </li>
+
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Edit-Progress-Reports.aspx"><i class="align-middle me-1 fas fa-fw fa-check-circle"></i>Progress reports</a>
+                                    </li>
+                                    
+
+                                </ul>
+
+                            </li>
+
+                            <li class="sidebar-item">
+                                <a class="sidebar-link" href="Report-Swim-Mark.aspx"><i class="align-middle me-1 fas fa-fw fa-user-friends"></i>Swim Mark</a>
+                            </li>
+
+                            <li class="sidebar-item">
+                                <a data-bs-target="#swim-times-reports-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                                    <i class="align-middle me-2 fas fa-fw fa-stopwatch"></i><span class="align-middle">Swim Times</span>
+                                </a>
+                                <ul id="swim-times-reports-menu" class="sidebar-dropdown list-unstyled collapse ms-3" data-bs-parent="#reports-menu">
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Best-Swim-Times-Report.aspx"><i class="align-middle me-1 fas fa-fw fa-clock"></i>Best swim times</a>
+                                    </li>
+
+                                    
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Fastest-Club-Relay-Times.aspx"><i class="align-middle me-1 fas fa-fw fa-clock"></i>Fastest relay times</a>
+                                    </li>
+
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Fastest-Club-Swim-Times.aspx"><i class="align-middle me-1 fas fa-fw fa-clock"></i>Fastest swim times</a>
+                                    </li>
+
+                                    
+
+                                </ul>
+
+                            </li>
+
+                        </ul>
+
+
+                    </li>
+
+                    
+
+                    <li class="sidebar-item top-level">
+                        <a data-bs-target="#setup-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                            <i class="align-middle me-2 fas fa-fw fa-wrench"></i><span class="align-middle">Setup</span>
+                        </a>
+                        <ul id="setup-menu" class="sidebar-dropdown list-unstyled collapse main-drop" data-bs-parent="#sidebar">
+
+                            
+
+                            <li class="sidebar-item">
+                                <a data-bs-target="#setup-club-menu" data-bs-toggle="collapse" class="sidebar-link collapsed">
+                                    <i class="align-middle me-2 fas fa-fw fa-building"></i><span class="align-middle">Club</span>
+                                </a>
+                                <ul id="setup-club-menu" class="sidebar-dropdown list-unstyled collapse ms-3" data-bs-parent="#setup-menu">
+
+                                    
+                                    <li class="sidebar-item">
+                                        <a class="sidebar-link" href="Club-Sessions.aspx?hideInactive=1"><i class="align-middle me-1 fas fa-fw fa-calendar"></i>Sessions</a>
+                                    </li>
+                                    
+                                </ul>
+                            </li>
+
+                            
+                        </ul>
+
+                    </li>
+                    
+                </ul>
+                <!--/sidebar-nav-->
+
+            </div>
+            <!--/sidebar-content-->
+
+        </nav>
+
+        <div class="main">
+
+            <nav class="navbar navbar-expand navbar-theme">
+                <a class="sidebar-toggle d-flex me-2">
+                    <i class="hamburger align-self-center"></i>
+                </a>
+
+                <form action="/Users/Search.aspx" method="get">
+                    <div class="d-flex align-items-center">
+                        <i class="fa fa-search text-tertiary "></i>
+                        <input id="member-search-input" name="q" class="form-control form-control-lite" type="text" placeholder="Type &amp; hit enter...">
+                    </div>
+                </form>
+
+
+
+                <div class="navbar-collapse collapse">
+                    <ul id="top-nav-bar" class="navbar-nav ms-auto">
+
+                        
+                        <li id="club-calendar" class="nav-item ms-lg-2">
+                            <a class="nav-link" href="Calendar.aspx" title="Club calendar"><i class="align-middle fas fa-calendar-alt"></i></a>
+                        </li>
+                        
+
+                        <li class="nav-item dropdown ms-lg-2">
+                            <a class="nav-link dropdown-toggle position-relative" href="#" id="quicklinksDropdown" data-bs-toggle="dropdown" title="Quick links">
+                                <i class="align-middle fas fa-link"></i>
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-end" aria-labelledby="quicklinksDropdown">
+
+                                <a class="dropdown-item" href="/Users/Quick-Links.aspx"><i class="align-middle me-1 fas fa-fw fa-edit"></i>Edit Quick Links</a>
+
+                                 
+
+
+                            </div>
+                        </li>
+
+                        <li id="user-button" class="nav-item dropdown ms-lg-2">
+                            <a class="nav-link dropdown-toggle position-relative" href="#" id="userDropdown" data-bs-toggle="dropdown" title="My account">
+                                <i class="align-middle fas fa-user"></i>
+                            </a>
+                            <div class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                                <a class="dropdown-item" href="/Users/My-Details.aspx"><i class="align-middle me-1 fas fa-fw fa-user"></i>My Account</a>
+                                <a class="dropdown-item" href="/Users/My-Calendar.aspx"><i class="align-middle me-1 fas fa-fw fa-calendar-alt"></i>My Calendar</a>
+
+                                
+
+                                <div class="dropdown-divider"></div>
+
+                                <a class="dropdown-item" href="#" onclick="logOut();return false"><i class="align-middle me-1 fas fa-fw fa-arrow-alt-circle-right"></i>Logout</a>
+                            </div>
+                        </li>
+
+                    </ul>
+                </div>
+
+            </nav>
+            <!--/nav-->
+
+            <main class="content">
+
+                <div class="container-fluid">
+
+                    
+
+                    
+
+    <div class="header">
+        <h1 class="header-title"><span class="d-none d-md-inline">Member Details: </span>
+            Kieran Crawford
+        </h1>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/Users/Dashboard.aspx">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="Users.aspx">Members</a></li>
+                <li class="breadcrumb-item active">Member Details</li>
+            </ol>
+        </nav>
+    </div>
+
+    <form id="emailForm" name="emailForm" action="User.aspx?id=536151" method="post" enctype="multipart/form-data">
+
+        <div id="sendEmail" class="row collapse">
+            <div class="col-lg-12">
+                <div class="card">
+
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Send Email</h5>
+                    </div>
+
+                    <div class="card-body">
+
+                        <div class="mb-3 row">
+                            <label class="col-form-label col-sm-4 text-sm-end">Add CC Recipients</label>
+                            <div id="CC" class="col-sm-8">
+                                <p class="mt-1">
+                                    <i class="fa fa-refresh fa-spin"></i>
+                                    Getting members...
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 row">
+                            <label class="col-form-label col-sm-4 text-sm-end">Reply To Address</label>
+                            <div class="col-sm-8 error-placeholder">
+                                
+                            </div>
+                        </div>
+
+                        <div class="mb-3 row">
+                            <label class="col-form-label col-sm-4 text-sm-end">Insert Email Template</label>
+                            <div id="EmailTemplates" class="col-sm-8">
+                                <p class="mt-1">
+                                    <i class="fa fa-refresh fa-spin"></i>
+                                    Getting templates...
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 row">
+                            <label class="col-form-label col-sm-4 text-sm-end">Subject</label>
+                            <div class="col-sm-8 error-placeholder">
+                                <input type="text" id="subject" name="emailSubject" class="form-control" placeholder="Email subject" required="required" />
+                            </div>
+                        </div>
+
+                        <div class="mb-3 row">
+                            <div class="col-sm-12">
+                                <textarea id="email_details" name="email_details" class="editor" rows="4"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 row">
+                            <label class="col-form-label col-sm-4 text-sm-end">Add Attachments</label>
+                            <div class="col-sm-8">
+                                <input type="file" id="attachments" class="form-control" name="attachments" />
+                            </div>
+                        </div>
+
+                        <div id="" class="mb-3 row">
+                            <label class="col-form-label col-sm-4 text-sm-end">Attach From Club Documents</label>
+                            <div id="clubDocs" class="col-sm-8">
+                                <div class="btn-group btn-group-sm">
+                                    <a href="#" class="btn btn-light" onclick="getclubDocsForEmail();return false"><i class="fa fa-file"></i>
+                                        Get Club Documents
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 row">
+                            <div class="col-sm-8 ms-sm-auto">
+                                <button type="submit" class="btn btn-primary">Send Email</button>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </form>
+
+
+    <div class="row">
+
+        <div class="col-lg-12">
+
+            <div class="card">
+
+                <div class="d-none d-md-block"><div class="ps-3 pe-3"><ul id="tab-selector-desktop" class="nav nav-underline">
+<li class="nav-item"><a id="basic2" class="nav-link active" title="Basic details" href="#" onclick="viewTab('basic');return false"><i class="fa fa-user me-1"></i></a></li>
+<li class="nav-item"><a id="groups2" class="nav-link" title="Groups" href="#" onclick="viewTab('groups');return false"><i class="fa fa-users me-1"></i></a></li>
+<li class="nav-item"><a id="sessions2" class="nav-link" title="Sessions" href="#" onclick="viewTab('sessions');return false"><i class="fa fa-calendar me-1"></i></a></li>
+<li class="nav-item"><a id="attendance2" class="nav-link" title="Attendance" href="#" onclick="viewTab('attendance');return false"><i class="fa fa-calendar-check me-1"></i></a></li>
+<li class="nav-item"><a id="event-attendance2" class="nav-link" title="Event attendance" href="#" onclick="viewTab('event-attendance');return false"><i class="fa fa-calendar-check me-1"></i></a></li>
+</ul></div></div>
+
+
+                <div class="d-md-none card-header">
+                    <h5 class="card-title mb-0 float-start">Member Details 
+                        <span class="d-none d-md-inline">: Kieran Crawford</span>
+                    </h5>
+                    <div class="float-end">
+                        <div class="btn-group btn-group-sm">
+<button class="btn btn-light dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+Select Tab
+</button>
+<ul id="tab-selector" class="dropdown-menu">
+<li><a id="basic" class="dropdown-item" href="#" onclick="viewTab('basic');return false"><i class="fa fa-user me-2"></i>Basic details</a></li>
+<li><a id="groups" class="dropdown-item" href="#" onclick="viewTab('groups');return false"><i class="fa fa-users me-2"></i>Groups</a></li>
+<li><a id="sessions" class="dropdown-item" href="#" onclick="viewTab('sessions');return false"><i class="fa fa-calendar me-2"></i>Sessions</a></li>
+<li><a id="attendance" class="dropdown-item" href="#" onclick="viewTab('attendance');return false"><i class="fa fa-calendar-check me-2"></i>Attendance</a></li>
+<li><a id="event-attendance" class="dropdown-item" href="#" onclick="viewTab('event-attendance');return false"><i class="fa fa-calendar-check me-2"></i>Event Attendance</a></li>
+</ul>
+</div>
+
+                    </div>
+                </div>
+
+                <div id="details" class="card-body">
+                </div>
+
+                <div id="basic-card-footer" class="card-footer d-flex justify-content-between d-none"><a class="btn btn-sm btn-light"><i class="fa fa-calendar"></i> Last modified 8<sup>th</sup> Jan</a><a class="btn btn-sm btn-light"><i class="fa fa-calendar-check"></i> Last logged in 09 Jan 2026</a><a class="btn btn-sm btn-light disabled" ><i class="fa fa-pen-to-square"></i> View audit trail</a></div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+
+
+
+    <div class="modal fade" id="swimTimesPopup">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 id="swimTimesPopupTitle" class="modal-title"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="swimTimesBody" class="modal-body">
+                </div>
+                <div class="modal-footer">
+                    <a href="#" id="downloadAuditTrailButton" class="btn btn-success d-none" onclick="downloadAuditTrail();return false"><i class="fa fa-file-pdf"></i>
+                        Download</a>
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <form name="uploadCertForm" action="User.aspx?id=536151" method="post" enctype="multipart/form-data">
+        <div class="modal fade" id="uploadCertificatePopup">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Upload Certificate</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div id="uploadCertificateBody" class="modal-body"></div>
+                    <div class="modal-footer">
+                        <div class="btn-group">
+                            <button type="submit" class="btn btn-primary">Upload</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- /.modal-content -->
+            </div>
+            <!-- /.modal-dialog -->
+        </div>
+        <!-- /.modal -->
+    </form>
+
+    <div class="modal fade" id="viewNotificationModal">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Notification</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="viewNotificationBody" class="modal-body">
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <div id="contactingGoCardlessPopup" class="modal">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-body">
+                    <i class="fa fa-circle-notch fa-spin"></i>
+                    Contacting GoCardless, please wait...
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <div id="invoiceEventsPopup" class="modal fade">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">GoCardless Events</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="invoiceEventsBody" class="modal-body">
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <div id="usernamePopup" class="modal fade">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 id="usernamePopupTitle" class="modal-title"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="usernameBody" class="modal-body">
+                </div>
+                <div class="modal-footer">
+                    <button id="updateUsernameButton" type="button" class="btn btn-primary d-none" onclick="setMemberUsername();return false">Update</button>
+                    <button id="updatePasswordButton" type="button" class="btn btn-primary d-none" onclick="setMemberPassword();return false">Update</button>
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <div id="assignToParentPopup" class="modal fade">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Assign Swimmer To Parent</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="assignToParentBody" class="modal-body">
+                    <div class="alert alert-light text-dark">
+                        <div class="alert-message"><i class="fa fa-circle-notch fa-spin me-1"></i>Getting parents...</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" onclick="assignSwimmerToParent();return false">Assign To Parent</button>
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="integrations" aria-labelledby="integrationsLabel">
+        <div class="offcanvas-header">
+            <h5 id="integrationsLabel">Integrations</h5>
+            <button type="button" class="btn-close text-reset" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            
+        </div>
+    </div>
+
+    
+
+    
+
+
+
+
+                </div>
+                <!--/container-fluid-->
+
+            </main>
+            <!--/content-->
+
+            <footer class="footer">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div class="col-12 text-end">
+                            <p class="mb-0 text-muted">
+                                <small>&copy; 2026 - BPS Designs Ltd.</small>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </footer>
+
+        </div>
+        <!--/main-->
+
+    </div>
+    <!--/wrapper-->
+
+    <div id="editDocumentPopup" class="modal fade">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title">Document Details</h4>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="editDocumentBody" class="modal-body">
+                </div>
+                <div class="modal-footer">
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-success" onclick="downloadDocument();">
+                            Download<span class="d-none d-md-inline"> Document</span></button>
+                        <button id="updateDocumentButtonPopup" type="button" class="btn btn-primary disableMe hidden" onclick="updateDocument();">
+                            Update<span class="d-none d-md-inline"> Document</span></button>
+                        <button id="deleteDocumentButtonPopup" type="button" class="btn btn-danger disableMe hidden" onclick="deleteDocument();">
+                            Delete<span class="d-none d-md-inline"> Document</span></button>
+                    </div>
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+
+    <div id="generalModalPopup" class="modal fade">
+        <div id="generalModalClass" class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 id="generalModalTitle" class="modal-title"></h4>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="generalModalBody" class="modal-body">
+                </div>
+                <div id="generalModalFooter" class="modal-footer">
+                    <a href="#" id="generalModalFooterButton" class="btn btn-success"></a>
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    <div id="editablePopup" class="modal fade">
+        <div class="modal-dialog modal-sm modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title">Edit Content</h4>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div id="editablePopupBody" class="modal-body">
+                </div>
+                <div class="modal-footer">
+                    <a href="#" id="editableSubmitButton" class="btn btn-success" onclick="updateEditable();return false">Update</a>
+                </div>
+            </div>
+            <!-- /.modal-content -->
+        </div>
+        <!-- /.modal-dialog -->
+    </div>
+    <!-- /.modal -->
+
+    
+
+</body>
+</html>

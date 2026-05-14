@@ -1,0 +1,183 @@
+
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, maximum-scale=1, user-scalable=no">
+
+    <title>Login to SwimClub Manager using your username and password</title>
+    <meta name="description" content="Use this form to login to your SwimClub manager account. Enter your username and password in the form below." />
+    <meta name="author" content="BPS Designs Limited">
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+
+    <link href="/v7/css/modern.css" rel="stylesheet" />
+
+
+
+    
+
+    <style>
+        body, html {
+            height: 100%;
+        }
+
+        .main {
+            background-image: url("/Img/homepageImages/swimming4.jpg");
+            height: 100%;
+            background-position: center;
+            background-repeat: no-repeat;
+            background-size: cover;
+        }
+    </style>
+</head>
+
+<body class="theme-blue">
+
+    <main class="main h-100 w-100">
+        <div class="container h-100">
+            <div class="row h-100">
+                <div class="col-sm-10 col-md-8 col-lg-6 mx-auto d-table h-100">
+                    <div class="d-table-cell align-middle">
+
+                        <div class="card rounded-4">
+                            <div class="card-body">
+                                <div class="m-sm-4">
+
+                                    <div class="text-center mb-3">
+                                        <img src="/Img/SCM-Logo-Inside.png" class="img-fluid" />
+                                    </div>
+
+                                    <div id="welcome" class="text-center">
+                                        <h1 class="h2">Welcome to SwimClub Manager</h1>
+                                        <p class="lead">
+                                            Login to your account to continue
+                                        </p>
+                                    </div>
+
+                                    <div id="reset-message" class="text-center collapse">
+                                        <h1 class="h2">Reset Password</h1>
+                                        <p class="lead">
+                                            Enter your login username below
+                                        </p>
+                                    </div>
+
+                                    <form method="post" action="./login" id="f1">
+<input type="hidden" name="__VIEWSTATE" id="__VIEWSTATE" value="42vqiFanaGXAozixoPKY3s4+y54NKr9SQvceFplE5TmHB7gqMVdTS2ktlVxCz261/rwGKcFVoOLezgR4GVYsInfTbvOWoNBjerJ1748zLOOuR6iUjRhPINULBfOrf55QplgqEqrrQ/fWrysaJP9rYWRkcbI=" />
+
+<input type="hidden" name="__VIEWSTATEGENERATOR" id="__VIEWSTATEGENERATOR" value="1838ACDA" />
+<input type="hidden" name="__EVENTVALIDATION" id="__EVENTVALIDATION" value="JlO/pRtqQX9z7palOFR0e2YIHDeljzdbUpoWvRuKYzxXDC6QPtZDX2FuW4XyZDZ4Vg1K2ePCJipQIGccplbc/wbNnD8tcyR9k18wRzxzyyNrxq0Rg1LlQGeeP5rbMB3oj4TEdSGUgeB5aYvQFaymy1nRBgM=" />
+                                        <div class="mb-3">
+                                            <label class="form-label">Username</label>
+                                            <div class="error-placeholder">
+                                                <input name="username" type="text" id="username" class="form-control" placeholder="Username" required="required" />
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Password</label>
+                                            <div class="error-placeholder">
+                                                <input name="password" type="password" id="password" class="form-control" placeholder="Password" required="required" />
+                                            </div>
+                                            <p class="form-text">
+                                                <a id="forgot" href="#">Forgot password?</a>
+                                            </p>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Stay Logged In</label>
+                                            <div class="form-check">
+                                                <input id="stayLoggedIn" type="checkbox" name="stayLoggedIn" class="form-check-input" />
+                                                <label class="form-check-label" for="stayLoggedIn"></label>
+                                            </div>
+                                        </div>
+                                        <div class="text-center mt-3">
+                                            <button type="submit" class="btn btn-lg btn-primary">Login</button>
+                                        </div>
+                                        <input type="hidden" id="m" name="m" value="0" />
+                                    </form>
+
+                                    <div id="reset-password" class="collapse">
+
+                                        <div id="resetPasswordMessage"></div>
+
+                                        <div class="mb-3">
+                                            <label class="form-label">Login username</label>
+                                            <div class="error-placeholder">
+                                                <input type="text" id="un" class="form-control" placeholder="Enter your login username" />
+                                            </div>
+                                            <p class="form-text">If you do not know your username, please contact your club</p>
+                                        </div>
+
+                                        <div class="text-center mt-3">
+                                            <button id="resetButton" type="button" class="btn btn-lg btn-primary" onclick="resetPw();return false">Next</button>
+                                        </div>
+
+                                    </div>
+
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/v7/js/app.js"></script>
+    <script src="/v7/js/outside.min.js?v=7.15.6"></script>
+    <script src="/v7/Js/mobile-app-detect.min.js"></script>
+
+    
+
+    <script>
+        $(document).ready(function () {
+
+            $.validator.setDefaults({
+                errorPlacement: function errorPlacement(error, element) {
+                    var $parent = $(element).parents(".error-placeholder");
+                    // Do not duplicate errors
+                    if ($parent.find(".jquery-validation-error").length) {
+                        return;
+                    }
+                    $parent.append(
+                        error.addClass("jquery-validation-error invalid-feedback")
+                    );
+                },
+                highlight: function (element) {
+                    var $el = $(element);
+                    var $parent = $el.parents(".error-placeholder");
+                    $el.addClass("is-invalid");
+                    // Select2 and Tagsinput
+                    if ($el.hasClass("select2-hidden-accessible") || $el.attr("data-role") === "tagsinput") {
+                        $el.parent().addClass("is-invalid");
+                    }
+                },
+                unhighlight: function (element) {
+                    $(element).parents(".error-placeholder").find(".is-invalid").removeClass("is-invalid");
+                }
+            });
+
+            $("#f1").validate();
+
+            $("#forgot").click(function () {
+                $("#f1, #welcome").addClass("d-none");
+                $("#reset-password, #reset-message").collapse("show");
+            });
+
+            if (MobileAppDetector.isMobileApp()) {
+                $("#m").val('1');
+            }
+
+        });
+
+    </script>
+
+</body>
+
+</html>
+

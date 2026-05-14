@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #__next {
+  height: 100%;
+}
+body {
+  @apply bg-gradient-to-b from-[#041420] via-[#052735] to-[#052b38] text-slate-100 font-sans;
+  background-image: radial-gradient(circle at 10% 10%, rgba(13,199,193,0.04), transparent 10%), radial-gradient(circle at 90% 80%, rgba(13,199,193,0.03), transparent 10%);
+  background-blend-mode: overlay;
+}
+
+.app-shell {
+  min-height:100vh;
+  padding:2rem;
+  background-image: url('/background.svg');
+  background-size: cover;
+  background-position: center;
+}
+
+.card {
+  @apply bg-gradient-to-b from-[#08282f]/60 to-[#052b35]/40 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-white/6;
+}
+
+.kpi {
+  @apply text-center p-4;
+}
+
+.small-muted {
+  @apply text-slate-300 text-sm;
+}

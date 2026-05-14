@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <filter id="noise" x="0" y="0" width="100%" height="100%">
+      <feTurbulence baseFrequency="0.8" numOctaves="2" stitchTiles="stitch" result="turb" />
+      <feColorMatrix type="saturate" values="0" />
+      <feBlend in="SourceGraphic" in2="turb" mode="overlay" opacity="0.04" />
+    </filter>
+
+    <filter id="caustics" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence baseFrequency="0.0025" numOctaves="5" seed="7" result="noise" />
+      <feDiffuseLighting in="noise" lighting-color="#ffffff" surfaceScale="4" result="light">
+        <feDistantLight azimuth="45" elevation="30" />
+      </feDiffuseLighting>
+      <feBlend in="SourceGraphic" in2="light" mode="overlay" opacity="0.08" />
+    </filter>
+
+    <radialGradient id="deep" cx="50%" cy="30%">
+      <stop offset="0" stop-color="#0dc7c1" stop-opacity="0.03" />
+      <stop offset="1" stop-color="#041620" stop-opacity="1" />
+    </radialGradient>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#041420" />
+
+  <!-- subtle depth gradient -->
+  <rect width="100%" height="100%" fill="url(#deep)" opacity="0.18" />
+
+  <!-- large faint caustic shapes -->
+  <g opacity="0.12" filter="url(#caustics)">
+    <path d="M0 180 C200 60 400 260 600 180 C800 100 1000 300 1200 180 C1400 60 1600 260 1600 260 L1600 900 L0 900 Z" fill="#0dc7c1" />
+  </g>
+
+  <!-- moving ripple layers -->
+  <g opacity="0.06" transform="translate(0,0)">
+    <path d="M0 140 C150 30 350 180 500 140 C650 100 850 210 1000 140 C1150 70 1350 210 1600 140 L1600 900 L0 900 Z" fill="#ffffff" />
+  </g>
+
+  <!-- soft caustic circles -->
+  <g opacity="0.03" fill="#8EEAE1">
+    <circle cx="240" cy="120" r="120" />
+    <circle cx="1380" cy="760" r="160" />
+    <circle cx="420" cy="680" r="80" />
+  </g>
+
+  <!-- fine noise overlay -->
+  <rect width="100%" height="100%" filter="url(#noise)" />
+
+</svg>

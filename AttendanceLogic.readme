@@ -1,0 +1,63 @@
+# Tonbridge Swimming - Attendance System Logic Documentation
+
+This document outlines the current logic for the training attendance system, from data acquisition to metric calculation.
+
+## 1. Data Acquisition (SCM Scraping)
+Attendance data is sourced from Swim Club Manager (SCM) via web scraping.
+
+*   **Endpoint:** `Users/ajax/attendance.ashx?action=getMemberAttendance`
+*   **Trigger:** `pages/api/sync-attendance.js` (Manual sync or scheduled).
+*   **Method:**
+    1.  Authenticate with SCM using credentials.
+    2.  Iterate through all swimmers with a valid `scm_numeric_id`.
+    3.  Fetch historical attendance records for a specified date range (default 1 year for full sync, 14 days for quick sync).
+    4.  Extract Date, Session Name, and Status ('yes'/'no' mapped to 'present'/'absent').
+
+## 2. Data Storage (Supabase)
+The system uses four primary tables for attendance tracking:
+
+*   **`sessions`**: Master list of club sessions. Includes `scm_guid`, `name`, `day_of_week`, `start_time`, and `end_time`.
+*   **`training_attendance`**: Stores individual attendance records. 
+    *   Unique constraint on `(swimmer_id, session_id, date)`.
+    *   Status is stored as 'present', 'absent', or 'excused'.
+*   **`swimmers`**: Contains `scm_numeric_id` and `squad_id` for mapping.
+*   **`club_exemptions`**: Defines date ranges for shutdowns.
+    *   `type = 'exempt'`: The period is ignored (analysis window shrinks).
+    *   `type = 'credit'`: The period is counted as attended (sessions/hours credited).
+
+## 3. Mapping Logic
+When syncing, SCM session names are mapped to database `session_id` using:
+1.  **Exact match** (lowercase, trimmed).
+2.  **Fuzzy match**: Checks if the database session name is a prefix of the SCM session name (e.g., "AGE DEVELOPMENT Sunday MORNING" matches "AGE DEVELOPMENT Sunday MORNING (Sun 07:00 - 09:00)").
+
+## 4. Analytics & Metrics (`lib/analytics-utils.js`)
+The core reliability metrics are calculated on-the-fly.
+
+### Workload Calculation (`calculateWorkload`)
+*   Groups records by week (ISO Year-Week).
+*   **Session Duration:** Extracted from the `sessions` table (start/end times) or regex patterns in the session name (e.g., "(2 hours)"). Falls back to 1.5h.
+*   **Gala Credits:** 
+    *   If a swimmer is 'absent' but has a gala result on that date, it counts as `galaHours` and `galaSessions`.
+    *   If there is a gala result but *no* attendance record exists, 2.0h and 1 session are credited.
+
+### Reliability Calculation (`calculateReliability`)
+Calculates the "Reliability Percentage" over a period (default 365 days).
+
+1.  **Analysis Window:**
+    *   Starts at `periodDays` ago.
+    *   Truncated by `squad_join_date` (if the join date is more recent).
+    *   Further truncated by the first available attendance record in the database for that swimmer.
+2.  **Weekly Targets (Squad-based):**
+    *   `target_sessions_per_week`
+    *   `target_hours_per_week`
+    *   `require_weekend` (Boolean)
+    *   `use_or_logic`: If `true`, meeting *either* sessions or hours counts as a met week. If `false`, *both* must be met.
+3.  **Met Week Logic:**
+    *   A week is "Met" if the combined Training + Gala (sessions/hours) meets the squad targets.
+    *   **Floating Holidays:** Swimmers have a `holiday_allowance` (default 2). If a week has 0 activity and allowance remains, the week is marked as "Met" and allowance is decremented.
+    *   **Shutdown Credits:** For 'credit' type shutdowns, sessions are credited if they were scheduled for those days.
+
+### Performance Indicators
+*   **Consistency (Attendance %):** `(Weeks Met / Swimmable Weeks) * 100`.
+*   **Volume (%):** Total hours completed (Training + Gala) vs. the seasonal target (Target Hours * Total Weeks).
+*   **Squad Health Score:** A weighted aggregate of Compliance, Progress (Velocity), Training Consistency, and Volume.

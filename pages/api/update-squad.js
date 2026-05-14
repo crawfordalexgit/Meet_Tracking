@@ -5,7 +5,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { squadId, isSquad, targetMeets } = req.body;
+  const { 
+    squadId, isSquad, targetMeets, targetSessionsPerWeek, targetTrainingPercent, 
+    targetHoursPerWeek, requireWeekend, useOrLogic,
+    health_weight_reliability, health_weight_progress, health_weight_competition, health_weight_volume,
+    holidayAllowance, age_based_criteria
+  } = req.body;
   
   if (!squadId) {
     return res.status(400).json({ error: 'Missing squadId' });
@@ -17,6 +22,17 @@ export default async function handler(req, res) {
     const updateData = {};
     if (typeof isSquad === 'boolean') updateData.is_squad = isSquad;
     if (typeof targetMeets === 'number') updateData.target_meets = targetMeets;
+    if (typeof targetSessionsPerWeek === 'number') updateData.target_sessions_per_week = targetSessionsPerWeek;
+    if (typeof targetTrainingPercent === 'number') updateData.target_training_percent = targetTrainingPercent;
+    if (typeof targetHoursPerWeek === 'number') updateData.target_hours_per_week = targetHoursPerWeek;
+    if (typeof requireWeekend === 'boolean') updateData.require_weekend = requireWeekend;
+    if (typeof useOrLogic === 'boolean') updateData.use_or_logic = useOrLogic;
+    if (typeof health_weight_reliability === 'number') updateData.health_weight_reliability = health_weight_reliability;
+    if (typeof health_weight_progress === 'number') updateData.health_weight_progress = health_weight_progress;
+    if (typeof health_weight_competition === 'number') updateData.health_weight_competition = health_weight_competition;
+    if (typeof health_weight_volume === 'number') updateData.health_weight_volume = health_weight_volume;
+    if (typeof holidayAllowance === 'number') updateData.holiday_allowance = holidayAllowance;
+    if (age_based_criteria) updateData.age_based_criteria = age_based_criteria;
 
     const { data, error } = await supabase
       .from('squads')
