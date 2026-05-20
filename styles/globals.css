@@ -479,6 +479,15 @@ h1, h2, h3, h4 {
   background: rgba(255, 255, 255, 0.05);
 }
 
+/* Table Typography Standardization */
+.table-wrapper table th {
+  font-size: 0.65rem !important;
+}
+.table-wrapper table td {
+  font-size: 0.8rem !important;
+}
+
+
 /* Charts */
 .chart-container {
   height: 350px;

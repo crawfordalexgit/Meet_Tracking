@@ -18,16 +18,18 @@ export default function SwimmersRegistry({ session }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data: swData } = await supabase.from('swimmers').select('*, squads(id,name)').order('full_name');
-      const { data: rData } = await supabase.from('results').select('swimmer_id, wa_pts').order('wa_pts', { ascending: false });
+      const { data: swData, error: swError } = await supabase.from('swimmers').select('*, squads(id,name)').order('full_name');
+      const { data: rData } = await supabase.from('results').select('swimmer_id, wa_pts');
 
-      // Map peak WA points to each swimmer
-      const mapped = swData.map(s => {
-        const peak = rData.find(r => r.swimmer_id === s.id)?.wa_pts || 0;
-        return { ...s, peak };
+      if (swError) throw swError;
+
+      const enrichedSwimmers = (swData || []).map(swimmer => {
+        const swimmerResults = (rData || []).filter(r => r.swimmer_id === swimmer.id);
+        const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
+        return { ...swimmer, peakWA };
       });
 
-      setSwimmers(mapped);
+      setSwimmers(enrichedSwimmers);
     } catch (e) {
       console.error(e);
     } finally {
@@ -51,7 +53,7 @@ export default function SwimmersRegistry({ session }) {
 
       <div className="flex justify-between items-center mb-12">
         <div>
-          <h1 style={{ fontSize: '3rem', fontWeight: 950, margin: 0, letterSpacing: '-0.04em' }}>ATHLETE <span style={{ color: 'var(--accent-cyan)' }}>REGISTRY</span></h1>
+          <h1 style={{ fontSize: '3rem', fontWeight: 955, margin: 0, letterSpacing: '-0.04em' }}>ATHLETE <span style={{ color: 'var(--accent-cyan)' }}>REGISTRY</span></h1>
           <p style={{ fontSize: '0.9rem', opacity: 0.4, marginTop: 8 }}>Central database of Tonbridge Swimming Club performance assets.</p>
         </div>
         <div className="tactical-search-container">
@@ -107,7 +109,7 @@ export default function SwimmersRegistry({ session }) {
                           {sw.date_of_birth ? (new Date().getFullYear() - new Date(sw.date_of_birth).getFullYear()) : sw.year_of_birth ? (new Date().getFullYear() - sw.year_of_birth) : 'N/A'}
                        </td>
                        <td className="p-6 text-right">
-                          <div className="text-2xl font-black text-white">{sw.peak}</div>
+                          <div className="text-2xl font-black text-white">{sw.peakWA}</div>
                           <div className="text-[0.6rem] font-black tracking-widest opacity-20 uppercase">WA POINTS</div>
                        </td>
                     </tr>
