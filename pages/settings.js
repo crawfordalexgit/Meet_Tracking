@@ -60,6 +60,10 @@ export default function Settings({ session, scmApiKey }) {
   const [inviteRole, setInviteRole] = useState('coach');
   const [inviteStatus, setInviteStatus] = useState(null);
 
+  const [resetPasswordCoach, setResetPasswordCoach] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [resetPasswordStatus, setResetPasswordStatus] = useState(null);
+
 
   useEffect(() => {
     if (session === undefined) return;
@@ -630,6 +634,49 @@ export default function Settings({ session, scmApiKey }) {
       setCoaches(coaches.map(c => c.id === coachId ? { ...c, role: newRole } : c));
     } catch (err) {
       console.error('Role update failed:', err);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setResetPasswordStatus({ type: 'info', text: 'Updating password...' });
+    try {
+      const res = await fetch('/api/update-coach-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coachId: resetPasswordCoach.id, newPassword })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to reset password');
+      setResetPasswordStatus({ type: 'success', text: 'Password successfully updated!' });
+      setTimeout(() => {
+        setResetPasswordCoach(null);
+        setNewPassword('');
+        setResetPasswordStatus(null);
+      }, 2000);
+    } catch (err) {
+      setResetPasswordStatus({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleDeleteCoach = async (coachId, coachEmail) => {
+    if (!window.confirm(`Are you sure you want to permanently delete the coach ${coachEmail}? This action cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/delete-coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coachId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete coach');
+      
+      setCoaches(coaches.filter(c => c.id !== coachId));
+      alert('Coach successfully deleted.');
+    } catch (err) {
+      alert('Error deleting coach: ' + err.message);
     }
   };
 
@@ -1389,7 +1436,7 @@ export default function Settings({ session, scmApiKey }) {
 
               <div className="table-wrapper">
                 <table className="stats-table">
-                  <thead><tr><th>Email</th><th>Role</th></tr></thead>
+                  <thead><tr><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
                   <tbody>
                     {coaches.map(c => (
                       <tr key={c.id}>
@@ -1400,6 +1447,22 @@ export default function Settings({ session, scmApiKey }) {
                             <option value="headcoach">Head Coach</option>
                             <option value="admin">Admin</option>
                           </select>
+                        </td>
+                        <td style={{ display: 'flex', gap: '8px' }}>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '4px 8px', margin: 0, fontSize: '0.75rem', borderColor: 'rgba(255, 255, 255, 0.2)' }}
+                            onClick={() => setResetPasswordCoach(c)}
+                          >
+                            🔑 Reset Password
+                          </button>
+                          <button 
+                            className="btn btn-secondary" 
+                            style={{ padding: '4px 8px', margin: 0, fontSize: '0.75rem', color: 'var(--accent-rose)', borderColor: 'rgba(244, 63, 94, 0.3)' }}
+                            onClick={() => handleDeleteCoach(c.id, c.email)}
+                          >
+                            🗑️ Delete
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1539,6 +1602,50 @@ export default function Settings({ session, scmApiKey }) {
               }}>Save & Apply Rules</button>
               <button className="btn btn-secondary" onClick={() => setEditingCriteriaSquad(null)}>Cancel</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESET PASSWORD MODAL */}
+      {resetPasswordCoach && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 10000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '1rem',
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)'
+        }}>
+          <div className="glass-card" style={{ width: '100%', maxWidth: '400px', padding: '2rem' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.5rem' }}>Set New Password</h2>
+            <p style={{ fontSize: '0.85rem', opacity: 0.6, marginBottom: '1.5rem' }}>
+              Setting password for <strong>{resetPasswordCoach.email}</strong>
+            </p>
+            {resetPasswordStatus && (
+              <div className={`alert ${resetPasswordStatus.type === 'error' ? 'alert-error' : 'alert-success'} mb-4`}>
+                {resetPasswordStatus.text}
+              </div>
+            )}
+            <form onSubmit={handleResetPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <input 
+                type="password" 
+                required 
+                className="input-field m-0" 
+                value={newPassword} 
+                onChange={(e) => setNewPassword(e.target.value)} 
+                placeholder="Enter new password" 
+                minLength={6}
+              />
+              <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
+                  setResetPasswordCoach(null);
+                  setNewPassword('');
+                  setResetPasswordStatus(null);
+                }}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ flex: 1 }}>Update Password</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

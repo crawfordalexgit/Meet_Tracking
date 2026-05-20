@@ -103,6 +103,21 @@ export default function Layout({ children, session, hideNav = false }) {
               >
                 🐛 Report Issue
               </button>
+
+              <button 
+                onClick={handleSignOut} 
+                className="btn-premium-intel" 
+                style={{ 
+                  width: '90%', 
+                  margin: '0.5rem auto 1rem auto', 
+                  display: 'block', 
+                  fontSize: '0.65rem', 
+                  borderColor: 'rgba(244, 63, 94, 0.3)', 
+                  color: 'var(--accent-rose)' 
+                }}
+              >
+                🚪 Sign Out
+              </button>
             </nav>
 
             <div className="sidebar-footer">
