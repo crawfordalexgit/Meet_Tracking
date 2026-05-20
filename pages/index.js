@@ -892,10 +892,10 @@ export default function Dashboard({ session }) {
         <>
           <div className="flex gap-6 mb-12 w-full overflow-x-auto no-scrollbar" style={{ flexWrap: 'nowrap' }}>
         {[
-          { label: 'Global Club Health', value: Math.round(squadKPIs.reduce((a, b) => a + b.overall, 0) / (squadKPIs.length || 1)), icon: '🏥', unit: '%' },
-          { label: 'Meet Attendance', value: stats.complianceRate, icon: '📊', unit: '%' },
-          { label: 'Training Attendance', value: Math.round(squadKPIs.reduce((a, b) => a + b.training, 0) / (squadKPIs.length || 1)), icon: '⏱️', unit: '%' },
-          { label: 'Training Volume', value: Math.round(squadKPIs.reduce((a, b) => a + b.volume, 0) / (squadKPIs.length || 1)), icon: '🌊', unit: '%' }
+          { label: 'Global Club Health', value: Math.round(squadKPIs.reduce((a, b) => a + b.overall, 0) / (squadKPIs.length || 1)), icon: '🏥', unit: '%', path: '/squads' },
+          { label: 'Meet Attendance', value: stats.complianceRate, icon: '📊', unit: '%', path: '/meets' },
+          { label: 'Training Attendance', value: Math.round(squadKPIs.reduce((a, b) => a + b.training, 0) / (squadKPIs.length || 1)), icon: '⏱️', unit: '%', path: '/swimmers' },
+          { label: 'Training Volume', value: Math.round(squadKPIs.reduce((a, b) => a + b.volume, 0) / (squadKPIs.length || 1)), icon: '🌊', unit: '%', path: '/swimmers' }
         ].map((card, idx) => {
           const isCritical = card.value < 50;
           const needsAttention = card.value >= 50 && card.value < 75;
@@ -905,10 +905,12 @@ export default function Dashboard({ session }) {
             <div 
               key={idx} 
               className="glass-card tactical-kpi-card" 
+              onClick={() => router.push(card.path)}
               style={{ 
                 flex: '1 0 0', 
                 minWidth: '240px',
-                boxShadow: card.value < 60 ? `inset 0 0 20px ${kpiColor}11` : 'none'
+                boxShadow: card.value < 60 ? `inset 0 0 20px ${kpiColor}11` : 'none',
+                cursor: 'pointer'
               }}
             >
               <div className="kpi-header">
