@@ -971,3 +971,33 @@ h1, h2, h3, h4 {
   }
 }
 
+@media (max-width: 768px) {
+  /* 1. Fix grid overflow (prevent horizontal page scroll) */
+  .squad-grid { grid-template-columns: 1fr !important; gap: 1rem !important; }
+  .kpi-grid { grid-template-columns: 1fr !important; gap: 1rem !important; }
+  .orb-layout { grid-template-columns: 1fr !important; gap: 1rem !important; }
+  
+  /* 2. Stack flex containers that are side-by-side on desktop */
+  .squad-header, .insight-header, .kpi-header { flex-direction: column !important; align-items: flex-start !important; gap: 10px !important; }
+
+  /* 3. Reduce massive desktop padding */
+  .glass-card { padding: 1.25rem !important; margin-bottom: 1rem !important; }
+  .container { padding: 1rem !important; }
+  .tactical-insight-module { padding: 1.5rem !important; }
+
+  /* 4. Make Data Tables horizontally scrollable */
+  .table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%; }
+  table { min-width: 600px; /* Forces tables to scroll rather than crush text */ }
+  
+  /* 5. Scale down massive desktop typography */
+  .kpi-value-large, .insight-value { font-size: 2rem !important; }
+  h1 { font-size: 1.8rem !important; }
+  h2 { font-size: 1.5rem !important; }
+  .section-title { font-size: 0.65rem !important; margin-bottom: 1rem !important; }
+  
+  /* 6. Fix Drilldown overlays */
+  .drilldown-overlay { padding: 2rem 1rem !important; }
+  .drilldown-modal { padding: 1.5rem !important; }
+  .drilldown-search-input { width: 100% !important; }
+}
+
