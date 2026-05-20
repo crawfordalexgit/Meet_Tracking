@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { getPreferredName } from '../lib/analytics-utils';
+import { getPreferredName, calculateReliability } from '../lib/analytics-utils';
 
 export default function SwimmersRegistry({ session }) {
   const router = useRouter();
@@ -18,20 +18,43 @@ export default function SwimmersRegistry({ session }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const { data: swData, error: swError } = await supabase.from('swimmers').select('*, squads(id,name)').order('full_name');
-      const { data: rData } = await supabase.from('results').select('swimmer_id, wa_pts');
+      const y1ago = new Date(new Date() - 365 * 86400000).toISOString();
+      const [swRes, rRes, aRes, sessRes, exRes, memRes] = await Promise.all([
+        supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
+        supabase.from('results').select('swimmer_id, wa_pts, date, meets(id,name,type)').gte('date', y1ago),
+        supabase.from('training_attendance').select('*').gte('date', y1ago),
+        supabase.from('sessions').select('*'),
+        supabase.from('club_exemptions').select('*'),
+        supabase.from('session_memberships').select('*')
+      ]);
 
-      if (swError) throw swError;
+      if (swRes.error) throw swRes.error;
 
-      const enrichedSwimmers = (swData || []).map(swimmer => {
-        const swimmerResults = (rData || []).filter(r => r.swimmer_id === swimmer.id);
+      const enrichedSwimmers = (swRes.data || []).map(swimmer => {
+        const swimmerResults = (rRes.data || []).filter(r => r.swimmer_id === swimmer.id);
         const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
-        return { ...swimmer, peakWA };
+        
+        const rel = calculateReliability(
+          swimmer, 
+          aRes.data || [], 
+          sessRes.data || [], 
+          swimmerResults, 
+          365, 
+          exRes.data || [], 
+          (memRes.data || []).filter(m => m.swimmer_id === swimmer.id)
+        );
+        
+        return { 
+          ...swimmer, 
+          peakWA, 
+          attendancePct: rel.percentage || 0, 
+          meetCompliance: rel.complianceRate || 0 
+        };
       });
 
       setSwimmers(enrichedSwimmers);
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -80,6 +103,8 @@ export default function SwimmersRegistry({ session }) {
                  <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                     <th className="p-6 text-xs font-black tracking-widest opacity-40 uppercase">Athlete Name</th>
                     <th className="p-6 text-xs font-black tracking-widest opacity-40 uppercase">Primary Squad</th>
+                    <th className="p-6 text-xs font-black tracking-widest opacity-40 uppercase text-center">Attendance</th>
+                    <th className="p-6 text-xs font-black tracking-widest opacity-40 uppercase text-center">Compliance</th>
                     <th className="p-6 text-xs font-black tracking-widest opacity-40 uppercase text-center">Age</th>
                     <th className="p-6 text-xs font-black tracking-widest opacity-40 uppercase text-right">Peak WA Standard</th>
                  </tr>
@@ -104,6 +129,12 @@ export default function SwimmersRegistry({ session }) {
                        </td>
                        <td className="p-6">
                           <span className="squad-tag">{sw.squads?.name || 'Unassigned'}</span>
+                       </td>
+                       <td className="p-6 text-center font-bold text-white">
+                          {sw.attendancePct}%
+                       </td>
+                       <td className="p-6 text-center font-bold" style={{ color: sw.meetCompliance >= 100 ? 'var(--accent-cyan)' : 'white' }}>
+                          {sw.meetCompliance}%
                        </td>
                        <td className="p-6 text-center font-bold opacity-60">
                           {sw.date_of_birth ? (new Date().getFullYear() - new Date(sw.date_of_birth).getFullYear()) : sw.year_of_birth ? (new Date().getFullYear() - sw.year_of_birth) : 'N/A'}
