@@ -5,7 +5,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { email } = req.body;
+  const { email, role } = req.body;
   if (!email) {
     return res.status(400).json({ error: 'Missing email address' });
   }
@@ -28,6 +28,12 @@ export default async function handler(req, res) {
     const { data, error } = await supabase.auth.admin.inviteUserByEmail(email);
 
     if (error) throw error;
+
+    if (role && data?.user?.id) {
+      if (['admin', 'headcoach', 'coach'].includes(role)) {
+        await supabase.from('profiles').update({ role }).eq('id', data.user.id);
+      }
+    }
 
     return res.status(200).json({ success: true, message: `Invitation sent to ${email}` });
   } catch (error) {

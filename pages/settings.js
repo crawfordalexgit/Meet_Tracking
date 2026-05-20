@@ -56,6 +56,10 @@ export default function Settings({ session, scmApiKey }) {
   const [isReconcilingPbs, setIsReconcilingPbs] = useState(false);
   const [pbSyncStatus, setPbSyncStatus] = useState(null);
 
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('coach');
+  const [inviteStatus, setInviteStatus] = useState(null);
+
 
   useEffect(() => {
     if (session === undefined) return;
@@ -598,6 +602,35 @@ export default function Settings({ session, scmApiKey }) {
     if (assign) setCoachSquads([...coachSquads, { coach_id: coachId, squad_id: squadId }]);
     else setCoachSquads(coachSquads.filter(cs => !(cs.coach_id === coachId && cs.squad_id === squadId)));
     await fetch('/api/assign-coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coachId, squadId, assign }) });
+  };
+
+  const handleInviteCoach = async (e) => {
+    e.preventDefault();
+    setInviteStatus({ type: 'info', text: 'Inviting...' });
+    try {
+      const res = await fetch('/api/invite-coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to invite coach');
+      setInviteStatus({ type: 'success', text: data.message });
+      setInviteEmail('');
+      loadData();
+    } catch (err) {
+      setInviteStatus({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleRoleChange = async (coachId, newRole) => {
+    try {
+      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', coachId);
+      if (error) throw error;
+      setCoaches(coaches.map(c => c.id === coachId ? { ...c, role: newRole } : c));
+    } catch (err) {
+      console.error('Role update failed:', err);
+    }
   };
 
   if (loading) return <Layout session={session}><div className="loading-spinner"></div></Layout>;
@@ -1339,7 +1372,40 @@ export default function Settings({ session, scmApiKey }) {
           {activePanel === 'coaches' && (
             <div className="panel-content">
               <h1>Coach Management</h1>
-              <div className="table-wrapper"><table className="stats-table"><thead><tr><th>Email</th><th>Role</th></tr></thead><tbody>{coaches.map(c => (<tr key={c.id}><td>{c.email}</td><td><span className="badge">{c.role}</span></td></tr>))}</tbody></table></div>
+              
+              <div className="card mb-8">
+                <h3>Invite New Coach</h3>
+                {inviteStatus && <div className={`alert ${inviteStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{inviteStatus.text}</div>}
+                <form onSubmit={handleInviteCoach} style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <input type="email" required className="input-field m-0" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="Email Address" style={{ flex: 1 }} />
+                  <select className="input-field m-0" value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} style={{ width: '150px' }}>
+                    <option value="coach">Coach</option>
+                    <option value="headcoach">Head Coach</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button type="submit" className="btn btn-primary m-0">Invite</button>
+                </form>
+              </div>
+
+              <div className="table-wrapper">
+                <table className="stats-table">
+                  <thead><tr><th>Email</th><th>Role</th></tr></thead>
+                  <tbody>
+                    {coaches.map(c => (
+                      <tr key={c.id}>
+                        <td>{c.email}</td>
+                        <td>
+                          <select className="input-field" style={{ padding: '4px 8px', margin: 0, fontSize: '0.8rem', width: 'auto' }} value={c.role || 'coach'} onChange={(e) => handleRoleChange(c.id, e.target.value)}>
+                            <option value="coach">Coach</option>
+                            <option value="headcoach">Head Coach</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
