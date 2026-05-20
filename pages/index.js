@@ -906,7 +906,7 @@ export default function Dashboard({ session }) {
             <div 
               key={idx} 
               className="glass-card tactical-kpi-card" 
-              onClick={() => router.push(card.path)}
+              onClick={() => router.push(`${card.path}?period=${periodDays}`)}
               style={{ 
                 flex: '1 0 0', 
                 minWidth: '240px',

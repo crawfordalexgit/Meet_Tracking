@@ -10,15 +10,31 @@ export default function SwimmersRegistry({ session }) {
   const [loading, setLoading] = useState(true);
   const [swimmers, setSwimmers] = useState([]);
   const [search, setSearch] = useState('');
+  const [periodDays, setPeriodDays] = useState(365);
+
+  const PERIOD_OPTIONS = [
+    { label: '30 Days', days: 30 },
+    { label: '90 Days', days: 90 },
+    { label: '6 Months', days: 180 },
+    { label: '52 Weeks', days: 365 },
+  ];
+
+  const handlePeriodChange = (days) => {
+    router.push({ pathname: '/swimmers', query: { ...router.query, period: days } }, undefined, { shallow: true });
+  };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (router.isReady) {
+      fetchData();
+    }
+  }, [router.isReady, router.query.period]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const y1ago = new Date(new Date() - 365 * 86400000).toISOString();
+      const period = parseInt(router.query.period) || 365;
+      setPeriodDays(period);
+      const y1ago = new Date(new Date() - period * 86400000).toISOString();
       const [swRes, rRes, aRes, sessRes, exRes, memRes] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
         supabase.from('results').select('swimmer_id, wa_pts, date, meets(id,name,type)').gte('date', y1ago),
@@ -39,7 +55,7 @@ export default function SwimmersRegistry({ session }) {
           aRes.data || [], 
           sessRes.data || [], 
           swimmerResults, 
-          365, 
+          period, 
           exRes.data || [], 
           (memRes.data || []).filter(m => m.swimmer_id === swimmer.id)
         );
@@ -74,10 +90,16 @@ export default function SwimmersRegistry({ session }) {
         <title>Athlete Registry | CoachesEye</title>
       </Head>
 
-      <div className="flex justify-between items-center mb-12">
-        <div>
+      <div className="flex justify-between items-center mb-12" style={{ flexWrap: 'wrap', gap: '20px' }}>
+        <div className="flex items-center gap-6" style={{ flexWrap: 'wrap' }}>
           <h1 style={{ fontSize: '3rem', fontWeight: 955, margin: 0, letterSpacing: '-0.04em' }}>ATHLETE <span style={{ color: 'var(--accent-cyan)' }}>REGISTRY</span></h1>
-          <p style={{ fontSize: '0.9rem', opacity: 0.4, marginTop: 8 }}>Central database of Tonbridge Swimming Club performance assets.</p>
+          <div className="period-selector-premium">
+             {PERIOD_OPTIONS.map(opt => (
+               <button key={opt.days} className={`period-btn-premium ${periodDays === opt.days ? 'active' : ''}`} onClick={() => handlePeriodChange(opt.days)}>
+                 {opt.label}
+               </button>
+             ))}
+          </div>
         </div>
         <div className="tactical-search-container">
            <svg className="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
@@ -114,7 +136,7 @@ export default function SwimmersRegistry({ session }) {
                     <tr 
                       key={sw.id} 
                       className="registry-row"
-                      onClick={() => router.push(`/swimmer/${sw.id}`)}
+                      onClick={() => router.push(`/swimmer/${sw.id}?period=${periodDays}`)}
                     >
                        <td className="p-6">
                           <div className="font-bold text-white text-lg">

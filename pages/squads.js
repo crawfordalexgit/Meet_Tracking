@@ -5,7 +5,7 @@ import { calculateReliability } from '../lib/analytics-utils';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 
-function SquadCard({ squad }) {
+function SquadCard({ squad, periodDays }) {
   const router = useRouter();
   const isCritical = squad.overall < 50;
   const needsAttention = squad.overall >= 50 && squad.overall < 75;
@@ -14,7 +14,7 @@ function SquadCard({ squad }) {
   return (
     <div 
       className="glass-card squad-card animate-fade-in"
-      onClick={() => router.push(`/squad/${squad.id}`)}
+      onClick={() => router.push(`/squad/${squad.id}?period=${periodDays}`)}
     >
       <div className="squad-header">
         <div className="squad-info">
@@ -182,22 +182,41 @@ function SquadCard({ squad }) {
 }
 
 export default function SquadsRegistry({ session }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [squads, setSquads] = useState([]);
+  const [periodDays, setPeriodDays] = useState(365);
+
+  const PERIOD_OPTIONS = [
+    { label: '30 Days', days: 30 },
+    { label: '90 Days', days: 90 },
+    { label: '6 Months', days: 180 },
+    { label: '52 Weeks', days: 365 },
+  ];
+
+  const handlePeriodChange = (days) => {
+    router.push({ pathname: '/squads', query: { ...router.query, period: days } }, undefined, { shallow: true });
+  };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (router.isReady) {
+      fetchData();
+    }
+  }, [router.isReady, router.query.period]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
+      const period = parseInt(router.query.period) || 365;
+      setPeriodDays(period);
+      const startStr = new Date(new Date() - period * 86400000).toISOString();
+
       // 1. Fetch data
       const [sRes, swRes, rRes, aRes, sessionsRes, membershipsArr, exRes, rankingsRes] = await Promise.all([
         supabase.from('squads').select('*').eq('is_squad', true).order('name'),
         supabase.from('swimmers').select('*'),
-        supabase.from('results').select('*, meets(id,name,type)').gte('date', new Date(new Date() - 365 * 86400000).toISOString()),
-        supabase.from('training_attendance').select('*').gte('date', new Date(new Date() - 90 * 86400000).toISOString()),
+        supabase.from('results').select('*, meets(id,name,type)').gte('date', startStr),
+        supabase.from('training_attendance').select('*').gte('date', startStr),
         supabase.from('sessions').select('*'),
         fetch('/api/memberships').then(r => r.ok ? r.json() : []),
         supabase.from('club_exemptions').select('*'),
@@ -227,7 +246,7 @@ export default function SquadsRegistry({ session }) {
           const swRes = resultsArr.filter(r => r.swimmer_id === sw.id);
           const swAtt = attendanceArr.filter(a => a.swimmer_id === sw.id);
           
-          const rel = calculateReliability(sw, swAtt, sessionsArr, swRes, 365, exemptionsArr, swMem);
+          const rel = calculateReliability(sw, swAtt, sessionsArr, swRes, period, exemptionsArr, swMem);
           totalTraining += rel.percentage;
           totalVolume += rel.volumePct;
           totalMeets += rel.complianceRate;
@@ -280,7 +299,16 @@ export default function SquadsRegistry({ session }) {
             <div style={{ width: 4, height: 24, background: 'var(--accent-cyan)' }}></div>
             <span style={{ fontSize: '0.75rem', fontWeight: 950, letterSpacing: '0.2em', opacity: 0.8 }}>GLOBAL OPERATIONAL AUDIT</span>
           </div>
-          <h1 style={{ fontSize: '3.5rem', fontWeight: 950, margin: 0, letterSpacing: '-0.04em', lineHeight: 1 }}>SQUAD <span style={{ color: 'var(--accent-cyan)' }}>REGISTRY</span></h1>
+          <div className="flex items-center gap-6 mb-4" style={{ flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: '3.5rem', fontWeight: 950, margin: 0, letterSpacing: '-0.04em', lineHeight: 1 }}>SQUAD <span style={{ color: 'var(--accent-cyan)' }}>REGISTRY</span></h1>
+            <div className="period-selector-premium" style={{ marginLeft: '1.5rem' }}>
+               {PERIOD_OPTIONS.map(opt => (
+                 <button key={opt.days} className={`period-btn-premium ${periodDays === opt.days ? 'active' : ''}`} onClick={() => handlePeriodChange(opt.days)}>
+                   {opt.label}
+                 </button>
+               ))}
+            </div>
+          </div>
           <p style={{ fontSize: '1rem', opacity: 0.9, marginTop: 12, maxWidth: '600px' }}>
             Real-time oversight of all competitive pathways. This registry synthesizes attendance, training volume, and championship compliance into a unified health score.
           </p>
@@ -307,7 +335,7 @@ export default function SquadsRegistry({ session }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-10">
-          {squads.map(s => <SquadCard key={s.id} squad={s} />)}
+          {squads.map(s => <SquadCard key={s.id} squad={s} periodDays={periodDays} />)}
         </div>
       )}
     </Layout>
