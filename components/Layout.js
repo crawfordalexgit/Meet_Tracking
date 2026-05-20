@@ -125,7 +125,7 @@ export default function Layout({ children, session, hideNav = false }) {
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                </button>
             </div>
-            <div style={{ fontSize: '0.6rem', opacity: 0.4, textAlign: 'center', marginTop: 'auto', padding: '1rem' }}>v2.1.0-stable</div>
+            <div style={{ fontSize: '0.6rem', opacity: 0.4, textAlign: 'center', marginTop: 'auto', padding: '1rem' }}>v1.0.0-beta.1</div>
           </div>
         </aside>
       )}
