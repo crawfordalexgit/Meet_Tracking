@@ -21,6 +21,17 @@ export default function SwimmerDetail({ session }) {
   const router = useRouter();
   const { id } = router.query;
   const [loading, setLoading] = useState(true);
+
+  const PERIOD_OPTIONS = [
+    { label: '30 Days', days: 30 },
+    { label: '90 Days', days: 90 },
+    { label: '6 Months', days: 180 },
+    { label: '52 Weeks', days: 365 },
+  ];
+
+  const handlePeriodChange = (days) => {
+    router.push({ pathname: `/swimmer/${id}`, query: { ...router.query, period: days } }, undefined, { shallow: true });
+  };
   const [swimmer, setSwimmer] = useState(null);
   const [results, setResults] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -913,6 +924,13 @@ export default function SwimmerDetail({ session }) {
           </div>
         </div>
         <div className="flex gap-6 items-center">
+          <div className="period-selector-premium">
+             {PERIOD_OPTIONS.map(opt => (
+               <button key={opt.days} className={`period-btn-premium ${period === opt.days ? 'active' : ''}`} onClick={() => handlePeriodChange(opt.days)}>
+                 {opt.label}
+               </button>
+             ))}
+          </div>
           <PremiumOrb value={healthData.total} label="Personal Health" size={130} />
           <div className="flex flex-col gap-2">
             <button className="btn-premium-action" onClick={() => setIsBenchmarkOpen(true)}>WA Standards</button>

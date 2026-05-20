@@ -70,6 +70,17 @@ export default function SquadDetail({
   const { id: queryId } = router.query;
   const id = queryId || initialId;
   const [loading, setLoading] = useState(true);
+
+  const PERIOD_OPTIONS = [
+    { label: '30 Days', days: 30 },
+    { label: '90 Days', days: 90 },
+    { label: '6 Months', days: 180 },
+    { label: '52 Weeks', days: 365 },
+  ];
+
+  const handlePeriodChange = (days) => {
+    router.push({ pathname: `/squad/${id}`, query: { ...router.query, period: days } }, undefined, { shallow: true });
+  };
   const [isExporting, setIsExporting] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
   const [squad, setSquad] = useState(initialSquad);
@@ -631,10 +642,17 @@ export default function SquadDetail({
           <div className="container mx-auto px-4 py-8">
             <div className="profile-header no-print" style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
               <div style={{ flex: 1 }}>
-                <div className="flex items-center gap-6 mb-4">
+                <div className="flex items-center gap-6 mb-4" style={{ flexWrap: 'wrap' }}>
                   <h1 style={{ background: 'none', WebkitTextFillColor: 'initial', fontSize: '3.5rem', margin: 0, lineHeight: 1, fontWeight: 900 }}>{squad.name}</h1>
                   <div className={`status-badge ${(healthData?.total || 0) > 75 ? 'success' : 'attention'}`} style={{ fontSize: '0.8rem', padding: '8px 16px' }}>
                      {(healthData?.total || 0) > 75 ? 'OPTIMAL HEALTH' : 'STABILIZING'}
+                  </div>
+                  <div className="period-selector-premium" style={{ marginLeft: 'auto' }}>
+                     {PERIOD_OPTIONS.map(opt => (
+                       <button key={opt.days} className={`period-btn-premium ${periodDays === opt.days ? 'active' : ''}`} onClick={() => handlePeriodChange(opt.days)}>
+                         {opt.label}
+                       </button>
+                     ))}
                   </div>
                 </div>
                 <div className="swimmer-meta">
@@ -891,7 +909,7 @@ export default function SquadDetail({
                 </thead>
                 <tbody>
                   {sortedSwimmers.map(sw => (
-                    <tr key={sw.id} onClick={() => router.push(`/swimmer/${sw.id}`)} style={{ cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.05)' }} className="hover:bg-white/[0.02] transition-all">
+                    <tr key={sw.id} onClick={() => router.push(`/swimmer/${sw.id}?period=${periodDays}`)} style={{ cursor: 'pointer', borderTop: '1px solid rgba(255,255,255,0.05)' }} className="hover:bg-white/[0.02] transition-all">
                       <td style={{ padding: '1.5rem' }}>
                         <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>{sw.full_name}</div>
                         <div style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)', fontWeight: 600 }}>{sw.peakWA} PEAK</div>
