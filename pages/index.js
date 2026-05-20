@@ -65,9 +65,10 @@ export default function Dashboard({ session }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   
   const PERIOD_OPTIONS = [
+    { label: '30 Days', days: 30 },
     { label: '90 Days', days: 90 },
     { label: '6 Months', days: 180 },
-    { label: '12 Months', days: 365 },
+    { label: '52 Weeks', days: 365 },
   ];
 
   useEffect(() => {
