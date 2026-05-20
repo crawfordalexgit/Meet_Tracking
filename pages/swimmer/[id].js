@@ -44,6 +44,7 @@ export default function SwimmerDetail({ session }) {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [selectedWeek, setSelectedWeek] = useState(null);
   const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
+  const [selectedChartWeek, setSelectedChartWeek] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [progressSubTab, setProgressSubTab] = useState('charts');
   const [reportConfig, setReportConfig] = useState({
@@ -1521,9 +1522,9 @@ export default function SwimmerDetail({ session }) {
                   </div>
                 </div>
              </div>
-             <div style={{ height: 350 }}>
+             <div style={{ height: 350, cursor: 'pointer' }}>
                <ResponsiveContainer width="100%" height="100%">
-                 <ComposedChart data={workloadChartData}>
+                 <ComposedChart data={workloadChartData} onClick={(e) => { if (e?.activePayload) setSelectedChartWeek(e.activePayload[0]?.payload); }}>
                    <defs>
                       <linearGradient id="trainingGrad" x1="0%" y1="0%" x2="0%" y2="100%">
                         <stop offset="0%" stopColor="#22d3ee" />
@@ -1859,6 +1860,36 @@ export default function SwimmerDetail({ session }) {
         swimmer={swimmer}
         results={results}
       />
+
+      {selectedChartWeek && (
+        <div className="modal-overlay" onClick={() => setSelectedChartWeek(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="glass-card animate-fade-in" onClick={e => e.stopPropagation()} style={{ padding: '2.5rem', maxWidth: 420, width: '90%' }}>
+            <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--accent-cyan)', letterSpacing: '0.15em', marginBottom: '1rem' }}>WEEK DRILL-DOWN</div>
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 900, marginBottom: '1.5rem' }}>Week of {selectedChartWeek.week}</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{selectedChartWeek.totalHours ?? selectedChartWeek.trainingHours ?? 0}h</div>
+                <div style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 800, marginTop: 4 }}>HOURS LOGGED</div>
+              </div>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'rgba(255,255,255,0.5)' }}>{selectedChartWeek.target ?? '—'}h</div>
+                <div style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 800, marginTop: 4 }}>TARGET HOURS</div>
+              </div>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: selectedChartWeek.isMet ? '#10b981' : 'var(--accent-amber)' }}>{selectedChartWeek.compliance ?? 0}%</div>
+                <div style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 800, marginTop: 4 }}>COMPLIANCE</div>
+              </div>
+              <div style={{ background: 'rgba(255,255,255,0.04)', borderRadius: 12, padding: '1rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'white' }}>{selectedChartWeek.sessions ?? 0}</div>
+                <div style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 800, marginTop: 4 }}>SESSIONS LOGGED</div>
+              </div>
+            </div>
+            {selectedChartWeek.isExempt && <div style={{ fontSize: '0.75rem', color: '#f97316', fontWeight: 800, marginBottom: 8 }}>⚠️ Club Shutdown Week</div>}
+            {selectedChartWeek.holidayUsed && <div style={{ fontSize: '0.75rem', color: '#a855f7', fontWeight: 800, marginBottom: 8 }}>✈️ Holiday Credit Applied</div>}
+            <button onClick={() => setSelectedChartWeek(null)} className="btn btn-secondary" style={{ width: '100%', marginTop: '0.5rem' }}>Close</button>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

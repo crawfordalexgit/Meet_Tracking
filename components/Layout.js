@@ -556,6 +556,21 @@ export default function Layout({ children, session, hideNav = false }) {
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+
+      {!hideNav && (
+        <nav className="mobile-bottom-nav no-print">
+          {navItems.slice(0, 5).map(item => (
+            <Link
+              key={item.label}
+              href={item.path}
+              className={`mobile-nav-item ${router.pathname === item.path ? 'active' : ''}`}
+            >
+              <div className="mobile-nav-icon">{item.icon}</div>
+              <span className="mobile-nav-label">{item.label}</span>
+            </Link>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }

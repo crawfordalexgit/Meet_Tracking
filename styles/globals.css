@@ -906,3 +906,68 @@ h1, h2, h3, h4 {
 .tracking-tighter { letter-spacing: -0.05em; }
 .tracking-widest { letter-spacing: 0.2em; }
 
+/* ── Mobile Bottom Navigation ── */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 900;
+    background: rgba(10, 25, 33, 0.95);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(0, 150, 255, 0.15);
+    padding: 0.5rem 0 calc(0.5rem + env(safe-area-inset-bottom));
+    justify-content: space-around;
+    align-items: center;
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 0.4rem 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+    text-decoration: none;
+    transition: color 0.2s;
+    flex: 1;
+  }
+
+  .mobile-nav-item.active {
+    color: var(--accent-cyan);
+  }
+
+  .mobile-nav-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .mobile-nav-label {
+    font-size: 0.55rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  /* Push content above the mobile nav */
+  .content-main {
+    padding-bottom: 5rem !important;
+  }
+
+  /* Hide the desktop sidebar on mobile */
+  .mockup-sidebar {
+    display: none !important;
+  }
+
+  /* Hide chatbot bubble on mobile to reduce clutter */
+  .chatbot-container {
+    bottom: 5rem;
+  }
+}
+

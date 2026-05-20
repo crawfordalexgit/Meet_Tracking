@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'next/router';
+import toast from 'react-hot-toast';
 
 export default function Settings({ session, scmApiKey }) {
   const router = useRouter();
@@ -399,7 +400,12 @@ export default function Settings({ session, scmApiKey }) {
             const data = JSON.parse(line.trim().substring(6));
             setScrapeStatus({ type: data.error ? 'error' : 'info', text: data.message });
             setScrapeProgress(data.progress);
-            if (data.isDone) { setIsScraping(false); loadData(); }
+            if (data.isDone) {
+              setIsScraping(false);
+              loadData();
+              if (data.error) toast.error(data.message || 'Scrape failed');
+              else toast.success(data.message || 'Scrape complete!');
+            }
           } catch (e) {}
         }
       }
@@ -439,6 +445,8 @@ export default function Settings({ session, scmApiKey }) {
               if (data.isDone) {
                 setIsRankingsScraping(false);
                 setRankingsScrapeStatus({ type: data.error ? 'error' : 'success', text: data.message });
+                if (data.error) toast.error(data.message || 'Rankings scrape failed');
+                else toast.success(data.message || 'Rankings sync complete!');
               }
             } catch (e) {
               console.error('Error parsing SSE:', e);

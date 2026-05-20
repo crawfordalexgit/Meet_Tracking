@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 export default function ChatBot({ clubDNA }) {
@@ -31,6 +31,14 @@ export default function ChatBot({ clubDNA }) {
         ]);
       }
     }
+  }, [clubDNA]);
+
+  const promptChips = useMemo(() => {
+    if (!clubDNA) return ['Summarize club health', 'Any operational risks?'];
+    const str = typeof clubDNA === 'string' ? clubDNA : JSON.stringify(clubDNA);
+    if (str.includes('swimmer:')) return ['What is their strongest stroke?', 'Analyze burnout risk', 'Summarize recent PBs'];
+    if (str.includes('squad_name')) return ['Summarize squad health', 'Who are the elite responders?'];
+    return ['Summarize club health', 'Any operational risks?'];
   }, [clubDNA]);
 
   const handleSubmit = async (e) => {
@@ -110,6 +118,18 @@ export default function ChatBot({ clubDNA }) {
             <div ref={messagesEndRef} />
           </div>
 
+          <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '0 1rem 1rem 1rem', scrollbarWidth: 'none' }}>
+            {promptChips.map(chip => (
+              <button
+                key={chip}
+                onClick={() => setInput(chip)}
+                className="btn-premium-intel"
+                style={{ whiteSpace: 'nowrap', fontSize: '0.65rem', padding: '4px 10px', flexShrink: 0 }}
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
           <form onSubmit={handleSubmit} className="chatbot-input-area">
             <input 
               type="text" 

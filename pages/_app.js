@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import { ThemeProvider } from '../lib/ThemeContext';
+import { Toaster } from 'react-hot-toast';
 
 export default function MyApp({ Component, pageProps }) {
   const [session, setSession] = useState(null);
@@ -72,6 +73,19 @@ export default function MyApp({ Component, pageProps }) {
 
   return (
     <ThemeProvider>
+      <Toaster
+        position="bottom-right"
+        toastOptions={{
+          style: {
+            background: '#0a1921',
+            color: '#fff',
+            border: '1px solid rgba(0, 212, 255, 0.3)',
+            fontFamily: 'Inter, sans-serif',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+          }
+        }}
+      />
       <Head>
         <title>Tonbridge Open Meet Dashboard</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
