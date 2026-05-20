@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite-preview" }, { apiVersion: "v1beta" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const metaPromptPath = path.join(process.cwd(), 'lib', 'prompts', 'meta_prompter.md');
     const metaPrompt = fs.readFileSync(metaPromptPath, 'utf8');

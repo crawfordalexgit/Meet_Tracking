@@ -18,6 +18,21 @@ export default function ChatBot({ clubDNA }) {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (clubDNA && typeof clubDNA === 'string') {
+      const swimmerMatch = clubDNA.match(/swimmer:\s*([^\n|]+)/i);
+      const swimmerName = swimmerMatch ? swimmerMatch[1].trim() : null;
+      if (swimmerName) {
+        setMessages([
+          { 
+            role: 'assistant', 
+            content: `Hello! I'm your CoachesEye Assistant. I've fully parsed **${swimmerName}**'s performance dossier. Ask me anything about their consistency, stroke roadmap, or competitive results!` 
+          }
+        ]);
+      }
+    }
+  }, [clubDNA]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim() || loading) return;

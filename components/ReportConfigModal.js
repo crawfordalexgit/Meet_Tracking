@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmerName }) {
+export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmerName, loading }) {
   const [sections, setSections] = useState({
     attendance: true,
     openMeets: true,
@@ -86,6 +86,29 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
     border: '1px solid rgba(255, 255, 255, 0.1)',
     cursor: 'pointer'
   };
+
+  if (loading) {
+    return (
+      <div style={modalOverlayStyle} className="no-print">
+        <div style={{ ...modalContentStyle, padding: '60px 40px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '24px' }}>
+          <div style={{ position: 'relative', width: '80px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--accent-cyan-rgb), 0.1)', borderRadius: '50%', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)' }}>
+            <span style={{ fontSize: '2.5rem', display: 'inline-block', animation: 'spin-glow 2s linear infinite' }}>✨</span>
+          </div>
+          <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.02em' }}>Compiling AI Reports</h3>
+          <p style={{ color: 'rgba(255, 255, 255, 0.6)', margin: 0, fontSize: '0.9rem', maxWidth: '380px', lineHeight: 1.6 }}>
+            CoachesEye is running deep diagnostic workflows on {swimmerName}'s physiological and technical datasets...
+          </p>
+          <style jsx>{`
+            @keyframes spin-glow {
+              0% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 5px rgba(var(--accent-cyan-rgb), 0.3)); }
+              50% { transform: rotate(180deg) scale(1.1); filter: drop-shadow(0 0 15px rgba(var(--accent-cyan-rgb), 0.6)); }
+              100% { transform: rotate(360deg) scale(1); filter: drop-shadow(0 0 5px rgba(var(--accent-cyan-rgb), 0.3)); }
+            }
+          `}</style>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={modalOverlayStyle} className="no-print">

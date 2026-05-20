@@ -63,7 +63,7 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
     <div className="glass-card mb-16" style={{ padding: '3rem', borderLeft: '4px solid var(--accent-cyan)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.03) 0%, transparent 100%)' }}>
       <div className="flex justify-between items-start mb-12">
         <div>
-          <div className="section-title" style={{ marginBottom: 8, color: 'var(--accent-cyan)', fontSize: '0.8rem' }}>CoachesEye Intelligence: Performance Audit</div>
+          <div className="section-title" style={{ marginBottom: 8, color: 'var(--accent-cyan)', fontSize: '0.8rem' }}>CoachesEye Insights: Performance Audit</div>
           <h2 className="text-2xl font-black tracking-tight uppercase">{displayData.headline}</h2>
         </div>
         <div style={{ padding: '6px 12px', background: 'rgba(6, 182, 212, 0.1)', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
@@ -100,7 +100,23 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
           
           <section>
             <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.1em' }}>2. Training Attendance Audit</h4>
-            <p style={{ fontSize: '1rem', lineHeight: 1.7, opacity: 0.9, fontWeight: 500 }}>{displayData.training_analysis}</p>
+            <p style={{ fontSize: '1rem', lineHeight: 1.7, opacity: 0.9, fontWeight: 500, marginBottom: 12 }}>{displayData.training_analysis}</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                <span style={{ opacity: 0.6, fontWeight: 700 }}>⏱️ Weekly Hours Compliance</span>
+                <span style={{ fontWeight: 900, color: 'var(--accent-cyan)' }}>{rel.hoursCompliance || 0}%</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                <span style={{ opacity: 0.6, fontWeight: 700 }}>⚡ Weekly Sessions Compliance</span>
+                <span style={{ fontWeight: 900, color: 'var(--accent-amber)' }}>{rel.sessionsCompliance || 0}%</span>
+              </div>
+              {squad?.require_weekend && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
+                  <span style={{ opacity: 0.6, fontWeight: 700 }}>🗓️ Weekend Attendance</span>
+                  <span style={{ fontWeight: 900, color: '#a855f7' }}>{rel.weekendCompliance !== null ? `${rel.weekendCompliance}%` : 'N/A'}</span>
+                </div>
+              )}
+            </div>
           </section>
           
           <section>
@@ -118,7 +134,7 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
           <section style={{ padding: '2rem', background: 'rgba(6, 182, 212, 0.05)', borderRadius: '24px', border: '1px solid rgba(6, 182, 212, 0.1)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 20 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-cyan)' }}></div>
-              <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>5. AI Brain Recommendations</h4>
+              <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>5. CoachesEye Insights Recommendations</h4>
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {displayData.recommendations?.map((rec, i) => (

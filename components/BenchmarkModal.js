@@ -1,14 +1,55 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { getBenchmarkTable } from '../lib/analytics-utils';
+import { supabase } from '../lib/supabase';
 
 export default function BenchmarkModal({ isOpen, onClose }) {
   const [gender, setGender] = useState('F');
   const [level, setLevel] = useState('COUNTY');
+  const [dbData, setDbData] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: 'event', direction: 'asc' });
   
   if (!isOpen) return null;
 
-  const tableData = useMemo(() => getBenchmarkTable(gender, level), [gender, level]);
+  const tableData = useMemo(() => {
+    if (level === 'NATIONAL') return dbData;
+    return getBenchmarkTable(gender, level);
+  }, [gender, level, dbData]);
+
+  useEffect(() => {
+    if (level === 'NATIONAL' && isOpen) {
+      fetchNationalBenchmarks();
+    }
+  }, [level, gender, isOpen]);
+
+  const fetchNationalBenchmarks = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('benchmarks')
+        .select('*')
+        .eq('category', 'National Top 40')
+        .eq('gender', gender)
+        .eq('year', 2026);
+      
+      if (data) {
+        // Transform DB rows to the table format expected by the UI
+        const events = [...new Set(data.map(d => d.event))];
+        const formatted = events.map(evt => {
+          const row = { event: evt };
+          data.filter(d => d.event === evt).forEach(d => {
+            row[`age${d.age_group}`] = { pts: d.wa_pts, time: d.time_standard };
+          });
+          return row;
+        });
+        setDbData(formatted);
+      }
+    } catch (e) {
+      console.error("Error fetching national benchmarks:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
   const ages = [11, 12, 13, 14, 15, 16, 17];
 
   const sortedTable = useMemo(() => {
@@ -45,7 +86,7 @@ export default function BenchmarkModal({ isOpen, onClose }) {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 900 }}>
-              {level === 'COUNTY' ? 'Kent County' : 'South East Regional'} Standards
+              {level === 'COUNTY' ? 'Kent County' : (level === 'REGIONAL' ? 'South East Regional' : 'National Top 40')} Standards
             </h2>
             <div className="text-xs opacity-50 uppercase tracking-widest mt-1">2026 Qualifying Standards to WA Points</div>
           </div>
@@ -59,6 +100,10 @@ export default function BenchmarkModal({ isOpen, onClose }) {
                 className={level === 'REGIONAL' ? 'active' : ''} 
                 onClick={() => setLevel('REGIONAL')}
               >REGIONAL</button>
+              <button 
+                className={level === 'NATIONAL' ? 'active' : ''} 
+                onClick={() => setLevel('NATIONAL')}
+              >NATIONAL</button>
             </div>
             <div className="gender-toggle">
               <button 
@@ -109,12 +154,18 @@ export default function BenchmarkModal({ isOpen, onClose }) {
               ))}
             </tbody>
           </table>
+          {loading && (
+            <div className="p-12 text-center opacity-50 flex flex-col items-center gap-4">
+              <div className="animate-spin h-6 w-6 border-t-2 border-cyan-400 rounded-full"></div>
+              <div className="text-[10px] font-black tracking-widest">RETRIEVING PATHWAY DATA...</div>
+            </div>
+          )}
         </div>
 
         <div className="mt-8 p-4 rounded-xl bg-white/5 border border-white/10">
           <p className="text-xs opacity-60 leading-relaxed m-0">
-            <b>Note:</b> These are the WA Points equivalents of the official <b>{level === 'COUNTY' ? 'Kent County' : 'South East Regional'} 2026 Standards</b>. 
-            Targets vary by stroke as qualifying times are not uniformly tied to a single point value. Coaches should use these as age-group specific performance goals.
+            <b>Note:</b> These are the WA Points equivalents of the official <b>{level === 'COUNTY' ? 'Kent County' : (level === 'REGIONAL' ? 'South East Regional' : 'National Top 40')} 2026 Standards</b>. 
+            {level === 'NATIONAL' ? ' These reflect the current Top 40 rankings and serve as elite benchmarks for national qualification.' : ' Targets vary by stroke as qualifying times are not uniformly tied to a single point value.'}
           </p>
         </div>
       </div>

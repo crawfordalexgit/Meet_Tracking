@@ -3,12 +3,12 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'next/router';
 
-export default function Settings({ session }) {
+export default function Settings({ session, scmApiKey }) {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   
-  const [scmKey, setScmKey] = useState('');
+  const [scmKey, setScmKey] = useState(scmApiKey || '');
   const [syncStatus, setSyncStatus] = useState(null);
   const [swimmingYear, setSwimmingYear] = useState('2025/2026');
   const [scrapeStatus, setScrapeStatus] = useState(null);
@@ -22,6 +22,10 @@ export default function Settings({ session }) {
   const [joinDateSyncStatus, setJoinDateSyncStatus] = useState(null);
   const [joinDateSyncProgress, setJoinDateSyncProgress] = useState(0);
   const [isJoinDateSyncing, setIsJoinDateSyncing] = useState(false);
+
+  const [rankingsScrapeStatus, setRankingsScrapeStatus] = useState(null);
+  const [rankingsScrapeProgress, setRankingsScrapeProgress] = useState(0);
+  const [isRankingsScraping, setIsRankingsScraping] = useState(false);
 
   const [coaches, setCoaches] = useState([]);
   const [squads, setSquads] = useState([]);
@@ -47,6 +51,10 @@ export default function Settings({ session }) {
   const [sessionSyncProgress, setSessionSyncProgress] = useState(0);
   const [isSessionSyncing, setIsSessionSyncing] = useState(false);
   const [editingCriteriaSquad, setEditingCriteriaSquad] = useState(null);
+  const [isDetectingGaps, setIsDetectingGaps] = useState(false);
+  const [gapStatus, setGapStatus] = useState(null);
+  const [isReconcilingPbs, setIsReconcilingPbs] = useState(false);
+  const [pbSyncStatus, setPbSyncStatus] = useState(null);
 
 
   useEffect(() => {
@@ -137,11 +145,22 @@ export default function Settings({ session }) {
   };
 
   const checkAdmin = async () => {
-    const { data } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
-    if (['admin', 'headcoach'].includes(data?.role)) {
-      setIsAuthorized(true);
-      loadData();
-    } else {
+    if (!session?.user?.id) {
+      router.push('/');
+      setLoading(false);
+      return;
+    }
+    
+    try {
+      const { data } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+      if (['admin', 'headcoach'].includes(data?.role)) {
+        setIsAuthorized(true);
+        loadData();
+      } else {
+        router.push('/');
+      }
+    } catch (e) {
+      console.error('checkAdmin error:', e);
       router.push('/');
     }
     setLoading(false);
@@ -217,6 +236,53 @@ export default function Settings({ session }) {
     } catch (e) { setDebugLog(`ERROR: ${e.message}`); }
   };
 
+  const handleDetectMissingSessions = async () => {
+    setIsDetectingGaps(true);
+    setGapStatus({ type: 'info', text: 'Scanning the last 365 days for cancelled sessions...' });
+    try {
+      const res = await fetch('/api/detect-missing-sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to detect missing sessions');
+      }
+      setGapStatus({
+        type: 'success',
+        text: `Scan complete! Found and created ${data.count} new cancellations: ${data.dates.join(', ') || 'none'}`
+      });
+      loadData();
+    } catch (err) {
+      setGapStatus({ type: 'error', text: err.message });
+    } finally {
+      setIsDetectingGaps(false);
+    }
+  };
+
+  const handleReconcilePbs = async () => {
+    setIsReconcilingPbs(true);
+    setPbSyncStatus({ type: 'info', text: 'Reconciling historical PBs...' });
+    try {
+      const res = await fetch('/api/reconcile-pbs', {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to reconcile PBs');
+      }
+      setPbSyncStatus({
+        type: 'success',
+        text: `Successfully reconciled ${data.updatedCount} results!`
+      });
+      loadData();
+    } catch (err) {
+      setPbSyncStatus({ type: 'error', text: err.message });
+    } finally {
+      setIsReconcilingPbs(false);
+    }
+  };
+
   const handleSyncScm = async (e) => {
     e.preventDefault();
     setSyncStatus({ type: 'info', text: 'Syncing (Phase 1: Scraping SCM)...' });
@@ -232,7 +298,7 @@ export default function Settings({ session }) {
           'Content-Type': 'application/json',
           'Connection': 'keep-alive'
         }, 
-        body: JSON.stringify({ scmApiKey: scmKey, returnOnly: true }),
+        body: JSON.stringify({ scmApiKey: scmKey }),
         signal: controller.signal
       });
       
@@ -250,37 +316,8 @@ export default function Settings({ session }) {
 
       if (!res.ok) throw new Error(data.error || 'Sync failed');
 
-      if (data.data) {
-        console.log('Data received from server, starting browser-side upsert...', data.data);
-        setSyncStatus({ type: 'info', text: 'Phase 2: Saving to Database...' });
-        
-        // 1. Sync Squads
-        if (data.data.squads?.length) {
-          console.log(`Upserting ${data.data.squads.length} squads...`);
-          const { error: sqErr } = await supabase.from('squads').upsert(data.data.squads, { onConflict: 'name' });
-          if (sqErr) throw sqErr;
-        }
-
-        // 2. Sync Sessions
-        if (data.data.sessions?.length) {
-          console.log(`Upserting ${data.data.sessions.length} sessions...`);
-          const { error: sessErr } = await supabase.from('sessions').upsert(data.data.sessions, { onConflict: 'scm_guid' });
-          if (sessErr) throw sessErr;
-        }
-
-        // 3. Sync Swimmers
-        if (data.data.swimmers?.length) {
-          console.log(`Upserting ${data.data.swimmers.length} swimmers...`);
-          const { error: swErr } = await supabase.from('swimmers').upsert(data.data.swimmers, { onConflict: 'member_id' });
-          if (swErr) throw swErr;
-        }
-
-        setSyncStatus({ type: 'success', text: 'SCM Sync Complete! Data saved via browser bridge.' });
-        loadData();
-      } else {
-        setSyncStatus({ type: 'success', text: data.message });
-        loadData();
-      }
+      setSyncStatus({ type: 'success', text: data.message });
+      loadData();
     } catch (err) {
       console.error('Hybrid Sync Error Details:', err);
       const errorMsg = err.name === 'AbortError' ? 'Sync timed out (2 minutes). The club might be too large for a single pass.' : err.message;
@@ -358,6 +395,52 @@ export default function Settings({ session }) {
           } catch (e) {}
         }
       }
+    }
+  };
+
+  const handleRankingsScrape = async (e) => {
+    if (e) e.preventDefault();
+    setIsRankingsScraping(true);
+    setRankingsScrapeProgress(0);
+    setRankingsScrapeStatus({ type: 'info', text: 'Starting Rankings Scrape...' });
+
+    try {
+      const response = await fetch('/api/scrape-rankings', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.trim().startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.trim().substring(6));
+              setRankingsScrapeStatus({ type: data.error ? 'error' : 'info', text: data.message });
+              setRankingsScrapeProgress(data.progress);
+              if (data.isDone) {
+                setIsRankingsScraping(false);
+                setRankingsScrapeStatus({ type: data.error ? 'error' : 'success', text: data.message });
+              }
+            } catch (e) {
+              console.error('Error parsing SSE:', e);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setRankingsScrapeStatus({ type: 'error', text: err.message });
+      setIsRankingsScraping(false);
     }
   };
 
@@ -592,6 +675,37 @@ export default function Settings({ session }) {
                     <button type="submit" className="btn btn-primary" disabled={isScraping}>{isScraping ? 'Scraping...' : 'Start Scrape'}</button>
                   </form>
                   {isScraping && <div className="progress-bg mt-4"><div className="progress-fill" style={{ width: `${scrapeProgress}%` }}></div></div>}
+                </div>
+
+                <div className="card">
+                  <h3>Rankings Scraper</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Fetch Kent & SE Region rankings for Tonbridge swimmers.</p>
+                  {rankingsScrapeStatus && <div className={`alert ${rankingsScrapeStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{rankingsScrapeStatus.text}</div>}
+                  <button 
+                    onClick={handleRankingsScrape} 
+                    className="btn btn-primary w-full" 
+                    disabled={isRankingsScraping}
+                  >
+                    {isRankingsScraping ? 'Scraping...' : 'Start Rankings Scrape'}
+                  </button>
+                  {isRankingsScraping && (
+                    <div className="progress-bg mt-4">
+                      <div className="progress-fill" style={{ width: `${rankingsScrapeProgress}%` }}></div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="card">
+                  <h3>Historical PBs Reconciler</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Mathematically reconstructs PB history from all logged results.</p>
+                  {pbSyncStatus && <div className={`alert ${pbSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{pbSyncStatus.text}</div>}
+                  <button 
+                    onClick={handleReconcilePbs} 
+                    className="btn-premium-action w-full" 
+                    disabled={isReconcilingPbs}
+                  >
+                    {isReconcilingPbs ? 'Reconciling...' : 'Reconcile Historical PBs'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -928,6 +1042,34 @@ export default function Settings({ session }) {
                   <h1>Exemptions & Shutdowns</h1>
                   <p style={{ color: 'var(--text-secondary)' }}>Manage athlete discretion and club-wide training breaks.</p>
                 </div>
+              </div>
+
+              <div className="card mb-8" style={{ background: 'linear-gradient(135deg, rgba(239,68,68,0.05) 0%, rgba(239,68,68,0.02) 100%)', border: '1px solid rgba(239,68,68,0.15)', padding: '1.5rem' }}>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>⚡</span> Auto-Detect Missing Sessions
+                    </h3>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '8px 0 0 0', lineHeight: 1.5 }}>
+                      Scans the last 365 days for dates where training was scheduled but zero attendance was recorded, automatically adding them as 'credit' exemptions so athletes aren't penalized for cancelled sessions.
+                    </p>
+                  </div>
+                  <div>
+                    <button 
+                      onClick={handleDetectMissingSessions} 
+                      className="btn btn-primary" 
+                      style={{ whiteSpace: 'nowrap', minWidth: '220px' }}
+                      disabled={isDetectingGaps}
+                    >
+                      {isDetectingGaps ? 'Detecting Gaps...' : 'Auto-Detect Missing Sessions'}
+                    </button>
+                  </div>
+                </div>
+                {gapStatus && (
+                  <div className={`alert mt-4 ${gapStatus.type === 'error' ? 'alert-error' : gapStatus.type === 'info' ? 'alert-info' : 'alert-success'}`}>
+                    {gapStatus.text}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -1349,4 +1491,12 @@ export default function Settings({ session }) {
       `}</style>
     </Layout>
   );
+}
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      scmApiKey: process.env.SCM_API_KEY || null
+    }
+  };
 }

@@ -5,6 +5,8 @@ import { supabase } from '../../lib/supabase';
 import Layout from '../../components/Layout';
 import PremiumOrb from '../../components/PremiumOrb';
 import TalentIntelligenceCard from '../../components/TalentIntelligenceCard';
+import AggregateBlockTracker from '../../components/AggregateBlockTracker';
+import SquadQualificationPredictor from '../../components/SquadQualificationPredictor';
 import { calculateReliability, calculateSquadHealth, generateSquadNarrative } from '../../lib/analytics-utils';
 import { getKentBenchmark } from '../../lib/qualifying-times';
 import { 
@@ -76,6 +78,7 @@ export default function SquadDetail({
   const [sessions, setSessions] = useState(initialSessions);
   const [results, setResults] = useState(initialResults);
   const [exemptions, setExemptions] = useState(initialExemptions);
+  const [meets, setMeets] = useState(initialMeets);
   const [periodDays, setPeriodDays] = useState(365);
   const [chartData, setChartData] = useState([]);
   const [ageData, setAgeData] = useState([]);
@@ -84,6 +87,7 @@ export default function SquadDetail({
   const [healthData, setHealthData] = useState(null);
   const [narrative, setNarrative] = useState([]);
   const [isRosterOnly, setIsRosterOnly] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const [sortConfig, setSortConfig] = useState({ key: 'trainingPct', direction: 'desc' });
   const [error, setError] = useState(initialError);
 
@@ -149,13 +153,31 @@ export default function SquadDetail({
       
       const swimmerIds = rawSwimmers.map(s => s.id);
       
-      const [attRes, resRes, memRes, allSwimmers, allResults] = await Promise.all([
+      const [attRes, resRes, memRes, allSwimmers, allResults, rankingsRes] = await Promise.all([
         fetchAll('training_attendance', '*', q => q.in('swimmer_id', swimmerIds)),
         fetchAll('results', '*, meets(*)', q => q.in('swimmer_id', swimmerIds)),
         fetch('/api/memberships').then(r => r.json()),
         fetchAll('swimmers', '*'),
-        fetchAll('results', '*', q => q.gte('date', startStr))
+        fetchAll('results', '*', q => q.gte('date', startStr)),
+        fetchAll('rankings', '*', q => q.in('swimmer_id', swimmerIds).order('snapshot_date', { ascending: false }))
       ]);
+
+      // Rankings Achievement Summary (Trend Tracking)
+      const uniqueSnapshots = [...new Set((rankingsRes || []).map(r => r.snapshot_date))].sort((a,b) => new Date(b) - new Date(a));
+      const latestRankSnapshot = uniqueSnapshots[0] || null;
+      const priorRankSnapshot = uniqueSnapshots[1] || null;
+      
+      const currentRankings = (rankingsRes || []).filter(r => r.snapshot_date === latestRankSnapshot);
+      const priorRankings = priorRankSnapshot ? (rankingsRes || []).filter(r => r.snapshot_date === priorRankSnapshot) : [];
+
+      const achievementSummary = {
+        national_count: new Set(currentRankings.filter(r => r.district === 'England' && r.rank <= 40).map(r => r.swimmer_id)).size,
+        regional_count: new Set(currentRankings.filter(r => r.district === 'South East' && r.rank <= 30).map(r => r.swimmer_id)).size,
+        county_count: new Set(currentRankings.filter(r => r.district === 'Kent' && r.rank <= 10).map(r => r.swimmer_id)).size,
+        prior_national: new Set(priorRankings.filter(r => r.district === 'England' && r.rank <= 40).map(r => r.swimmer_id)).size,
+        prior_regional: new Set(priorRankings.filter(r => r.district === 'South East' && r.rank <= 30).map(r => r.swimmer_id)).size,
+        prior_county: new Set(priorRankings.filter(r => r.district === 'Kent' && r.rank <= 10).map(r => r.swimmer_id)).size
+      };
 
       // Robust Deduplication to prevent double-counting
       const uniqueAttMap = new Map();
@@ -170,6 +192,7 @@ export default function SquadDetail({
       
       setAttendance(rawAttendance);
       setResults(rawResults);
+      setMeets(meetsData);
 
       const attendanceBySwimmer = {};
       rawAttendance.forEach(att => {
@@ -181,6 +204,12 @@ export default function SquadDetail({
       rawResults.forEach(res => {
         if (!resultsBySwimmer[res.swimmer_id]) resultsBySwimmer[res.swimmer_id] = [];
         resultsBySwimmer[res.swimmer_id].push(res);
+      });
+
+      const rankingsBySwimmer = {};
+      currentRankings.forEach(rank => {
+        if (!rankingsBySwimmer[rank.swimmer_id]) rankingsBySwimmer[rank.swimmer_id] = [];
+        rankingsBySwimmer[rank.swimmer_id].push(rank);
       });
 
       const squadSwimmers = rawSwimmers.filter(s => s.is_active !== false && !s.is_exempt);
@@ -222,8 +251,6 @@ export default function SquadDetail({
           if (s.date_of_birth) {
             const dob = new Date(s.date_of_birth);
             calcAge = now.getFullYear() - dob.getFullYear();
-            const mDiff = now.getMonth() - dob.getMonth();
-            if (mDiff < 0 || (mDiff === 0 && now.getDate() < dob.getDate())) calcAge--;
           } else if (s.year_of_birth) {
             calcAge = now.getFullYear() - s.year_of_birth;
           } else {
@@ -255,7 +282,8 @@ export default function SquadDetail({
           trainingPct: rel.percentage,
           volumePct: rel.volumePct,
           totalHours: Math.round(rel.totalHours),
-          isMet: rel.complianceRate >= 100 && (rel.percentage >= (squadData.target_training_percent || 75) || rel.volumePct >= (squadData.target_training_percent || 75))
+          isMet: rel.complianceRate >= 100 && (rel.percentage >= (squadData.target_training_percent || 75) || rel.volumePct >= (squadData.target_training_percent || 75)),
+          rankings: rankingsBySwimmer[s.id] || []
         };
       });
 
@@ -293,7 +321,8 @@ export default function SquadDetail({
         targetMeets: squadData.target_meets,
         avgAge,
         gender: squadSwimmers[0]?.gender || 'M',
-        strokeData
+        strokeData,
+        achievementSummary
       };
 
       const healthObj = { ...statsObj, avgTraining: statsObj.avgConsistency };
@@ -310,8 +339,6 @@ export default function SquadDetail({
         if (s.date_of_birth) {
           const dob = new Date(s.date_of_birth);
           calcAge = now.getFullYear() - dob.getFullYear();
-          const mDiff = now.getMonth() - dob.getMonth();
-          if (mDiff < 0 || (mDiff === 0 && now.getDate() < dob.getDate())) calcAge--;
         } else {
           calcAge = now.getFullYear() - s.year_of_birth;
         }
@@ -394,7 +421,7 @@ export default function SquadDetail({
     }, 500);
   };
 
-  if (loading && !squad) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', opacity: 0.5 }}>Loading Squad Analytics...</div></Layout>;
+  if (loading && !squad) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', opacity: 0.9 }}>Loading Squad Analytics...</div></Layout>;
   if (error) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', color: 'var(--accent-rose)' }}>Error loading squad: {error}</div></Layout>;
   if (!squad) return <Layout session={session}><div>Squad not found.</div></Layout>;
 
@@ -410,7 +437,7 @@ export default function SquadDetail({
             .roster-only-mode { padding: 0 !important; margin: 0 !important; }
             .roster-cover-page { display: flex !important; height: 100vh; flex-direction: column; justify-content: center; align-items: center; text-align: center; page-break-after: always; break-after: page; background: #050b10; color: white !important; }
             .glass-card { border: 1px solid rgba(255,255,255,0.1) !important; background: rgba(10,10,20,0.8) !important; color: white !important; page-break-inside: avoid; }
-            .stats-table-glass th { color: rgba(255,255,255,0.4) !important; }
+            .stats-table-glass th { color: rgba(255,255,255,0.8) !important; }
             .stats-table-glass td { color: white !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
           }
         `}</style>
@@ -426,8 +453,8 @@ export default function SquadDetail({
                 <h1 style={{ fontSize: '7rem', fontWeight: 900, margin: 0, lineHeight: 1, letterSpacing: '-0.04em', textTransform: 'uppercase' }}>{squad.name}</h1>
                 <div style={{ height: '12px', width: '160px', background: 'var(--accent-cyan)', margin: '5rem 0' }}></div>
                 <div style={{ fontSize: '1.8rem', fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Performance Period: {periodDays} Days</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 500, opacity: 0.5, marginTop: '1.5rem' }}>Analytical Engine: CoachesEye DNA v2.0</div>
-                <div style={{ fontSize: '1.2rem', fontWeight: 500, opacity: 0.3, marginTop: '4rem' }}>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
+                <div style={{ fontSize: '1.4rem', fontWeight: 500, opacity: 0.9, marginTop: '1.5rem' }}>Analytical Engine: CoachesEye DNA v2.0</div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 500, opacity: 0.8, marginTop: '4rem' }}>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</div>
              </div>
 
              {/* PAGE 2: SQUAD PERFORMANCE CRITERIA */}
@@ -437,69 +464,69 @@ export default function SquadDetail({
                 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '3rem' }}>
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Training Consistency (Reliability)</div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Training Consistency (Reliability)</div>
                       <div style={{ display: 'flex', gap: '2rem', alignItems: 'end', marginBottom: '1.5rem' }}>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>{squad.target_training_percent || 75}%</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>TARGET</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>TARGET</div>
                          </div>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: stats.avgConsistency >= (squad.target_training_percent || 75) ? '#10b981' : '#f43f5e' }}>{stats.avgConsistency}%</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>ACTUAL SQUAD AVG</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>ACTUAL SQUAD AVG</div>
                          </div>
                       </div>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6, margin: 0 }}>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6, margin: 0 }}>
                          Attendance baseline required for skill consolidation. The current squad average reflects the overall commitment to the training program.
                       </p>
                    </div>
 
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Session Intensity (Volume)</div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Session Intensity (Volume)</div>
                       <div style={{ display: 'flex', gap: '2rem', alignItems: 'end', marginBottom: '1.5rem' }}>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>100%</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>TARGET</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>TARGET</div>
                          </div>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: stats.avgVolume >= 75 ? 'var(--accent-cyan)' : '#f43f5e' }}>{stats.avgVolume}%</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>ACTUAL SQUAD AVG</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>ACTUAL SQUAD AVG</div>
                          </div>
                       </div>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6, margin: 0 }}>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6, margin: 0 }}>
                          Ratio of actual hours trained vs target. This drives the aerobic foundation necessary for championship performance.
                       </p>
                    </div>
 
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Competition Engagement</div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Competition Engagement</div>
                       <div style={{ display: 'flex', gap: '2rem', alignItems: 'end', marginBottom: '1.5rem' }}>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>{squad.target_open_meets || 5}</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>TARGET ATTENDANCE</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>TARGET ATTENDANCE</div>
                          </div>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: stats.complianceRate >= 100 ? '#10b981' : '#f59e0b' }}>{stats.complianceRate}%</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>COMPLIANCE RATE</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>COMPLIANCE RATE</div>
                          </div>
                       </div>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6, margin: 0 }}>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6, margin: 0 }}>
                          Percentage of athletes meeting the open meet frequency targets. High compliance correlates with technical maturity under pressure.
                       </p>
                    </div>
 
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '32px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Squad Technical Standard</div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Squad Technical Standard</div>
                       <div style={{ display: 'flex', gap: '2rem', alignItems: 'end', marginBottom: '1.5rem' }}>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>{squad.county_standard || 350}</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>COUNTY TARGET</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>COUNTY TARGET</div>
                          </div>
                          <div>
                             <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{stats.peakStandard}</div>
-                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.3 }}>SQUAD PEAK AVG</div>
+                            <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>SQUAD PEAK AVG</div>
                          </div>
                       </div>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6, margin: 0 }}>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6, margin: 0 }}>
                          Current peak World Aquatics points average. This is the primary indicator of the squad's competitive ranking.
                       </p>
                    </div>
@@ -518,7 +545,7 @@ export default function SquadDetail({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '2rem' }}>
                    <h2 style={{ fontSize: '2.5rem', fontWeight: 900, margin: 0, textTransform: 'uppercase' }}>Athlete Performance Roster</h2>
                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.4 }}>{squad.name}</div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.8 }}>{squad.name}</div>
                       <div style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>COACHESEYE AUDIT</div>
                    </div>
                 </div>
@@ -526,13 +553,13 @@ export default function SquadDetail({
                 <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
                    <thead>
                       <tr style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase' }}>Athlete</th>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase' }}>Training Consistency</th>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase' }}>Volume</th>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase' }}>Meet Attendance</th>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase' }}>Velocity</th>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase' }}>Peak WA</th>
-                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', textAlign: 'right' }}>Status</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Athlete</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Training Consistency</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Volume</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Meet Attendance</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Velocity</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Peak WA</th>
+                         <th style={{ padding: '1.5rem 1rem', fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', textAlign: 'right' }}>Status</th>
                       </tr>
                    </thead>
                    <tbody>
@@ -540,10 +567,10 @@ export default function SquadDetail({
                          <tr key={sw.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', pageBreakInside: 'avoid' }}>
                             <td style={{ padding: '1.5rem 1rem' }}>
                                <div style={{ fontSize: '1.3rem', fontWeight: 900, textTransform: 'uppercase' }}>{sw.full_name}</div>
-                               <div style={{ fontSize: '0.7rem', opacity: 0.4 }}>Member ID: {sw.member_id}</div>
+                               <div style={{ fontSize: '0.7rem', opacity: 0.8 }}>Member ID: {sw.member_id}</div>
                             </td>
                             <td style={{ padding: '1.5rem 1rem', fontSize: '1.2rem', fontWeight: 900, color: sw.trainingPct >= 75 ? '#10b981' : '#fff' }}>{sw.trainingPct}%</td>
-                            <td style={{ padding: '1.5rem 1rem', fontSize: '1.2rem', fontWeight: 900 }}>{sw.volumePct}% <span style={{ fontSize: '0.7rem', opacity: 0.3, fontWeight: 500 }}>({sw.totalHours}h)</span></td>
+                            <td style={{ padding: '1.5rem 1rem', fontSize: '1.2rem', fontWeight: 900 }}>{sw.volumePct}% <span style={{ fontSize: '0.7rem', opacity: 0.8, fontWeight: 500 }}>({sw.totalHours}h)</span></td>
                             <td style={{ padding: '1.5rem 1rem', fontSize: '1.2rem', fontWeight: 900, color: sw.meetCount >= sw.targetMeets ? '#10b981' : (sw.meetCount >= sw.targetMeets - 1 ? '#f59e0b' : '#f43f5e') }}>{sw.meetCount} / {sw.targetMeets}</td>
                             <td style={{ padding: '1.5rem 1rem', fontSize: '1.2rem', fontWeight: 900, color: sw.velocity >= 0 ? '#10b981' : '#f43f5e' }}>{sw.velocity > 0 ? '+' : ''}{sw.velocity}</td>
                             <td style={{ padding: '1.5rem 1rem', fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{sw.peakWA}</td>
@@ -555,7 +582,7 @@ export default function SquadDetail({
                                   borderRadius: '4px', 
                                   display: 'inline-block',
                                   background: sw.is_exempt ? 'rgba(255,255,255,0.05)' : (sw.isMet ? 'rgba(16,185,129,0.1)' : (sw.meetCount >= sw.targetMeets - 1 ? 'rgba(245,158,11,0.1)' : 'rgba(244,63,94,0.1)')), 
-                                  color: sw.is_exempt ? 'rgba(255,255,255,0.4)' : (sw.isMet ? '#10b981' : (sw.meetCount >= sw.targetMeets - 1 ? '#f59e0b' : '#f43f5e')),
+                                  color: sw.is_exempt ? 'rgba(255,255,255,0.8)' : (sw.isMet ? '#10b981' : (sw.meetCount >= sw.targetMeets - 1 ? '#f59e0b' : '#f43f5e')),
                                   border: `1px solid ${sw.is_exempt ? 'rgba(255,255,255,0.1)' : (sw.isMet ? '#10b981' : (sw.meetCount >= sw.targetMeets - 1 ? '#f59e0b' : '#f43f5e'))}`
                                 }}>
                                   {sw.is_exempt ? 'EXEMPT' : (sw.isMet ? 'COMPLIANT' : (sw.meetCount >= sw.targetMeets - 1 ? 'NEARLY' : 'NOT MET'))}
@@ -575,19 +602,19 @@ export default function SquadDetail({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4rem' }}>
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.05)' }}>
                       <h4 style={{ color: 'var(--accent-cyan)', fontWeight: 900, textTransform: 'uppercase', fontSize: '1.1rem', marginBottom: '1.5rem' }}>Training Consistency</h4>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6 }}>Percentage of expected sessions attended based on the squad's weekly target. This metric represents the psychological and physical commitment to the training program.</p>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6 }}>Percentage of expected sessions attended based on the squad's weekly target. This metric represents the psychological and physical commitment to the training program.</p>
                    </div>
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.05)' }}>
                       <h4 style={{ color: 'var(--accent-amber)', fontWeight: 900, textTransform: 'uppercase', fontSize: '1.1rem', marginBottom: '1.5rem' }}>Volume % (Banked Hours)</h4>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6 }}>Ratio of actual hours trained vs the squad's target hours. High volume correlates with aerobic threshold stability and technical consolidation.</p>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6 }}>Ratio of actual hours trained vs the squad's target hours. High volume correlates with aerobic threshold stability and technical consolidation.</p>
                    </div>
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.05)' }}>
                       <h4 style={{ color: 'var(--accent-emerald)', fontWeight: 900, textTransform: 'uppercase', fontSize: '1.1rem', marginBottom: '1.5rem' }}>Squad Velocity</h4>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6 }}>The average change in WA Points standard over the selected period. A positive velocity indicates technical and physiological progression.</p>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6 }}>The average change in WA Points standard over the selected period. A positive velocity indicates technical and physiological progression.</p>
                    </div>
                    <div style={{ padding: '3rem', background: 'rgba(255,255,255,0.02)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.05)' }}>
                       <h4 style={{ color: 'var(--accent-rose)', fontWeight: 900, textTransform: 'uppercase', fontSize: '1.1rem', marginBottom: '1.5rem' }}>Compliance Status</h4>
-                      <p style={{ fontSize: '1.1rem', opacity: 0.6, lineHeight: 1.6 }}>A binary status based on meeting both training consistency thresholds AND open meet frequency targets set by the coaching staff.</p>
+                      <p style={{ fontSize: '1.1rem', opacity: 0.9, lineHeight: 1.6 }}>A binary status based on meeting both training consistency thresholds AND open meet frequency targets set by the coaching staff.</p>
                    </div>
                 </div>
 
@@ -611,9 +638,9 @@ export default function SquadDetail({
                   </div>
                 </div>
                 <div className="swimmer-meta">
-                  <span className="meta-item" style={{ fontWeight: 700, opacity: 0.6 }}>{stats.athletes} Athletes Registered</span>
-                  <span className="meta-item" style={{ margin: '0 10px', opacity: 0.3 }}>•</span>
-                  <span className="meta-item" style={{ fontWeight: 700, opacity: 0.6 }}>Season 2025/26 Analytics</span>
+                  <span className="meta-item" style={{ fontWeight: 700, opacity: 0.9 }}>{stats.athletes} Athletes Registered</span>
+                  <span className="meta-item" style={{ margin: '0 10px', opacity: 0.8 }}>•</span>
+                  <span className="meta-item" style={{ fontWeight: 700, opacity: 0.9 }}>Season 2025/26 Analytics</span>
                 </div>
               </div>
               <div className="flex gap-4 items-center">
@@ -623,7 +650,26 @@ export default function SquadDetail({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
+            <div className="profile-tabs-container no-print" style={{ display: 'flex', gap: '12px', marginBottom: '2rem', padding: '6px', borderRadius: '16px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.05)', width: 'fit-content' }}>
+              <button 
+                className={`profile-tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
+                style={activeTab === 'overview' ? { background: 'var(--accent-cyan)', color: '#000', fontWeight: 950, padding: '10px 24px', borderRadius: '12px', fontSize: '0.7rem', border: 'none', cursor: 'pointer' } : { color: 'rgba(255, 255, 255, 0.5)', padding: '10px 24px', borderRadius: '12px', fontSize: '0.7rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                onClick={() => setActiveTab('overview')}
+              >
+                📊 OVERVIEW
+              </button>
+              <button 
+                className={`profile-tab-btn ${activeTab === 'predictor' ? 'active' : ''}`}
+                style={activeTab === 'predictor' ? { background: 'var(--accent-cyan)', color: '#000', fontWeight: 950, padding: '10px 24px', borderRadius: '12px', fontSize: '0.7rem', border: 'none', cursor: 'pointer' } : { color: 'rgba(255, 255, 255, 0.5)', padding: '10px 24px', borderRadius: '12px', fontSize: '0.7rem', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                onClick={() => setActiveTab('predictor')}
+              >
+                🎯 QT Predictor
+              </button>
+            </div>
+
+            {activeTab === 'overview' && (
+              <>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
                <div className="glass-card lg:col-span-2" style={{ borderLeft: '4px solid var(--accent-cyan)', padding: '2rem 2.5rem' }}>
                   <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: 20, letterSpacing: '0.2em', opacity: 0.8, fontWeight: 900, textTransform: 'uppercase' }}>Squad Performance Story</div>
                   <div className="space-y-6">
@@ -642,7 +688,7 @@ export default function SquadDetail({
                </div>
 
                <div className="glass-card" style={{ padding: '2rem' }}>
-                  <div className="kpi-label" style={{ marginBottom: 32, fontWeight: 900, textTransform: 'uppercase', fontSize: '0.7rem', opacity: 0.5 }}>Squad Health & Compliance</div>
+                  <div className="kpi-label" style={{ marginBottom: 32, fontWeight: 900, textTransform: 'uppercase', fontSize: '0.7rem', opacity: 0.9 }}>Squad Health & Compliance</div>
                   
                   <div className="flex justify-center mb-8">
                      <PremiumOrb value={healthData?.total || 0} label="Overall Health Score" size={130} />
@@ -653,6 +699,41 @@ export default function SquadDetail({
                      <PremiumOrb value={stats.avgVolume} label="Volume" size={80} />
                      <PremiumOrb value={stats.complianceRate} label="Meets" size={80} />
                      <PremiumOrb value={stats.peakStandard} label="Avg WA Pts" size={80} color="amber" unit="" />
+                  </div>
+
+                  <div className="mt-8 pt-6 border-t border-white/5">
+                    <div className="kpi-label" style={{ marginBottom: 24, fontWeight: 900, textTransform: 'uppercase', fontSize: '0.65rem', opacity: 0.9 }}>Achievement DNA</div>
+                    <div className="flex justify-between items-center px-2">
+                      {[
+                        { label: 'Nationals', value: stats.achievementSummary?.national_count || 0, prior: stats.achievementSummary?.prior_national || 0, color: 'amber', top: 'Top 40' },
+                        { label: 'Regionals', value: stats.achievementSummary?.regional_count || 0, prior: stats.achievementSummary?.prior_regional || 0, color: 'cyan', top: 'Top 30' },
+                        { label: 'County', value: stats.achievementSummary?.county_count || 0, prior: stats.achievementSummary?.prior_county || 0, color: 'white', top: 'Top 10' }
+                      ].map((orb, i) => {
+                        const delta = orb.value - orb.prior;
+                        return (
+                          <div key={i} className="flex flex-col items-center" style={{ position: 'relative' }}>
+                            <div style={{ fontSize: '0.5rem', fontWeight: 900, opacity: 0.7, marginBottom: 8, textAlign: 'center', whiteSpace: 'nowrap' }}>{orb.label}</div>
+                            <PremiumOrb value={orb.value} label="" size={60} color={orb.color} unit="" />
+                            {delta !== 0 && (
+                              <div style={{ 
+                                position: 'absolute', 
+                                bottom: '-10px', 
+                                fontSize: '0.55rem', 
+                                fontWeight: 900,
+                                color: delta > 0 ? 'var(--accent-cyan)' : '#f87171',
+                                background: 'rgba(0,0,0,0.6)',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                border: `1px solid ${delta > 0 ? 'rgba(0, 212, 255, 0.3)' : 'rgba(248, 113, 113, 0.3)'}`,
+                                zIndex: 10
+                              }}>
+                                {delta > 0 ? `+${delta}` : delta}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div className="mt-8 pt-6 border-t border-white/5 space-y-4">
@@ -682,17 +763,28 @@ export default function SquadDetail({
                />
             </div>
 
+            <div className="mb-16">
+               <AggregateBlockTracker 
+                 title={`${squad.name} Macro-Cycle ROI`}
+                 meets={meets}
+                 swimmers={swimmers}
+                 results={results}
+                 attendance={attendance}
+                 sessions={sessions}
+               />
+            </div>
+
             <div className="grid lg:grid-cols-2 gap-8 mb-16">
                <div className="glass-card" style={{ padding: '2rem' }}>
                   <div className="flex justify-between items-start mb-6">
                     <div>
-                      <div className="kpi-label" style={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '0.7rem', opacity: 0.5 }}>Squad Average Points Trend</div>
-                      <div style={{ fontSize: '0.6rem', opacity: 0.4, fontStyle: 'italic', marginTop: 4 }}>
+                      <div className="kpi-label" style={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '0.7rem', opacity: 0.9 }}>Squad Average Points Trend</div>
+                      <div style={{ fontSize: '0.6rem', opacity: 0.8, fontStyle: 'italic', marginTop: 4 }}>
                          Note: Regional/County benchmarks are averaged based on squad avg age ({stats.avgAge}).
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                       <div style={{ fontSize: '0.55rem', opacity: 0.4, fontWeight: 900 }}>SQUAD VELOCITY</div>
+                       <div style={{ fontSize: '0.55rem', opacity: 0.8, fontWeight: 900 }}>SQUAD VELOCITY</div>
                        <div style={{ fontSize: '1.2rem', fontWeight: 900, color: stats.avgVelocity >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>{stats.avgVelocity > 0 ? '+' : ''}{stats.avgVelocity}</div>
                     </div>
                   </div>
@@ -751,8 +843,8 @@ export default function SquadDetail({
                <div className="glass-card" style={{ padding: '2rem' }}>
                   <div className="flex justify-between items-start mb-6">
                     <div>
-                      <div className="kpi-label" style={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '0.7rem', opacity: 0.5 }}>Squad vs Club Performance by Age</div>
-                      <div style={{ fontSize: '0.6rem', opacity: 0.4, fontStyle: 'italic', marginTop: 4 }}>
+                      <div className="kpi-label" style={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '0.7rem', opacity: 0.9 }}>Squad vs Club Performance by Age</div>
+                      <div style={{ fontSize: '0.6rem', opacity: 0.8, fontStyle: 'italic', marginTop: 4 }}>
                          Direct comparison across all LTAD age bands.
                       </div>
                     </div>
@@ -787,14 +879,14 @@ export default function SquadDetail({
               <table className="w-full text-left border-collapse stats-table-glass">
                 <thead>
                   <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Athlete</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Compliance</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Consistency</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Volume</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Meet Attendance</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Races</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase' }}>Velocity</th>
-                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.3, textTransform: 'uppercase', textAlign: 'right' }}>Status</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Athlete</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Compliance</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Consistency</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Volume</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Meet Attendance</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Races</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase' }}>Velocity</th>
+                    <th style={{ padding: '1.5rem', fontSize: '0.7rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', textAlign: 'right' }}>Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -812,7 +904,7 @@ export default function SquadDetail({
                       <td style={{ padding: '1.5rem', fontWeight: 900, color: sw.trainingPct >= 75 ? 'var(--accent-emerald)' : '#fff' }}>{sw.trainingPct}%</td>
                       <td style={{ padding: '1.5rem' }}>
                         <div style={{ fontWeight: 900 }}>{sw.volumePct}%</div>
-                        <div style={{ fontSize: '0.65rem', opacity: 0.5 }}>{sw.totalHours}h banked</div>
+                        <div style={{ fontSize: '0.65rem', opacity: 0.9 }}>{sw.totalHours}h banked</div>
                       </td>
                       <td style={{ padding: '1.5rem', fontWeight: 900, color: sw.meetCount >= sw.targetMeets ? 'var(--accent-emerald)' : (sw.meetCount >= sw.targetMeets - 1 ? 'var(--accent-amber)' : 'var(--accent-rose)') }}>
                         {sw.meetCount} / {sw.targetMeets}
@@ -831,6 +923,11 @@ export default function SquadDetail({
                 </tbody>
               </table>
             </div>
+          </>
+        )}
+        {activeTab === 'predictor' && (
+          <SquadQualificationPredictor swimmers={swimmers} results={results} squads={[squad]} />
+        )}
           </div>
         )}
       </div>

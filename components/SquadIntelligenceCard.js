@@ -71,7 +71,6 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
       </div>
     );
   }
-
   if (loading) {
     return (
       <div className="glass-card animate-fade-in no-print" style={{ padding: '4rem', textAlign: 'center' }}>
@@ -83,92 +82,75 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
   }
 
   return (
-    <div className="glass-card animate-fade-in" style={{ position: 'relative', overflow: 'visible', padding: '2.5rem' }}>
-      <div className="flex justify-between items-center mb-8">
-        <div className="flex items-center gap-4">
-          <div className="section-title">CoachesEye Insights: {type === 'club' ? 'Club' : 'Squad'} Profile</div>
+    <div className="glass-card animate-fade-in" style={{ position: 'relative', overflow: 'visible', padding: '3.5rem' }}>
+      <div className="flex justify-between items-center mb-12">
+        <div className="flex items-center gap-6">
+          <div className="section-title">COACHESEYE INTELLIGENCE LAB</div>
           {insight.flag && (
-            <div className={`status-badge ${insight.risk_level === 'high' ? 'critical' : (insight.risk_level === 'medium' ? 'attention' : 'success')}`} style={{ fontSize: '0.6rem', padding: '4px 10px' }}>
-              {insight.flag}
+            <div className={`status-badge ${insight.risk_level === 'high' ? 'critical' : (insight.risk_level === 'medium' ? 'attention' : 'success')}`} style={{ fontSize: '0.7rem', padding: '6px 14px', borderRadius: '8px' }}>
+              {insight.flag.toUpperCase()}
             </div>
           )}
         </div>
         <div className="flex items-center gap-4 no-print">
-          {history.length > 1 && (
-            <div className="flex items-center gap-2">
-              <span style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 900 }}>HISTORY</span>
-              <select 
-                className="period-selector-minimal"
-                onChange={(e) => setInsight(history[e.target.value].content)}
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', fontSize: '0.65rem', padding: '4px 8px', borderRadius: '4px' }}
-              >
-                {history.map((h, i) => (
-                  <option key={h.id} value={i}>
-                    {new Date(h.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <button className="period-btn" onClick={generateInsight} style={{ fontSize: '0.6rem' }}>✨ Refresh Audit</button>
-          <button className="period-btn" onClick={() => setInsight(null)} style={{ fontSize: '0.6rem' }}>Reset</button>
+          <button className="btn-premium-intel mini" onClick={generateInsight}>REFRESH AUDIT</button>
         </div>
       </div>
 
-      <div className="mb-10">
-        <h2 style={{ fontSize: '2.2rem', fontWeight: 900, marginBottom: '1.5rem', color: 'var(--accent-cyan)', letterSpacing: '-0.03em' }}>{insight.headline}</h2>
+      <div className="mb-14">
+        <h2 style={{ fontSize: '3.5rem', fontWeight: 950, marginBottom: '2rem', color: '#fff', letterSpacing: '-0.04em', lineHeight: 1.1 }}>{insight.headline}</h2>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-          <div className="md:col-span-2">
-             <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Group Performance Profile</h4>
-             <p style={{ fontSize: '1rem', lineHeight: '1.6', color: 'var(--text-primary)', marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 mb-12">
+          <div className="lg:col-span-2">
+             <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1.5rem', opacity: 0.5 }}>GROUP PERFORMANCE PROFILE</div>
+             <p style={{ fontSize: '1.15rem', lineHeight: '1.7', color: 'var(--text-primary)', marginBottom: '2.5rem', fontWeight: 500 }}>{insight.summary.assessment}</p>
              
-             <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Technical Review</h4>
-             <div style={{ lineHeight: '1.7', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-               {insight.analysis.split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1rem' }}>{p}</p>)}
+             <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1.5rem', opacity: 0.5 }}>TECHNICAL REVIEW</div>
+             <div style={{ lineHeight: '1.8', color: 'rgba(255,255,255,0.7)', fontSize: '1rem' }}>
+                {insight.analysis.split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1.2rem' }}>{p}</p>)}
              </div>
           </div>
 
-          <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6">
-            <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1.5rem', justifyContent: 'center' }}>Squad SWOT</h4>
-            <div style={{ spaceY: '1.5rem' }}>
-              <div className="mb-4">
-                <div style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Strengths</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.strengths}</div>
-              </div>
-              <div className="mb-4">
-                <div style={{ fontSize: '0.6rem', color: 'var(--accent-rose)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Weaknesses</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.weaknesses}</div>
-              </div>
-              <div className="mb-4">
-                <div style={{ fontSize: '0.6rem', color: 'var(--accent-cyan)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Opportunities</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.opportunities}</div>
+          <div className="bg-white/[0.03] border border-white/10 rounded-3xl p-8 backdrop-blur-md">
+            <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '2rem', justifyContent: 'center' }}>STRATEGIC SWOT</div>
+            <div className="space-y-8">
+              <div>
+                <div style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Strengths</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.strengths}</div>
               </div>
               <div>
-                <div style={{ fontSize: '0.6rem', color: '#f59e0b', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Threats</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.threats}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Weaknesses</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.weaknesses}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Opportunities</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.opportunities}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Threats</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.threats}</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-white/5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-12 border-t border-white/10">
           <div>
-            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>Season Outlook</h4>
-            <div style={{ padding: '1.25rem', background: 'rgba(0, 212, 255, 0.05)', borderRadius: '16px', border: '1px solid rgba(0, 212, 255, 0.1)' }}>
-              <p style={{ fontSize: '0.9rem', fontStyle: 'italic', color: 'var(--text-primary)', margin: 0 }}>
+            <div className="section-title" style={{ fontSize: '0.65rem' }}>SEASON OUTLOOK</div>
+            <div style={{ padding: '2rem', background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.08), transparent)', borderRadius: '24px', border: '1px solid rgba(0, 212, 255, 0.15)' }}>
+              <p style={{ fontSize: '1.1rem', fontStyle: 'italic', color: '#fff', margin: 0, lineHeight: 1.6, fontWeight: 500 }}>
                 "{insight.foresight}"
               </p>
             </div>
           </div>
 
           <div>
-            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>Squad Training Focus</h4>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            <div className="section-title" style={{ fontSize: '0.65rem' }}>SQUAD TRAINING FOCUS</div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '1rem' }}>
               {insight.recommendations.map((rec, i) => (
-                <li key={i} style={{ fontSize: '0.85rem', display: 'flex', gap: '12px', marginBottom: '10px' }}>
-                  <div style={{ minWidth: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '8px' }}></div>
-                  <span style={{ color: 'var(--text-secondary)' }}>{rec}</span>
+                <li key={i} style={{ fontSize: '0.95rem', display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                  <div style={{ minWidth: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '8px', boxShadow: '0 0 10px var(--accent-cyan)' }}></div>
+                  <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>{rec}</span>
                 </li>
               ))}
             </ul>

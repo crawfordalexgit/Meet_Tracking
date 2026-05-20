@@ -6,23 +6,20 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { scmApiKey, returnOnly } = req.body;
-  console.log('SCM SYNC REQUEST:', { hasApiKey: !!scmApiKey, returnOnly });
+  const scmApiKey = req.body.scmApiKey || process.env.SCM_API_KEY;
+  const { includeWebTasks = false } = req.body;
+  console.log('SCM SYNC REQUEST:', { hasApiKey: !!scmApiKey, includeWebTasks });
 
   if (!scmApiKey) {
-    return res.status(400).json({ error: 'Missing SCM API Key' });
+    return res.status(400).json({ error: 'Missing SCM API Key. Please provide it in the request or set SCM_API_KEY in environment.' });
   }
 
   try {
     let supabase = null;
-    if (returnOnly === true || returnOnly === 'true') {
-       console.log('SCM SYNC: Running in returnOnly mode (Bypassing DB)');
-    } else {
-       try {
-         supabase = getServiceSupabase();
-       } catch (e) {
-         console.warn("Supabase initialization failed, but continuing for safety check.");
-       }
+    try {
+      supabase = getServiceSupabase();
+    } catch (e) {
+      console.warn("Supabase initialization failed, but continuing for safety check.");
     }
     
     // Helper function to fetch all paginated records with a small delay
@@ -239,6 +236,8 @@ export default async function handler(req, res) {
         return {
           member_id: mId,
           full_name: `${firstName} ${lastName}`.trim(),
+          legal_first_name: member.legalFirstName || member.legal_first_name || firstName,
+          known_as: member.knownAs || member.known_as || member.preferredName || null,
           squad_id: squadId,
           squad_join_date: joinDate,
           year_of_birth: member.dob ? parseInt(member.dob.substring(0, 4)) : null,
@@ -288,7 +287,8 @@ export default async function handler(req, res) {
 
     // 6. Map SCM Web Numeric IDs and verify Join Dates
     // Skip these for returnOnly mode as they are too complex for client-side batching
-    if (supabase && process.env.SCM_WEB_USERNAME && process.env.SCM_WEB_PASSWORD) {
+    // Also skip by default to avoid timeouts (use includeWebTasks=true to enable)
+    if (supabase && includeWebTasks && process.env.SCM_WEB_USERNAME && process.env.SCM_WEB_PASSWORD) {
       try {
         console.log("SCM SYNC: Starting web portal tasks (Numeric IDs & Join Dates)...");
         const cookies = await scmLogin(process.env.SCM_WEB_USERNAME, process.env.SCM_WEB_PASSWORD);
@@ -369,18 +369,6 @@ export default async function handler(req, res) {
       }
     }
 
-    if (returnOnly === true || returnOnly === 'true') {
-      return res.status(200).json({
-        success: true,
-        message: `Scraped ${finalSwimmersToInsert.length} members and ${squadsToInsert.length} squads from SCM. Data ready for local save.`,
-        data: {
-          squads: squadsToInsert,
-          sessions: sessionsToUpsert,
-          swimmers: finalSwimmersToInsert,
-          memberships: []
-        }
-      });
-    }
 
     return res.status(200).json({ 
       success: true, 

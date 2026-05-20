@@ -11,7 +11,10 @@ import Link from 'next/link';
 import AiInsightCard from '../../components/AiInsightCard';
 import ForesightTimeline from '../../components/ForesightTimeline';
 import ReportConfigModal from '../../components/ReportConfigModal';
-import CoachesEyeDeepDive from '../../components/CoachesEyeDeepDive';
+import WeeklyWorkloadModal from '../../components/WeeklyWorkloadModal';
+import ReadinessBreakdownCard from '../../components/ReadinessBreakdownCard';
+import TrainingBlockTracker from '../../components/TrainingBlockTracker';
+import SquadQualificationPredictor from '../../components/SquadQualificationPredictor';
 
 
 export default function SwimmerDetail({ session }) {
@@ -33,7 +36,16 @@ export default function SwimmerDetail({ session }) {
   const [insights, setInsights] = useState([]);
   const [exemptions, setExemptions] = useState([]);
   const [sessionMemberships, setSessionMemberships] = useState([]);
+  const [includeShutdowns, setIncludeShutdowns] = useState(true);
+  const [includeSessionCredits, setIncludeSessionCredits] = useState(true);
+  const [includeHolidays, setIncludeHolidays] = useState(true);
+  const [includeGalas, setIncludeGalas] = useState(true);
+  const [complianceMode, setComplianceMode] = useState('combined');
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [selectedWeek, setSelectedWeek] = useState(null);
+  const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [progressSubTab, setProgressSubTab] = useState('charts');
   const [reportConfig, setReportConfig] = useState({
     sections: {
       attendance: true,
@@ -47,6 +59,9 @@ export default function SwimmerDetail({ session }) {
     },
     audience: 'Coach'
   });
+
+  const [aiInsight, setAiInsight] = useState(null);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
   useEffect(() => {
     if (session === undefined) return;
@@ -96,6 +111,44 @@ export default function SwimmerDetail({ session }) {
       setSessionMemberships(memRes || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
+  };
+
+  const generateAthleteInsight = async (type = 'general', coachNotes = '') => {
+    if (type === 'reset') {
+      setAiInsight(null);
+      return;
+    }
+    setIsGeneratingAi(true);
+    try {
+      const res = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          swimmerId: id, 
+          type, 
+          performance_slope,
+          totalActualHours: Math.round(totalActualHours),
+          meetAttendance: `${rel?.meetsAttended || 0}/${rel?.targetMeets || 5} meets (${progressPercent || 0}%)`,
+          complianceRelativeToSquad: `${(progressPercent || 0) - (squad?.target_training_percent || 75)}%`,
+          instructions: [
+            ...(coachNotes ? [coachNotes] : []),
+            "MANDATORY: List all medalists (Gold/Silver/Bronze) with their events.",
+            "MANDATORY: List all Finalists with their events.",
+            "MANDATORY: If 'bubble_analysis' contains data, YOU MUST include it here (e.g., 'Kieran Crawford narrowly missed the 50m Breaststroke final by just 0.12s!').",
+            "List of other significant PBs or achievements."
+          ]
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setAiInsight(data);
+      return data;
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to generate technical roadmap');
+    } finally {
+      setIsGeneratingAi(false);
+    }
   };
 
   const period = parseInt(router.query.period) || 365;
@@ -236,7 +289,13 @@ export default function SwimmerDetail({ session }) {
       return true;
     };
 
-    const rel = calculateReliability(swimmer, attendance, sessions, results, period, exemptions, sessionMemberships);
+    const rel = calculateReliability(swimmer, attendance, sessions, results, period, exemptions, sessionMemberships, {
+      sessionCredits: includeSessionCredits,
+      galas: includeGalas,
+      holidays: includeHolidays,
+      shutdowns: includeShutdowns,
+      complianceMode
+    });
     const yearResults = results.filter(r => new Date(r.meets?.date || 0) >= START);
     
     // Generate continuous rolling timeline based on the reliability analysis window
@@ -415,6 +474,10 @@ export default function SwimmerDetail({ session }) {
         };
       });
 
+      const isWeekExemptOrHoliday = w.isExempt || holidayUsed;
+      const weekHours = w.trainingHours + (includeGalas ? w.galaHours : 0);
+      const weekCompliance = isPreJoin ? 0 : (isWeekExemptOrHoliday ? 100 : Math.min(100, Math.round((weekHours / (targetHrs || 1)) * 100)));
+
       chartData.push({
         week: wLabel,
         weekKey,
@@ -426,9 +489,9 @@ export default function SwimmerDetail({ session }) {
         galaSessions: w.galaSessions,
         creditedHours: creditedHoursInWeek,
         creditedSessions: creditedSessionsInWeek,
-        totalHours: w.trainingHours + w.galaHours + creditedHoursInWeek,
-        totalSessions: w.trainingSessions + w.galaSessions + creditedSessionsInWeek,
-        sessions: w.trainingSessions + w.galaSessions + creditedSessionsInWeek, // Keep for chart/logic
+        totalHours: weekHours,
+        totalSessions: w.trainingSessions + (includeGalas ? w.galaSessions : 0),
+        sessions: w.trainingSessions + (includeGalas ? w.galaSessions : 0), // Keep for chart/logic
         isMet,
         isExempt: w.isExempt,
         isCredit: w.isCredit || creditedSessionsInWeek > 0,
@@ -437,6 +500,7 @@ export default function SwimmerDetail({ session }) {
         target: targetHrs,
         requiredSessions: targetSess,
         appliedRule,
+        compliance: weekCompliance,
         displayTraining: ((w.isExempt || holidayUsed) && w.trainingHours === 0) ? 0.5 : w.trainingHours,
         exceptionDetails
       });
@@ -576,7 +640,7 @@ export default function SwimmerDetail({ session }) {
       rawAbsentCount: attendance.filter(a => a.status === 'absent' && new Date(a.date) >= START).length,
       periodMeets: uniqueMeetsList.filter(m => new Date(m.date) >= START)
     };
-  }, [results, swimmer, squad, attendance, sessions, exemptions, sessionMemberships, period, periodWeeks, selectedMonth, selectedStroke, router.query.period, sortConfig]);
+  }, [results, swimmer, squad, attendance, sessions, exemptions, sessionMemberships, period, periodWeeks, selectedMonth, selectedStroke, router.query.period, sortConfig, includeShutdowns, includeSessionCredits, includeHolidays, includeGalas, complianceMode]);
 
   const requestSort = (key) => {
     let direction = 'desc';
@@ -613,12 +677,46 @@ export default function SwimmerDetail({ session }) {
     }
   }, [attendancePct, statsObj, squad, progressPercent, velocity, seasonVolumePct]);
 
-  const handleGenerateReport = (sections, audience) => {
+  const handleGenerateReport = async (sections, audience) => {
     setReportConfig({ sections, audience });
+    if ((sections.aiTechnical || sections.aiDeepDive) && !aiInsight) {
+      await generateAthleteInsight('general');
+    }
     setIsReportModalOpen(false);
     setTimeout(() => {
       window.print();
     }, 500);
+  };
+
+  const renderCustomBarLabel = (props) => {
+    const { x, y, width, index } = props;
+    const entry = workloadChartData[index];
+    if (!entry) return null;
+    
+    const isExempt = entry.isExempt;
+    const holidayUsed = entry.holidayUsed;
+    
+    if (!isExempt && !holidayUsed) return null;
+    
+    // Tag placement: slightly above the top of the bar
+    const labelX = x + width / 2;
+    const labelY = y - 8;
+    const labelText = isExempt ? 'SHUTDOWN' : 'HOLIDAY';
+    const labelColor = isExempt ? '#f97316' : '#a855f7';
+    
+    return (
+      <text
+        x={labelX}
+        y={labelY}
+        fill={labelColor}
+        fontSize="6px"
+        fontWeight="900"
+        textAnchor="middle"
+        transform={`rotate(-90, ${labelX}, ${labelY})`}
+      >
+        {labelText}
+      </text>
+    );
   };
 
   if (loading) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', opacity: 0.5 }}>Loading Athlete Profile...</div></Layout>;
@@ -629,6 +727,96 @@ export default function SwimmerDetail({ session }) {
       <Head>
         <title>{swimmer.full_name} | Athlete Profile</title>
         <style>{`
+          @media screen {
+            .no-screen { display: none !important; }
+            .profile-tabs-container {
+              display: flex;
+              gap: 12px;
+              margin-bottom: 2rem;
+              padding: 6px;
+              border-radius: 16px;
+              background: rgba(255, 255, 255, 0.02);
+              border: 1px solid rgba(255, 255, 255, 0.05);
+              width: fit-content;
+            }
+            .profile-tab-btn {
+              padding: 10px 24px;
+              border-radius: 12px;
+              font-size: 0.7rem;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 0.1em;
+              cursor: pointer;
+              transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+              border: none;
+              background: transparent;
+              color: rgba(255, 255, 255, 0.5);
+              display: flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .profile-tab-btn:hover {
+              color: #fff;
+              background: rgba(255, 255, 255, 0.03);
+            }
+            .profile-tab-btn.active {
+              background: linear-gradient(135deg, var(--accent-cyan) 0%, rgba(var(--accent-cyan-rgb), 0.85) 100%);
+              color: #000 !important;
+              font-weight: 950;
+              box-shadow: 0 0 20px rgba(var(--accent-cyan-rgb), 0.45), 0 0 40px rgba(var(--accent-cyan-rgb), 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+            }
+
+            /* Subtabs Premium Themed System */
+            .profile-subtabs-container {
+              display: flex;
+              gap: 8px;
+              margin-bottom: 2rem;
+              padding: 4px;
+              border-radius: 14px;
+              background: rgba(255, 255, 255, 0.02);
+              border: 1px solid rgba(255, 255, 255, 0.05);
+              width: fit-content;
+              box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.3);
+            }
+            .profile-subtab-btn {
+              padding: 8px 18px;
+              border-radius: 10px;
+              font-size: 0.65rem;
+              font-weight: 900;
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              cursor: pointer;
+              transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+              border: none;
+              background: transparent;
+              color: rgba(255, 255, 255, 0.4);
+              display: flex;
+              align-items: center;
+              gap: 6px;
+            }
+            .profile-subtab-btn:hover {
+              color: #fff;
+              background: rgba(255, 255, 255, 0.03);
+            }
+            .profile-subtab-btn.active-cyan {
+              background: linear-gradient(135deg, var(--accent-cyan) 0%, rgba(var(--accent-cyan-rgb), 0.85) 100%);
+              color: #000 !important;
+              font-weight: 950;
+              box-shadow: 0 0 18px rgba(var(--accent-cyan-rgb), 0.5), 0 0 35px rgba(var(--accent-cyan-rgb), 0.25);
+            }
+            .profile-subtab-btn.active-amber {
+              background: linear-gradient(135deg, var(--accent-amber) 0%, rgba(var(--accent-amber-rgb), 0.85) 100%);
+              color: #000 !important;
+              font-weight: 950;
+              box-shadow: 0 0 18px rgba(var(--accent-amber-rgb), 0.5), 0 0 35px rgba(var(--accent-amber-rgb), 0.25);
+            }
+            .profile-subtab-btn.active-rose {
+              background: linear-gradient(135deg, var(--accent-rose) 0%, rgba(var(--accent-rose-rgb), 0.85) 100%);
+              color: #fff !important;
+              font-weight: 950;
+              box-shadow: 0 0 18px rgba(var(--accent-rose-rgb), 0.5), 0 0 35px rgba(var(--accent-rose-rgb), 0.25);
+            }
+          }
           @media print {
             .no-print, button, nav, .profile-header { display: none !important; }
             .print-only { display: block !important; }
@@ -732,13 +920,53 @@ export default function SwimmerDetail({ session }) {
         </div>
       </div>
 
+      {/* Modern Premium Glassmorphic Tab Controls */}
+      <div className="profile-tabs-container no-print">
+        <button 
+          onClick={() => setActiveTab('overview')} 
+          className={`profile-tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
+        >
+          📊 OVERVIEW
+        </button>
+        <button 
+          onClick={() => setActiveTab('workload')} 
+          className={`profile-tab-btn ${activeTab === 'workload' ? 'active' : ''}`}
+        >
+          ⏱️ WORKLOAD
+        </button>
+        <button 
+          onClick={() => setActiveTab('progress')} 
+          className={`profile-tab-btn ${activeTab === 'progress' ? 'active' : ''}`}
+        >
+          📈 PROGRESS
+        </button>
+        <button 
+          onClick={() => setActiveTab('competition')} 
+          className={`profile-tab-btn ${activeTab === 'competition' ? 'active' : ''}`}
+        >
+          🏁 COMPETITION
+        </button>
+        <button 
+          onClick={() => setActiveTab('block_roi')} 
+          className={`profile-tab-btn ${activeTab === 'block_roi' ? 'active' : ''}`}
+        >
+          🔄 BLOCK ROI
+        </button>
+        <button 
+          onClick={() => setActiveTab('predictor')} 
+          className={`profile-tab-btn ${activeTab === 'predictor' ? 'active' : ''}`}
+        >
+          🎯 QT Predictor
+        </button>
+      </div>
+
       <div className="print-only" style={{ display: 'none', textAlign: 'center', marginBottom: 40 }}>
          <h1 style={{ fontSize: '2.5rem', marginBottom: 8, fontWeight: 900 }}>{reportConfig.audience.toUpperCase()}'S PERFORMANCE REVIEW</h1>
          <h2 style={{ fontSize: '1.5rem', color: '#666' }}>{swimmer.full_name} - {new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</h2>
          <p style={{ fontSize: '0.9rem', color: '#999' }}>Report Focus: {reportConfig.audience} Perspective | {Object.entries(reportConfig.sections).filter(([_,v])=>v).map(([k])=>k).join(', ')}</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }} className={`mb-16 ${!reportConfig.sections.performanceNarrative ? 'hide-in-report' : ''}`}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }} className={`mb-16 ${activeTab !== 'overview' ? 'no-screen' : ''} ${!reportConfig.sections.performanceNarrative ? 'hide-in-report' : ''}`}>
         <div className="glass-card" style={{ gridColumn: 'span 1', borderLeft: '4px solid var(--accent-cyan)', padding: '2rem 2.5rem' }}>
           <div className="section-title" style={{ fontSize: '0.75rem', marginBottom: 24, fontWeight: 900, letterSpacing: '0.2em', opacity: 0.9, color: 'var(--accent-cyan)' }}>PERSONAL PERFORMANCE STORY</div>
           <div style={{ display: 'grid', gap: '1rem' }}>
@@ -795,23 +1023,87 @@ export default function SwimmerDetail({ session }) {
             </div>
           </div>
 
-          <div className="flex justify-between items-start gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-             <PremiumOrb value={rel.percentage || 0} label="Training Consistency" size={70} color="#f59e0b" />
-             <PremiumOrb value={statsObj.volumePct || 0} label="Volume %" size={70} />
-             <PremiumOrb 
-               value={((statsObj.holidaysUsed || 0) / (statsObj.holidayAllowance || 1)) * 100} 
-               customValue={`${statsObj.holidaysUsed || 0}/${statsObj.holidayAllowance || 0}`} 
-               label="Holidays" 
-               size={70} 
-             />
-             <PremiumOrb value={statsObj.peakStandard || 0} label="Avg WA Pts" size={70} color="amber" unit="" />
-             <PremiumOrb 
-               value={Math.round(rel.complianceRate || 0)} 
-               customValue={`${rel.meetsAttended || 0}/${rel.targetMeets || 5}`}
-               label="Meet Attendance" 
-               size={70} 
-               color="#22d3ee"
-             />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', padding: '1rem', borderRadius: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+             {/* Consistency Card */}
+             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <PremiumOrb value={rel.percentage || 0} label="Consistency" size={65} color="#f59e0b" />
+                
+                {/* Consistency Micro-Bars */}
+                <div style={{ width: '100%', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', fontWeight: 900, letterSpacing: '0.05em', color: 'rgba(255,255,255,0.4)' }}>
+                      <span>⏱️ HOURS</span>
+                      <span style={{ color: 'rgba(255,255,255,0.8)' }}>{rel.hoursCompliance || 0}%</span>
+                    </div>
+                    <div style={{ height: '4px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${rel.hoursCompliance || 0}%`, background: '#22d3ee', borderRadius: '9999px' }}></div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', fontWeight: 900, letterSpacing: '0.05em', color: 'rgba(255,255,255,0.4)' }}>
+                      <span>⚡ SESS</span>
+                      <span style={{ color: 'rgba(255,255,255,0.8)' }}>{rel.sessionsCompliance || 0}%</span>
+                    </div>
+                    <div style={{ height: '4px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${rel.sessionsCompliance || 0}%`, background: '#fbbf24', borderRadius: '9999px' }}></div>
+                    </div>
+                  </div>
+                  {squad?.require_weekend && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', fontWeight: 900, letterSpacing: '0.05em', color: 'rgba(255,255,255,0.4)' }}>
+                        <span>🗓️ WKND</span>
+                        <span style={{ color: 'rgba(255,255,255,0.8)' }}>{rel.weekendCompliance !== null ? `${rel.weekendCompliance}%` : 'N/A'}</span>
+                      </div>
+                      <div style={{ height: '4px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '9999px', overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${rel.weekendCompliance || 0}%`, background: '#a855f7', borderRadius: '9999px' }}></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+             </div>
+
+             {/* Volume Card */}
+             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <PremiumOrb value={statsObj.volumePct || 0} label="Volume %" size={65} />
+                
+                {/* Volume Micro-Bars */}
+                <div style={{ width: '100%', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.75rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', fontWeight: 900, letterSpacing: '0.05em', color: 'rgba(255,255,255,0.4)' }}>
+                      <span>🏊 SWIM</span>
+                      <span style={{ color: '#34d399', fontWeight: 'bold' }}>{Math.round((rel.totalTrainingHours / (rel.annualTarget || 1)) * 100)}%</span>
+                    </div>
+                    <div style={{ height: '4px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, Math.round((rel.totalTrainingHours / (rel.annualTarget || 1)) * 100))}%`, background: '#10b981', borderRadius: '9999px' }}></div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', fontWeight: 900, letterSpacing: '0.05em', color: 'rgba(255,255,255,0.4)' }}>
+                      <span>⛵ GALA</span>
+                      <span style={{ color: '#a78bfa', fontWeight: 'bold' }}>{Math.round((rel.totalGalaHours / (rel.annualTarget || 1)) * 100)}%</span>
+                    </div>
+                    <div style={{ height: '4px', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '9999px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, Math.round((rel.totalGalaHours / (rel.annualTarget || 1)) * 100))}%`, background: '#8b5cf6', borderRadius: '9999px' }}></div>
+                    </div>
+                  </div>
+                </div>
+             </div>
+
+             {/* Avg WA Pts Card */}
+             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <PremiumOrb value={statsObj.avgWA || 0} label="Avg WA Pts" size={65} color="amber" unit="" />
+             </div>
+
+             {/* Meet Attendance Card */}
+             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1rem', borderRadius: '12px', background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <PremiumOrb 
+                  value={Math.round(rel.complianceRate || 0)} 
+                  customValue={`${rel.meetsAttended || 0}/${rel.targetMeets || 5}`}
+                  label="Meet Attendance" 
+                  size={65} 
+                  color="#22d3ee"
+                />
+             </div>
           </div>
 
           <div className="mt-8 grid grid-cols-2 gap-4">
@@ -821,7 +1113,7 @@ export default function SwimmerDetail({ session }) {
              </div>
              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
                 <div style={{ fontSize: '0.6rem', opacity: 0.4, marginBottom: 4, fontWeight: 900 }}>MISSED SESSIONS</div>
-                <div className="text-xl font-black text-rose-500">{totalAbsentSessions} <span className="text-[10px] opacity-30">({rawAbsentCount} ABSENT)</span></div>
+                <div className="text-xl font-black text-rose-500">{totalAbsentSessions}</div>
              </div>
           </div>
 
@@ -889,19 +1181,27 @@ export default function SwimmerDetail({ session }) {
                 </div>
                 <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
                    <div style={{ fontSize: '0.6rem', opacity: 0.4, marginBottom: 4, fontWeight: 900 }}>PB RATE</div>
-                   <div className="text-xl font-black" style={{ color: 'var(--accent-cyan)' }}>{Math.round((seasonPBs?.length || 0) / (results.length || 1) * 100)}%</div>
+                   <div className="text-xl font-black" style={{ color: 'var(--accent-cyan)' }}>{Math.round((seasonPBs || 0) / (results.length || 1) * 100)}%</div>
                 </div>
              </div>
           </div>
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
+      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${activeTab !== 'overview' ? 'no-screen' : ''} ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
         <div className="lg:col-span-2">
           <AiInsightCard 
             swimmerId={id} 
             coachId={session?.user?.id} 
             performance_slope={performance_slope}
+            totalActualHours={Math.round(totalActualHours)}
+            meetsAttended={rel?.meetsAttended || 0}
+            targetMeets={rel?.targetMeets || 5}
+            complianceRate={progressPercent || 0}
+            squadTargetCompliance={squad?.target_training_percent || 75}
+            insight={aiInsight}
+            loading={isGeneratingAi}
+            onGenerate={generateAthleteInsight}
           />
         </div>
         <div className="no-print">
@@ -909,30 +1209,54 @@ export default function SwimmerDetail({ session }) {
         </div>
       </div>
 
-      <div className={!reportConfig.sections.aiDeepDive ? 'hide-in-report' : ''}>
-        <CoachesEyeDeepDive 
-          results={results} 
-          attendance={attendance} 
-          sessions={sessions} 
-          swimmer={swimmer} 
-          squad={squad} 
-          rel={rel}
-        />
-      </div>
+      {/* Progress Sub-Tab Navigation Toggle */}
+      {activeTab === 'progress' && (
+        <div className="profile-subtabs-container no-print">
+          <button 
+            onClick={() => setProgressSubTab('charts')}
+            className={`profile-subtab-btn ${progressSubTab === 'charts' ? 'active-cyan' : ''}`}
+          >
+            📈 PROGRESSION CHART
+          </button>
+          <button 
+            onClick={() => setProgressSubTab('roadmap')}
+            className={`profile-subtab-btn ${progressSubTab === 'roadmap' ? 'active-amber' : ''}`}
+          >
+            🗺️ PERFORMANCE ROADMAP
+          </button>
+          <button 
+            onClick={() => setProgressSubTab('readiness')}
+            className={`profile-subtab-btn ${progressSubTab === 'readiness' ? 'active-rose' : ''}`}
+          >
+            ❤️ READINESS & HEALTH
+          </button>
+        </div>
+      )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }} className="mb-16">
+      {/* Progression Chart Section */}
+      <div className={`mb-16 ${activeTab !== 'progress' || progressSubTab !== 'charts' ? 'no-screen' : ''}`}>
         <div className="glass-card" style={{ padding: '2rem', minHeight: '400px', position: 'relative', overflow: 'hidden' }}>
            {/* Background Glow */}
            <div style={{ position: 'absolute', top: '-10%', right: '-10%', width: '40%', height: '40%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.05) 0%, transparent 70%)', filter: 'blur(50px)', zIndex: 0 }}></div>
 
            <div className="flex justify-between items-center mb-8 relative z-10">
-             <div>
-                <div className="section-title" style={{ marginBottom: 4 }}>Performance Velocity</div>
-                <h3 className="text-xl font-black tracking-tight">Points Progression Trend</h3>
-                <div style={{ fontSize: '0.65rem', opacity: 0.4, fontStyle: 'italic', marginTop: 4 }}>
-                  {selectedStroke === 'All' 
-                    ? 'Global Average: Benchmarks are averaged across all strokes and distances.' 
-                    : `Discipline Average: Benchmarks are averaged across all distances for ${selectedStroke}.`}
+             <div className="flex items-center gap-6">
+                <PremiumOrb 
+                  value={statsObj?.velocity || 0} 
+                  customValue={statsObj?.velocity > 0 ? `+${statsObj.velocity}` : `${statsObj?.velocity || 0}`}
+                  label="Performance Velocity" 
+                  size={80} 
+                  unit="pts"
+                  color={statsObj?.velocity >= 0 ? 'cyan' : 'rose'}
+                />
+                <div>
+                   <div className="section-title" style={{ marginBottom: 4 }}>Performance Velocity</div>
+                   <h3 className="text-xl font-black tracking-tight">Points Progression Trend</h3>
+                   <div style={{ fontSize: '0.65rem', opacity: 0.4, fontStyle: 'italic', marginTop: 4 }}>
+                     {selectedStroke === 'All' 
+                       ? 'Global Average: Benchmarks are averaged across all strokes and distances.' 
+                       : `Discipline Average: Benchmarks are averaged across all distances for ${selectedStroke}.`}
+                   </div>
                 </div>
              </div>
              <div className="flex gap-2 no-print">
@@ -978,7 +1302,10 @@ export default function SwimmerDetail({ session }) {
               </ResponsiveContainer>
            </div>
         </div>
-        
+      </div>
+      
+      {/* Stroke Performance Roadmap Section */}
+      <div className={`mb-16 ${activeTab !== 'progress' || progressSubTab !== 'roadmap' ? 'no-screen' : ''}`}>
         <div className="glass-card" style={{ padding: '2.5rem' }}>
            <div className="flex justify-between items-center mb-2">
              <div className="kpi-label">Stroke Performance Roadmap</div>
@@ -1098,37 +1425,114 @@ export default function SwimmerDetail({ session }) {
         </div>
       </div>
 
-      <div className={!reportConfig.sections.attendance ? 'hide-in-report' : ''}>
+      {/* Readiness & Health Section */}
+      {activeTab === 'progress' && progressSubTab === 'readiness' && (
+        <div className="mb-16">
+          <ReadinessBreakdownCard swimmer={swimmer} healthData={healthData} squad={squad} />
+        </div>
+      )}
+
+      <div className={`${activeTab !== 'workload' ? 'no-screen' : ''} ${!reportConfig.sections.attendance ? 'hide-in-report' : ''}`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', minHeight: '400px' }}>
-             <div className="flex justify-between items-center mb-6">
-               <div>
-                  <div className="section-title">Consistency Engine</div>
-                  <h3 className="text-xl font-black tracking-tight">Training Workload & Compliance</h3>
-                  <div className="flex gap-4 items-center">
-                    <div className="flex items-center gap-2">
-                      <div style={{ width: 10, height: 10, background: 'var(--accent-cyan)', borderRadius: '2px' }}></div>
-                      <span className="text-[10px] font-bold opacity-60">TRAINING</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div style={{ width: 10, height: 10, background: 'var(--accent-rose)', borderRadius: '2px' }}></div>
-                      <span className="text-[10px] font-bold opacity-60">GALA</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div style={{ width: 10, height: 10, background: '#475569', borderRadius: '2px' }}></div>
-                      <span className="text-[10px] font-bold opacity-60">SHUTDOWN</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div style={{ width: 10, height: 10, background: '#8b5cf6', borderRadius: '2px' }}></div>
-                      <span className="text-[10px] font-bold opacity-60">HOLIDAY</span>
-                    </div>
+             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                <div>
+                   <div className="section-title">Consistency Engine</div>
+                   <h3 className="text-xl font-black tracking-tight">Training Workload & Compliance</h3>
+                   <div className="flex gap-4 items-center mt-2">
+                     <div className="flex items-center gap-2">
+                       <div style={{ width: 10, height: 10, background: 'var(--accent-cyan)', borderRadius: '2px' }}></div>
+                       <span className="text-[10px] font-bold opacity-60">COMPLIANT WEEKS</span>
+                     </div>
+                     <div className="flex items-center gap-2">
+                       <div style={{ width: 10, height: 10, background: 'var(--accent-amber)', borderRadius: '2px' }}></div>
+                       <span className="text-[10px] font-bold opacity-60">NON-COMPLIANT WEEKS</span>
+                     </div>
+                   </div>
+                </div>
+                
+                {/* Elegant Toggle Controls */}
+                <div className="flex flex-wrap items-center gap-4 p-2 rounded-xl bg-white/[0.02] border border-white/5 no-print">
+                  {/* Compliance Metric Selector */}
+                  <div className="flex items-center rounded-lg bg-black/40 p-1 border border-white/5">
+                    <button 
+                      onClick={() => setComplianceMode('combined')} 
+                      className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${complianceMode === 'combined' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-white/60 hover:text-white'}`}
+                    >
+                      COMBINED
+                    </button>
+                    <button 
+                      onClick={() => setComplianceMode('hours')} 
+                      className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${complianceMode === 'hours' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-white/60 hover:text-white'}`}
+                    >
+                      HOURS
+                    </button>
+                    <button 
+                      onClick={() => setComplianceMode('sessions')} 
+                      className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${complianceMode === 'sessions' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-white/60 hover:text-white'}`}
+                    >
+                      SESS
+                    </button>
                   </div>
-               </div>
+                  
+                  <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }}></div>
+                  
+                  {/* Exemption and Holiday Toggle Controls */}
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={includeShutdowns} 
+                        onChange={(e) => setIncludeShutdowns(e.target.checked)}
+                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
+                      />
+                      ❄️ SHUTDOWN
+                    </label>
+                    
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={includeSessionCredits} 
+                        onChange={(e) => setIncludeSessionCredits(e.target.checked)}
+                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
+                      />
+                      ⚡ CREDIT
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={includeHolidays} 
+                        onChange={(e) => setIncludeHolidays(e.target.checked)}
+                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
+                      />
+                      🏖️ HOLIDAY
+                    </label>
+
+                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
+                      <input 
+                        type="checkbox" 
+                        checked={includeGalas} 
+                        onChange={(e) => setIncludeGalas(e.target.checked)}
+                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
+                      />
+                      ⛵ GALA
+                    </label>
+                  </div>
+                </div>
              </div>
              <div style={{ height: 350 }}>
                <ResponsiveContainer width="100%" height="100%">
                  <ComposedChart data={workloadChartData}>
                    <defs>
+                      <linearGradient id="trainingGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#22d3ee" />
+                        <stop offset="100%" stopColor="#0891b2" />
+                      </linearGradient>
+                      <linearGradient id="creditGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#fbbf24" />
+                        <stop offset="100%" stopColor="#d97706" />
+                      </linearGradient>
                      <linearGradient id="compGrad" x1="0" y1="0" x2="0" y2="1">
                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
@@ -1146,10 +1550,10 @@ export default function SwimmerDetail({ session }) {
                          return (
                            <div className="glass-card" style={{ padding: '12px', border: '1px solid var(--glass-border)', boxShadow: '0 10px 30px rgba(0,0,0,0.5)', backdropFilter: 'blur(20px)' }}>
                              <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.5, marginBottom: 8 }}>WEEK {label}</div>
-                             <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>{data.training}h Training</div>
-                             {data.gala > 0 && <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-rose)' }}>{data.gala}h Gala</div>}
-                             {data.isExempt && <div style={{ fontSize: '0.65rem', fontWeight: 900, color: '#475569', marginTop: 4 }}>[ CLUB SHUTDOWN ]</div>}
-                             {data.holidayUsed && <div style={{ fontSize: '0.65rem', fontWeight: 900, color: '#8b5cf6', marginTop: 4 }}>[ HOLIDAY CREDIT ]</div>}
+                             <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>{data.trainingHours}h Training</div>
+                             {data.galaHours > 0 && <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--accent-rose)' }}>{data.galaHours}h Gala</div>}
+                             {data.isExempt && <div style={{ fontSize: '0.65rem', fontWeight: 900, color: '#f97316', marginTop: 4 }}>[ CLUB SHUTDOWN ]</div>}
+                             {data.holidayUsed && <div style={{ fontSize: '0.65rem', fontWeight: 900, color: '#a855f7', marginTop: 4 }}>[ HOLIDAY CREDIT ]</div>}
                              <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#10b981', marginTop: 4 }}>{data.compliance}% Compliance</div>
                              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)', fontSize: '0.7rem', fontWeight: 700 }}>
                                Sessions: <span style={{ color: data.isMet ? '#10b981' : 'var(--accent-amber)' }}>{data.sessions} / {data.requiredSessions}</span>
@@ -1166,21 +1570,32 @@ export default function SwimmerDetail({ session }) {
                        yAxisId="left"
                        x1={d.week} 
                        x2={d.week} 
-                       fill={d.isExempt ? 'rgba(71, 85, 105, 0.2)' : 'rgba(139, 92, 246, 0.2)'} 
+                       fill={d.isExempt ? 'rgba(249, 115, 22, 0.2)' : 'rgba(168, 85, 247, 0.2)'} 
                        strokeOpacity={0.3}
                      />
                    ))}
                    <Area yAxisId="right" type="stepAfter" dataKey="compliance" fill="url(#compGrad)" stroke="#10b981" strokeWidth={1} strokeOpacity={0.3} />
-                   <Bar yAxisId="left" dataKey="displayTraining" name="Training" radius={[3, 3, 0, 0]} stackId="a">
+                   <Bar 
+                      yAxisId="left" 
+                      dataKey="totalHours" 
+                      name="Total Hours" 
+                      radius={[3, 3, 0, 0]} 
+                      barSize={9}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(data) => {
+                        if (data) {
+                          setSelectedWeek(data);
+                          setIsWorkloadModalOpen(true);
+                        }
+                      }}
+                    >
+                      <LabelList content={renderCustomBarLabel} />
                       {workloadChartData.map((entry, index) => {
-                        let color = 'rgba(255,255,255,0.1)';
-                        if (entry.isExempt) color = '#475569';
-                        else if (entry.holidayUsed) color = '#8b5cf6';
-                        else if (entry.isMet) color = 'var(--accent-cyan)';
-                        return <Cell key={`cell-${index}`} fill={color} />;
+                         const isCompliant = entry.isExempt || entry.holidayUsed || entry.isMet;
+                         const fillUrl = isCompliant ? 'url(#trainingGrad)' : 'url(#creditGrad)';
+                         return <Cell key={`cell-${index}`} fill={fillUrl} />;
                       })}
-                    </Bar>
-                   <Bar yAxisId="left" dataKey="gala" name="Gala" fill="var(--accent-rose)" radius={[3, 3, 0, 0]} stackId="a" />
+                   </Bar>
                    <Line yAxisId="left" type="stepAfter" dataKey="target" name="Target Hours" stroke="rgba(255,255,255,0.2)" strokeDasharray="5 5" dot={false} strokeWidth={2} />
                  </ComposedChart>
                </ResponsiveContainer>
@@ -1196,13 +1611,23 @@ export default function SwimmerDetail({ session }) {
 
               <div className="space-y-3">
                 {[...workloadChartData].reverse().map((w, idx) => (
-                  <div key={idx} style={{ 
-                    padding: '1rem', 
-                    background: 'rgba(255,255,255,0.02)', 
-                    borderRadius: '12px', 
-                    border: w.isMet ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)',
-                    position: 'relative'
-                  }}>
+                  <div 
+                    key={idx} 
+                    onClick={() => {
+                      setSelectedWeek(w);
+                      setIsWorkloadModalOpen(true);
+                    }}
+                    className="hover:bg-white/[0.04] hover:border-cyan-500/30 hover:scale-[1.01]"
+                    style={{ 
+                      padding: '1rem', 
+                      background: 'rgba(255,255,255,0.02)', 
+                      borderRadius: '12px', 
+                      border: w.isMet ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)',
+                      position: 'relative',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease-in-out'
+                    }}
+                  >
                     <div className="flex justify-between items-center mb-2">
                        <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.4 }}>WEEK {w.week}</div>
                        <span style={{ 
@@ -1253,7 +1678,7 @@ export default function SwimmerDetail({ session }) {
         </div>
       </div>
 
-      <div className={!reportConfig.sections.openMeets ? 'hide-in-report' : ''}>
+      <div className={`${activeTab !== 'competition' ? 'no-screen' : ''} ${!reportConfig.sections.openMeets ? 'hide-in-report' : ''}`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', position: 'relative', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: '-10%', left: '-10%', width: '60%', height: '60%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.08) 0%, transparent 70%)', filter: 'blur(50px)', zIndex: 0 }}></div>
@@ -1338,23 +1763,8 @@ export default function SwimmerDetail({ session }) {
         </div>
       </div>
 
-      <div className={!reportConfig.sections.aiDeepDive ? 'hide-in-report' : ''}>
-        <CoachesEyeDeepDive 
-          results={results} 
-          attendance={attendance} 
-          sessions={sessions} 
-          swimmer={swimmer} 
-          squad={squad} 
-          rel={rel}
-          insights={insights}
-        />
-      </div>
 
-      <div className="no-print mb-16">
-        <ForesightTimeline insights={insights} />
-      </div>
-
-      <details className="glass-card mb-16 no-print" style={{ border: 'none', padding: 0, overflow: 'hidden' }}>
+      <details className={`glass-card mb-16 no-print ${activeTab !== 'competition' ? 'no-screen' : ''}`} style={{ border: 'none', padding: 0, overflow: 'hidden' }}>
         <summary style={{ 
           padding: '2rem', 
           cursor: 'pointer', 
@@ -1409,6 +1819,23 @@ export default function SwimmerDetail({ session }) {
         </div>
       </details>
 
+      {activeTab === 'block_roi' && swimmer && (
+        <div className="mb-16 animate-fade-in">
+          <TrainingBlockTracker 
+            swimmer={swimmer}
+            results={results}
+            attendance={attendance}
+            sessions={sessions}
+          />
+        </div>
+      )}
+
+      {activeTab === 'predictor' && swimmer && (
+        <div className="mb-16 animate-fade-in">
+          <SquadQualificationPredictor swimmers={[swimmer]} results={results} />
+        </div>
+      )}
+
       <BenchmarkModal isOpen={isBenchmarkOpen} onClose={() => setIsBenchmarkOpen(false)} />
       
       <ReportConfigModal 
@@ -1416,6 +1843,21 @@ export default function SwimmerDetail({ session }) {
         onClose={() => setIsReportModalOpen(false)} 
         onGenerate={handleGenerateReport}
         swimmerName={swimmer.full_name}
+        loading={isGeneratingAi}
+      />
+
+      <WeeklyWorkloadModal
+        isOpen={isWorkloadModalOpen}
+        onClose={() => {
+          setIsWorkloadModalOpen(false);
+          setSelectedWeek(null);
+        }}
+        week={selectedWeek}
+        attendance={attendance}
+        sessions={sessions}
+        exemptions={exemptions}
+        swimmer={swimmer}
+        results={results}
       />
     </Layout>
   );

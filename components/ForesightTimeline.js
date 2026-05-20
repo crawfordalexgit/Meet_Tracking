@@ -19,7 +19,7 @@ export default function ForesightTimeline({ insights, pbs = {} }) {
   return (
     <div className="glass-card animate-fade-in" style={{ padding: '2rem', maxHeight: '1000px', overflowY: 'auto' }}>
       <div className="flex justify-between items-center mb-8">
-        <div className="section-title">Technical Foresight Timeline</div>
+        <div className="section-title">CoachesEye Insights: Technical Foresight Timeline</div>
         <div style={{ fontSize: '0.6rem', color: 'var(--accent-cyan)', fontWeight: 900 }}>{insights.length} ARCHIVED REPORTS</div>
       </div>
       

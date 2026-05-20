@@ -1,29 +1,26 @@
 import React, { useState } from 'react';
 
-export default function AiInsightCard({ swimmerId, coachId, performance_slope = 0 }) {
-  const [loading, setLoading] = useState(false);
-  const [insight, setInsight] = useState(null);
-  const [error, setError] = useState(null);
+export default function AiInsightCard({ 
+  swimmerId, 
+  coachId, 
+  performance_slope = 0,
+  totalActualHours = 0,
+  meetsAttended = 0,
+  targetMeets = 0,
+  complianceRate = 0,
+  squadTargetCompliance = 75,
+  insight,
+  loading,
+  onGenerate
+}) {
   const [isEditing, setIsEditing] = useState(false);
   const [correction, setCorrection] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [coachNotes, setCoachNotes] = useState('');
 
   const generateInsight = async (type = 'general') => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/ai/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ swimmerId, type, performance_slope })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setInsight(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+    if (onGenerate) {
+      await onGenerate(type, coachNotes);
     }
   };
 
@@ -38,7 +35,8 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
           coachId,
           originalInsight: insight,
           coachCorrection: isPositive ? 'PRECISION CONFIRMED' : correction,
-          isPositive
+          isPositive,
+          prompt_refinement: "summary: MANDATORY: 3-4 substantial, narrative paragraphs. You are a professional sports editor. Paragraph 1: Set the scene of the meet and the club's presence. Paragraph 2: Discuss the medalists and elite finalists. Paragraph 3: Discuss the broader squad progress (PBs and Near Misses). Paragraph 4: Closing tactical reflection. Integrate specific names and stats directly into the narrative. Be descriptive, celebratory, and detailed."
         })
       });
       
@@ -70,6 +68,27 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
         <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', maxWidth: '500px', margin: '0 auto 2rem', fontSize: '0.9rem' }}>
           Synthesizing technical metrics, drop-off ratios, and technical conversion benchmarks into an actionable technical roadmap.
         </p>
+        <div style={{ maxWidth: '500px', margin: '0 auto 2rem', textAlign: 'left' }}>
+          <label style={{ fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '8px' }}>Coach Notes (AI Instructions)</label>
+          <textarea
+            className="glass-input w-full"
+            placeholder="Specify focus areas for this analysis (e.g. 'Focus on training consistency gap' or 'Technical progression in Backstroke')..."
+            value={coachNotes}
+            onChange={(e) => setCoachNotes(e.target.value)}
+            style={{ 
+              minHeight: '80px', 
+              fontSize: '0.85rem', 
+              background: 'rgba(0,0,0,0.3)', 
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: '12px',
+              color: '#fff',
+              padding: '12px',
+              width: '100%',
+              fontFamily: 'inherit',
+              resize: 'vertical'
+            }}
+          />
+        </div>
         <div className="flex justify-between gap-4" style={{ justifyContent: 'center' }}>
           <button className="intel-toggle" onClick={() => generateInsight('general')}>
             <span>✨</span> Performance Insight
@@ -78,7 +97,6 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
             <span>🔥</span> Burnout Check
           </button>
         </div>
-        {error && <p style={{ color: 'var(--accent-rose)', marginTop: '1rem', fontSize: '0.8rem' }}>{error}</p>}
       </div>
     );
   }
@@ -94,7 +112,10 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
   }
 
   return (
-    <div className="glass-card animate-fade-in" style={{ position: 'relative', overflow: 'visible', padding: '2.5rem' }}>
+    <div className="group relative overflow-hidden rounded-xl bg-slate-900/40 border border-slate-800/50 p-6 transition-all hover:bg-slate-900/60 hover:border-blue-500/30 hover:shadow-[0_0_20px_rgba(59,130,246,0.1)]">
+      {/* Subtle Glow Effect */}
+      <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-blue-500/5 blur-3xl transition-all group-hover:bg-blue-500/10" />
+      
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-4">
           <div className="section-title">CoachesEye Insights: Technical Profile</div>
@@ -107,7 +128,8 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
         <div className="flex gap-2 no-print">
           <button className="period-btn" onClick={() => handleFeedback(true)} style={{ fontSize: '0.6rem', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>👍 Precise</button>
           <button className="period-btn" onClick={() => handleFeedback(false)} style={{ fontSize: '0.6rem', background: 'rgba(244, 63, 94, 0.1)', color: 'var(--accent-rose)' }}>👎 Correct</button>
-          <button className="period-btn" onClick={() => setInsight(null)} style={{ fontSize: '0.6rem' }}>Reset</button>
+          <button className="period-btn" onClick={() => generateInsight(insight?.type || 'general')} style={{ fontSize: '0.6rem', background: 'rgba(0, 150, 255, 0.15)', color: 'var(--accent-cyan)' }}>🔄 Refresh</button>
+          <button className="period-btn" onClick={() => onGenerate('reset')} style={{ fontSize: '0.6rem' }}>Reset</button>
         </div>
       </div>
 
@@ -169,8 +191,8 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-white/5">
           <div>
-            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>Predictive Foresight</h4>
-            <div style={{ padding: '1.25rem', background: 'rgba(0, 212, 255, 0.05)', borderRadius: '16px', border: '1px solid rgba(0, 212, 255, 0.1)' }}>
+            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>CoachesEye Insights: Predictive Foresight</h4>
+            <div style={{ padding: '1.25rem', background: 'rgba(var(--accent-cyan-rgb), 0.05)', borderRadius: '16px', border: '1px solid rgba(var(--accent-cyan-rgb), 0.1)' }}>
               <p style={{ fontSize: '0.9rem', fontStyle: 'italic', color: 'var(--text-primary)', margin: 0 }}>
                 "{insight.foresight}"
               </p>
@@ -187,8 +209,30 @@ export default function AiInsightCard({ swimmerId, coachId, performance_slope = 
                 </li>
               ))}
             </ul>
-          </div>
         </div>
+      </div>
+      </div>
+
+      <div className="no-print mt-8 pt-6 border-t border-white/5">
+        <h4 className="section-title" style={{ fontSize: '0.65rem', marginBottom: '0.75rem', color: 'var(--accent-cyan)' }}>Coach Notes (Instructions for next generation)</h4>
+        <textarea
+          className="glass-input w-full"
+          placeholder="Enter custom focus areas or notes (e.g. 'Flag the 100m Free PB', 'Emphasize LC technical endurance')..."
+          value={coachNotes}
+          onChange={(e) => setCoachNotes(e.target.value)}
+          style={{ 
+            minHeight: '80px', 
+            fontSize: '0.85rem', 
+            background: 'rgba(0,0,0,0.2)', 
+            border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: '12px',
+            color: '#fff',
+            padding: '12px',
+            width: '100%',
+            fontFamily: 'inherit',
+            resize: 'vertical'
+          }}
+        />
       </div>
 
       <style jsx>{`

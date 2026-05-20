@@ -101,7 +101,7 @@ export default async function handler(req, res) {
           }
         });
         
-        if (foundMeetsOnPage > 0 && newMeetsOnPage > 0 && page < 20) {
+        if (foundMeetsOnPage > 0 && newMeetsOnPage > 0 && page < 100) {
           page++;
         } else {
           hasMorePages = false;
@@ -115,12 +115,20 @@ export default async function handler(req, res) {
     }
 
     sendProgress(`Updating ${meets.length} meets in database...`, 30);
-    const { data: insertedMeets, error: meetsError } = await supabase
-      .from('meets')
-      .upsert(meets, { onConflict: 'meet_code' })
-      .select();
-
-    if (meetsError) throw meetsError;
+    const insertedMeets = [];
+    const chunkSize = 1000;
+    for (let i = 0; i < meets.length; i += chunkSize) {
+      const chunk = meets.slice(i, i + chunkSize);
+      const { data: chunkInserted, error: meetsError } = await supabase
+        .from('meets')
+        .upsert(chunk, { onConflict: 'meet_code' })
+        .select();
+      
+      if (meetsError) throw meetsError;
+      if (chunkInserted) {
+        insertedMeets.push(...chunkInserted);
+      }
+    }
 
     // 2. Scrape results for each meet
     let totalResultsScraped = 0;
@@ -135,92 +143,98 @@ export default async function handler(req, res) {
       });
     }
 
-    for (let i = 0; i < insertedMeets.length; i++) {
-      const meet = insertedMeets[i];
-      const progressPercent = 35 + Math.round(((i + 1) / insertedMeets.length) * 60);
-      sendProgress(`Scraping results for: ${meet.name}...`, progressPercent);
+    // Process results using concurrency to prevent timeouts and speed up the scrape
+    const concurrency = 4;
+    const resultsQueue = [...insertedMeets];
+    let processedCount = 0;
+    
+    const runWorker = async () => {
+      while (resultsQueue.length > 0) {
+        const meet = resultsQueue.shift();
+        if (!meet) continue;
+        
+        processedCount++;
+        const progressPercent = 35 + Math.min(60, Math.round((processedCount / insertedMeets.length) * 60));
+        sendProgress(`Scraping results for: ${meet.name}...`, progressPercent);
 
-      const meetUrl = `https://www.swimmingresults.org/showmeetsbyclub/index.php?targetyear=${meet.year}&masters=0&pgm=1&meetcode=${meet.meet_code}&targetclub=${targetClub}`;
-      const meetResponse = await fetch(meetUrl);
-      const meetHtml = await meetResponse.text();
-      const $meet = cheerio.load(meetHtml);
+        try {
+          const meetUrl = `https://www.swimmingresults.org/showmeetsbyclub/index.php?targetyear=${meet.year}&masters=0&pgm=1&meetcode=${meet.meet_code}&targetclub=${targetClub}`;
+          const meetResponse = await fetch(meetUrl);
+          const meetHtml = await meetResponse.text();
+          const $meet = cheerio.load(meetHtml);
 
-      // We use the course from the meet record
-      const course = meet.course;
-      
-      const resultsToInsert = [];
-      let totalRows = 0;
-      let matches = 0;
-
-      // Robust table finding: Look for ANY table row that has enough columns
-      $meet('tr').each((j, el) => {
-        const tds = $meet(el).find('td');
-        if (tds.length >= 9) {
-          const seId = $meet(tds[0]).text().trim();
-          const swimmerName = $meet(tds[1]).text().trim();
-          const event = $meet(tds[5]).text().trim();
-          const dateStr = $meet(tds[3]).text().trim();
-          const time = $meet(tds[7]).text().trim();
-          const waPts = parseInt($meet(tds[8]).text().trim()) || 0;
-
-          // Skip headers
-          if (seId.toLowerCase().includes('reg') || event.toLowerCase().includes('event')) return;
+          const course = meet.course;
+          const resultsToInsert = [];
           
-          totalRows++;
-          let swimmerId = swimmerMap[seId] || nameMap[swimmerName.toLowerCase()];
-          
-          if (swimmerId) {
-            matches++;
-            
-            // Look for splits link on the time column
-            const timeLink = $meet(tds[7]).find('a').attr('href') || '';
-            const swimId = extractSwimId(timeLink);
-            
-            resultsToInsert.push({
-              swimmer_id: swimmerId,
-              meet_id: meet.id,
-              event,
-              time,
-              wa_pts: waPts,
-              date: formatDate(dateStr) || meet.date,
-              swimId // Temporary to fetch splits
-            });
-          }
-        }
-      });
+          $meet('tr').each((j, el) => {
+            const tds = $meet(el).find('td');
+            if (tds.length >= 9) {
+              const seId = $meet(tds[0]).text().trim();
+              const swimmerName = $meet(tds[1]).text().trim();
+              const event = $meet(tds[5]).text().trim();
+              const dateStr = $meet(tds[3]).text().trim();
+              const time = $meet(tds[7]).text().trim();
+              const waPts = parseInt($meet(tds[8]).text().trim()) || 0;
 
-      console.log(`MEET SYNC: ${meet.name} - Found ${totalRows} results, matched ${matches} swimmers.`);
-
-      if (resultsToInsert.length > 0) {
-        // Fetch splits for results that have a swimId
-        const resultsWithSplits = [];
-        for (const res of resultsToInsert) {
-          let splits = null;
-          if (res.swimId) {
-            splits = await fetchSplits(res.swimId);
-            await new Promise(r => setTimeout(r, 100)); // Polite delay
-          }
-          
-          resultsWithSplits.push({
-            swimmer_id: res.swimmer_id,
-            meet_id: res.meet_id,
-            event: res.event,
-            time: res.time,
-            wa_pts: res.wa_pts,
-            date: res.date,
-            splits: splits,
-            course: course // Use the course detected for the meet
+              if (seId.toLowerCase().includes('reg') || event.toLowerCase().includes('event')) return;
+              
+              let swimmerId = swimmerMap[seId] || nameMap[swimmerName.toLowerCase()];
+              if (swimmerId) {
+                const timeLink = $meet(tds[7]).find('a').attr('href') || '';
+                const swimId = extractSwimId(timeLink);
+                resultsToInsert.push({
+                  swimmer_id: swimmerId,
+                  meet_id: meet.id,
+                  event,
+                  time,
+                  wa_pts: waPts,
+                  date: formatDate(dateStr) || meet.date,
+                  swimId
+                });
+              }
+            }
           });
-        }
 
-        await supabase.from('results').delete().eq('meet_id', meet.id);
-        const { error: resultsError } = await supabase.from('results').insert(resultsWithSplits);
-        if (!resultsError) totalResultsScraped += resultsWithSplits.length;
+          if (resultsToInsert.length > 0) {
+            const resultsWithSplits = [];
+            for (const res of resultsToInsert) {
+              let splits = null;
+              if (res.swimId) {
+                splits = await fetchSplits(res.swimId);
+                await new Promise(r => setTimeout(r, 50)); // Tiny polite delay
+              }
+              resultsWithSplits.push({
+                swimmer_id: res.swimmer_id,
+                meet_id: res.meet_id,
+                event: res.event,
+                time: res.time,
+                wa_pts: res.wa_pts,
+                date: res.date,
+                splits: splits,
+                course: course
+              });
+            }
+
+            await supabase.from('results').delete().eq('meet_id', meet.id);
+            const { error: resultsError } = await supabase.from('results').insert(resultsWithSplits);
+            if (!resultsError) {
+              totalResultsScraped += resultsWithSplits.length;
+            }
+          }
+        } catch (err) {
+          console.error(`Error scraping results for ${meet.name}:`, err);
+        }
       }
-    }
+    };
+    
+    const workers = Array(concurrency).fill(null).map(() => runWorker());
+    await Promise.all(workers);
 
     sendProgress(`Success! Scraped ${insertedMeets.length} meets and ${totalResultsScraped} individual results.`, 100, true);
+    // Trigger PB Reconciler in the background
+    fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/reconcile-pbs`, { method: 'POST' }).catch(console.error);
     res.end();
+
 
   } catch (error) {
     console.error('Meet Scrape Error:', error);

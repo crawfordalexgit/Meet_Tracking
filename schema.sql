@@ -245,6 +245,7 @@ CREATE TABLE public.ai_reports (
     swimmer_id UUID REFERENCES public.swimmers(id) ON DELETE CASCADE,
     squad_id UUID REFERENCES public.squads(id) ON DELETE CASCADE,
     type TEXT NOT NULL, -- 'weekly', 'monthly', 'meet'
+    meet_id UUID REFERENCES public.meets(id) ON DELETE CASCADE,
     content JSONB NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -265,7 +266,8 @@ CREATE TABLE public.benchmarks (
     course TEXT NOT NULL, -- 'SC', 'LC'
     time_standard TEXT NOT NULL, -- The qualifying time string
     time_seconds FLOAT NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    UNIQUE(category, year, gender, age_group, event, course)
 );
 ALTER TABLE public.benchmarks ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Benchmarks are viewable by all authenticated." 
@@ -287,3 +289,51 @@ CREATE POLICY "Exemptions are viewable by all authenticated."
 ON public.club_exemptions FOR SELECT TO authenticated USING (true);
 GRANT ALL ON public.club_exemptions TO service_role;
 GRANT ALL ON public.club_exemptions TO authenticated;
+
+-- 13. User Issues Table
+CREATE TABLE public.user_issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    type TEXT NOT NULL,
+    user_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+ALTER TABLE public.user_issues ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Issues can be inserted by authenticated users."
+ON public.user_issues FOR INSERT
+TO authenticated
+WITH CHECK (true);
+CREATE POLICY "Issues can be viewed by authenticated users."
+ON public.user_issues FOR SELECT
+TO authenticated
+USING (true);
+GRANT ALL ON public.user_issues TO service_role;
+GRANT ALL ON public.user_issues TO authenticated;
+
+-- Add upvotes column to user_issues table
+ALTER TABLE public.user_issues ADD COLUMN IF NOT EXISTS upvotes INTEGER DEFAULT 0;
+
+-- 14. Issue Upvotes Table
+CREATE TABLE IF NOT EXISTS public.issue_upvotes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    issue_id UUID NOT NULL REFERENCES public.user_issues(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    UNIQUE (issue_id, user_id)
+);
+ALTER TABLE public.issue_upvotes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Upvotes can be inserted by authenticated users."
+ON public.issue_upvotes FOR INSERT
+TO authenticated
+WITH CHECK (true);
+
+CREATE POLICY "Upvotes can be viewed by authenticated users."
+ON public.issue_upvotes FOR SELECT
+TO authenticated
+USING (true);
+
+GRANT ALL ON public.issue_upvotes TO service_role;
+GRANT ALL ON public.issue_upvotes TO authenticated;
+

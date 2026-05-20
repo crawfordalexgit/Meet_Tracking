@@ -31,3 +31,23 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# scratchpad and local debugging
+/scratch/
+/meet_text_dump.txt
+
+# backups
+/_backups/
+/backup_pre_ui_changes/
+
+# reports and static reference materials
+/Reports/
+/AiTraining/
+
+# root-level debug logs and data dumps
+/*.html
+/*.json
+/*.log
+/*.txt
+
+
