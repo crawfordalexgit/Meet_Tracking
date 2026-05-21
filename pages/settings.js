@@ -29,6 +29,10 @@ export default function Settings({ session, scmApiKey }) {
   const [rankingsScrapeProgress, setRankingsScrapeProgress] = useState(0);
   const [isRankingsScraping, setIsRankingsScraping] = useState(false);
 
+  const [globalPbSyncStatus, setGlobalPbSyncStatus] = useState(null);
+  const [globalPbSyncProgress, setGlobalPbSyncProgress] = useState(0);
+  const [isGlobalPbSyncing, setIsGlobalPbSyncing] = useState(false);
+
   const [coaches, setCoaches] = useState([]);
   const [squads, setSquads] = useState([]);
   const [coachSquads, setCoachSquads] = useState([]);
@@ -462,6 +466,54 @@ export default function Settings({ session, scmApiKey }) {
     }
   };
 
+  const handleGlobalPbSync = async (e) => {
+    if (e) e.preventDefault();
+    setIsGlobalPbSyncing(true);
+    setGlobalPbSyncProgress(0);
+    setGlobalPbSyncStatus({ type: 'info', text: 'Starting Global PB Sync...' });
+
+    try {
+      const response = await fetch('/api/sync-pbs', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (line.trim().startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.trim().substring(6));
+              setGlobalPbSyncStatus({ type: data.error ? 'error' : 'info', text: data.message });
+              setGlobalPbSyncProgress(data.progress);
+              if (data.isDone) {
+                setIsGlobalPbSyncing(false);
+                setGlobalPbSyncStatus({ type: data.error ? 'error' : 'success', text: data.message });
+                if (data.error) toast.error(data.message || 'PB sync failed');
+                else toast.success(data.message || 'PB sync complete!');
+              }
+            } catch (e) {
+              console.error('Error parsing SSE:', e);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setGlobalPbSyncStatus({ type: 'error', text: err.message });
+      setIsGlobalPbSyncing(false);
+    }
+  };
+
   const handleHistoricalAttendanceSync = async (e) => {
     e.preventDefault();
     setIsAttendanceScraping(true);
@@ -782,6 +834,24 @@ export default function Settings({ session, scmApiKey }) {
                   {isRankingsScraping && (
                     <div className="progress-bg mt-4">
                       <div className="progress-fill" style={{ width: `${rankingsScrapeProgress}%` }}></div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="card">
+                  <h3>Global PB Sync</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Sync personal best times and splits for all swimmers from Swimming Results.</p>
+                  {globalPbSyncStatus && <div className={`alert ${globalPbSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{globalPbSyncStatus.text}</div>}
+                  <button 
+                    onClick={handleGlobalPbSync} 
+                    className="btn btn-primary w-full" 
+                    disabled={isGlobalPbSyncing}
+                  >
+                    {isGlobalPbSyncing ? 'Syncing...' : 'Start Global PB Sync'}
+                  </button>
+                  {isGlobalPbSyncing && (
+                    <div className="progress-bg mt-4">
+                      <div className="progress-fill" style={{ width: `${globalPbSyncProgress}%` }}></div>
                     </div>
                   )}
                 </div>

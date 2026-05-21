@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 export default function AiInsightCard({ 
   swimmerId, 
@@ -9,14 +10,48 @@ export default function AiInsightCard({
   targetMeets = 0,
   complianceRate = 0,
   squadTargetCompliance = 75,
-  insight,
-  loading,
+  insight: initialInsight,
+  loading: initialLoading,
   onGenerate
 }) {
+  const [insight, setInsight] = useState(initialInsight || null);
+  const [loading, setLoading] = useState(initialLoading || false);
   const [isEditing, setIsEditing] = useState(false);
   const [correction, setCorrection] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [coachNotes, setCoachNotes] = useState('');
+
+  useEffect(() => {
+    if (swimmerId) fetchLatestInsight();
+  }, [swimmerId]);
+
+  const fetchLatestInsight = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('swimmer_insights')
+        .select('*')
+        .eq('swimmer_id', swimmerId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (data && data.length > 0) {
+        setInsight(data[0].full_report || data[0]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch insight', err);
+    }
+  };
+
+  useEffect(() => {
+    if (initialInsight) {
+      setInsight(initialInsight);
+    }
+  }, [initialInsight]);
+
+  useEffect(() => {
+    if (initialLoading !== undefined) {
+      setLoading(initialLoading);
+    }
+  }, [initialLoading]);
 
   const generateInsight = async (type = 'general') => {
     if (onGenerate) {
@@ -62,40 +97,58 @@ export default function AiInsightCard({
 
   if (!insight && !loading) {
     return (
-      <div className="glass-card animate-fade-in no-print" style={{ textAlign: 'center', padding: '3rem' }}>
-        <div className="section-title" style={{ justifyContent: 'center' }}>CoachesEye Insights Lab</div>
-        <h3 style={{ marginBottom: '1rem', fontSize: '1.8rem', fontWeight: 900 }}>Technical Performance Analysis</h3>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', maxWidth: '500px', margin: '0 auto 2rem', fontSize: '0.9rem' }}>
-          Synthesizing technical metrics, drop-off ratios, and technical conversion benchmarks into an actionable technical roadmap.
-        </p>
-        <div style={{ maxWidth: '500px', margin: '0 auto 2rem', textAlign: 'left' }}>
-          <label style={{ fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '8px' }}>Coach Notes (AI Instructions)</label>
-          <textarea
-            className="glass-input w-full"
-            placeholder="Specify focus areas for this analysis (e.g. 'Focus on training consistency gap' or 'Technical progression in Backstroke')..."
-            value={coachNotes}
-            onChange={(e) => setCoachNotes(e.target.value)}
-            style={{ 
-              minHeight: '80px', 
-              fontSize: '0.85rem', 
-              background: 'rgba(0,0,0,0.3)', 
-              border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '12px',
-              color: '#fff',
-              padding: '12px',
-              width: '100%',
-              fontFamily: 'inherit',
-              resize: 'vertical'
-            }}
-          />
-        </div>
-        <div className="flex justify-between gap-4" style={{ justifyContent: 'center' }}>
-          <button className="intel-toggle" onClick={() => generateInsight('general')}>
-            <span>✨</span> Performance Insight
-          </button>
-          <button className="intel-toggle" onClick={() => generateInsight('burnout')} style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)', background: 'rgba(244, 63, 94, 0.1)' }}>
-            <span>🔥</span> Burnout Check
-          </button>
+      <div className="glass-card animate-fade-in no-print" style={{ padding: '1.5rem 2rem' }}>
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+          <div style={{ flex: '1 1 30%', minWidth: '200px' }}>
+            <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '4px' }}>CoachesEye Insights Lab</div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 900, margin: '0 0 6px 0', letterSpacing: '-0.02em' }}>Technical Performance Analysis</h3>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', lineHeight: '1.4', margin: 0 }}>
+              Synthesizing technical metrics, drop-off ratios, and technical benchmarks into an actionable technical roadmap.
+            </p>
+          </div>
+          
+          <div style={{ flex: '2 1 45%', width: '100%', minWidth: '250px' }}>
+            <label style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '6px', letterSpacing: '0.05em' }}>
+              Coach Notes (AI Instructions)
+            </label>
+            <textarea
+              className="glass-input w-full"
+              placeholder="Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')..."
+              value={coachNotes}
+              onChange={(e) => setCoachNotes(e.target.value)}
+              style={{ 
+                minHeight: '60px', 
+                fontSize: '0.8rem', 
+                background: 'rgba(0,0,0,0.3)', 
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '8px',
+                color: '#fff',
+                padding: '8px 12px',
+                width: '100%',
+                fontFamily: 'inherit',
+                resize: 'none'
+              }}
+            />
+          </div>
+          
+          <div className="flex flex-col gap-2" style={{ flex: '1 1 20%', minWidth: '160px', width: '100%' }}>
+            <button className="intel-toggle w-full" onClick={() => generateInsight('general')} style={{ padding: '10px 16px', fontSize: '0.8rem' }}>
+              <span>✨</span> Performance Insight
+            </button>
+            <button 
+              className="intel-toggle w-full" 
+              onClick={() => generateInsight('burnout')} 
+              style={{ 
+                borderColor: 'var(--accent-rose)', 
+                color: 'var(--accent-rose)', 
+                background: 'rgba(244, 63, 94, 0.1)',
+                padding: '10px 16px',
+                fontSize: '0.8rem'
+              }}
+            >
+              <span>🔥</span> Burnout Check
+            </button>
+          </div>
         </div>
       </div>
     );

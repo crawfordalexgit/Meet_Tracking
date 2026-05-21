@@ -148,7 +148,7 @@ export default function ChatBot({ clubDNA }) {
       <style jsx>{`
         .chatbot-container {
           position: fixed;
-          bottom: 2rem;
+          bottom: 6rem;
           right: 2rem;
           z-index: 1000;
         }

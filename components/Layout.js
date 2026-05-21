@@ -3,11 +3,13 @@ import { supabase } from '../lib/supabase';
 import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import IssueModal from './IssueModal';
+import ChangelogModal from './ChangelogModal';
 
 export default function Layout({ children, session, hideNav = false }) {
   const router = useRouter();
   const [profile, setProfile] = useState({ role: 'headcoach' });
   const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
+  const [changelogVisible, setChangelogVisible] = useState(false);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -555,6 +557,40 @@ export default function Layout({ children, session, hideNav = false }) {
         /* Utils */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        .changelog-trigger {
+          position: fixed;
+          bottom: 2rem;
+          right: 2rem;
+          background: rgba(15, 20, 30, 0.95);
+          border: 1px solid rgba(0, 212, 255, 0.3);
+          color: #fff;
+          padding: 12px 24px;
+          border-radius: 30px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.85rem;
+          font-weight: 800;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 15px rgba(0, 212, 255, 0.1);
+          backdrop-filter: blur(10px);
+          z-index: 9999;
+          transition: all 0.3s ease;
+        }
+
+        .changelog-trigger:hover {
+          border: 1px solid rgba(0, 212, 255, 0.8);
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 212, 255, 0.3);
+          transform: translateY(-2px);
+        }
+
+        @media (max-width: 768px) {
+          .changelog-trigger {
+            bottom: 5rem !important;
+            right: 7.5rem !important;
+          }
+        }
       `}</style>
 
       {!hideNav && (
@@ -571,6 +607,17 @@ export default function Layout({ children, session, hideNav = false }) {
           ))}
         </nav>
       )}
+
+      {/* Changelog Floating Trigger Button */}
+      <button 
+        onClick={() => setChangelogVisible(true)}
+        className="changelog-trigger no-print"
+      >
+        <span>🚀</span> What's New
+      </button>
+
+      {/* Changelog Modal */}
+      <ChangelogModal isOpen={changelogVisible} onClose={() => setChangelogVisible(false)} />
     </div>
   );
 }

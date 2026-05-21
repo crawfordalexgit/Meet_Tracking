@@ -51,12 +51,30 @@ export default async function handler(req, res) {
         if (pbs.length > 0) {
           const pbsWithSplits = [];
           for (const pb of pbs) {
-            let splits = null;
-            if (pb.swimId) {
+            let splits = pb.splits;
+            if (!splits && pb.swimId) {
               // Fetch splits if available
               splits = await fetchSplits(pb.swimId);
               // Small delay to be polite
               await new Promise(r => setTimeout(r, 100));
+            }
+            
+            // Database splits fallback query
+            if (!splits) {
+              const resultsCourse = pb.course === 'S' ? 'SC' : 'LC';
+              const { data: matchedResults } = await supabase
+                .from('results')
+                .select('splits')
+                .eq('swimmer_id', swimmer.id)
+                .eq('event', pb.event)
+                .eq('time', pb.time)
+                .eq('course', resultsCourse)
+                .eq('date', pb.date)
+                .not('splits', 'is', null);
+              
+              if (matchedResults && matchedResults.length > 0) {
+                splits = matchedResults[0].splits;
+              }
             }
             
             pbsWithSplits.push({
@@ -73,9 +91,18 @@ export default async function handler(req, res) {
             });
           }
 
-          const { error: pbError } = await supabase
+          let { error: pbError } = await supabase
             .from('swimmer_pbs')
             .upsert(pbsWithSplits, { onConflict: 'swimmer_id, event, course' });
+
+          if (pbError && pbError.message && pbError.message.includes('level')) {
+            console.warn(`[PB Sync] 'level' column not found in swimmer_pbs. Retrying without it.`);
+            const cleanedPbs = pbsWithSplits.map(({ level, ...rest }) => rest);
+            const { error: retryError } = await supabase
+              .from('swimmer_pbs')
+              .upsert(cleanedPbs, { onConflict: 'swimmer_id, event, course' });
+            pbError = retryError;
+          }
 
           if (pbError) throw pbError;
           synced++;
@@ -109,27 +136,41 @@ async function scrapePBs(tiref, lastName = '') {
   
   const pbs = [];
 
-  // Find all rows in all tables
-  $('tr').each((i, row) => {
+  // Find all rows in all tables and sequentially fetch true splits
+  const rows = $('tr').toArray();
+  for (const row of rows) {
     const tds = $(row).find('td');
     if (tds.length >= 6) {
       const event = $(tds[0]).text().trim();
-      const time = $(tds[1]).text().trim();
+      // Column 2 contains the time and the split link on the PB page
+      const timeNode = $(tds[1]); 
+      const time = timeNode.text().trim();
       const dateStr = $(tds[4]).text().trim();
       const gala = $(tds[5]).text().trim();
 
       // Skip headers
-      if (event.toLowerCase().includes('event') || time.toLowerCase().includes('time')) return;
+      const eventLower = event.toLowerCase();
+      if (
+        eventLower === 'event' || 
+        eventLower === 'stroke' || 
+        eventLower === 'event / stroke' ||
+        time.toLowerCase().includes('time')
+      ) continue;
 
       if (event && time && dateStr && dateStr.includes('/')) {
-        // Time link often contains the swimid for splits
-        const timeLink = $(tds[1]).find('a').attr('href') || '';
-        const swimId = extractSwimId(timeLink);
+        // Extract swimid and fetch true in-race splits
+        const href = timeNode.find('a').attr('href');
+        const swimid = href ? extractSwimId(href) : null;
+        let splits = null;
+
+        if (swimid) {
+          splits = await fetchSplits(swimid);
+          // Small delay to be polite
+          await new Promise(r => setTimeout(r, 100));
+        }
 
         // Figure out course: find the nearest preceding heading or look at the time link
         let course = 'S';
-        const pageTextBefore = $(row).prevAll().text().toLowerCase();
-        // Also check the event link itself, often has tcourse=L or S
         const eventLink = $(tds[0]).find('a').attr('href') || '';
         if (eventLink.includes('tcourse=L')) {
             course = 'L';
@@ -142,11 +183,19 @@ async function scrapePBs(tiref, lastName = '') {
             if (prev.indexOf('long course') > prev.indexOf('short course')) course = 'L';
         }
 
-        // Detect level (L1, L2, L3, L4) from gala name
+        // Detect level (L1, L2, L3, L4) from lvl column or gala name
         let level = null;
-        const levelMatch = gala.match(/Level\s*([1-4])|L([1-4])\b/i);
-        if (levelMatch) {
-          level = 'L' + (levelMatch[1] || levelMatch[2]);
+        if (tds.length >= 9) {
+          const lvlText = $(tds[8]).text().trim();
+          if (lvlText && ['1', '2', '3', '4'].includes(lvlText)) {
+            level = 'L' + lvlText;
+          }
+        }
+        if (!level) {
+          const levelMatch = gala.match(/Level\s*([1-4])|L([1-4])\b/i);
+          if (levelMatch) {
+            level = 'L' + (levelMatch[1] || levelMatch[2]);
+          }
         }
 
         pbs.push({
@@ -155,12 +204,13 @@ async function scrapePBs(tiref, lastName = '') {
           time,
           date: formatDate(dateStr),
           gala,
-          level, // New column
-          swimId // Store temporarily to fetch splits
+          level,
+          splits,
+          swimId: swimid // Store temporarily for outer flow if needed
         });
       }
     }
-  });
+  }
 
   return pbs;
 }

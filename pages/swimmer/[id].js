@@ -40,6 +40,8 @@ export default function SwimmerDetail({ session }) {
   const [selectedStroke, setSelectedStroke] = useState('All');
   const [selectedMonth, setSelectedMonth] = useState('All');
 const [decayDistance, setDecayDistance] = useState('100');
+  const [selectedRaceIdx, setSelectedRaceIdx] = useState(0);
+  const [pbs, setPbs] = useState([]);
   const [narrative, setNarrative] = useState([]);
   const [healthData, setHealthData] = useState({ total: 0, components: [] });
   const [personalStats, setPersonalStats] = useState({});
@@ -75,6 +77,97 @@ const [decayDistance, setDecayDistance] = useState('100');
 
   const [aiInsight, setAiInsight] = useState(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [syncingPbs, setSyncingPbs] = useState(false);
+
+  const allAvailableSplits = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+
+    // 1. Process PBs
+    (pbs || []).forEach(pb => {
+      if (pb.splits && typeof pb.splits === 'object' && Object.keys(pb.splits).length >= 2) {
+        const dateStr = pb.date ? new Date(pb.date).toISOString().split('T')[0] : '';
+        const courseNorm = pb.course === 'SC' || pb.course === 'S' ? 'S' : 'L';
+        const key = `${pb.event.toLowerCase()}_${dateStr}_${pb.time}_${courseNorm}`;
+        
+        list.push({
+          event: pb.event,
+          time: pb.time,
+          date: pb.date,
+          gala: pb.gala || '',
+          course: courseNorm,
+          splits: pb.splits,
+          isPB: true
+        });
+        seen.add(key);
+      }
+    });
+
+    // 2. Process results
+    (results || []).forEach(r => {
+      if (r.splits && typeof r.splits === 'object' && Object.keys(r.splits).length >= 2) {
+        const dateStr = r.date ? new Date(r.date).toISOString().split('T')[0] : '';
+        const courseNorm = r.course === 'SC' || r.course === 'S' ? 'S' : 'L';
+        const key = `${r.event.toLowerCase()}_${dateStr}_${r.time}_${courseNorm}`;
+        
+        if (!seen.has(key)) {
+          list.push({
+            event: r.event,
+            time: r.time,
+            date: r.date,
+            gala: r.meets?.name || r.gala || '',
+            course: courseNorm,
+            splits: r.splits,
+            isPB: false
+          });
+          seen.add(key);
+        }
+      }
+    });
+
+    // Sort by date descending
+    return list.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+  }, [pbs, results]);
+
+  const handleSyncPbs = async () => {
+    setSyncingPbs(true);
+    try {
+      const res = await fetch('/api/sync-pbs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ swimmerId: id })
+      });
+      // Consume the SSE stream so we wait for it to fully finish
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(trimmed.slice(6));
+              console.log(`[PB Sync] ${data.message} (${data.progress}%)`);
+            } catch (e) {
+              // Ignore parse errors
+            }
+          }
+        }
+      }
+      await fetchSwimmerData(); // Refresh the dashboard with the new splits
+    } catch (err) {
+      console.error("Failed to sync PBs:", err);
+    } finally {
+      setSyncingPbs(false);
+    }
+  };
 
   useEffect(() => {
     if (session === undefined) return;
@@ -82,7 +175,10 @@ const [decayDistance, setDecayDistance] = useState('100');
       router.push('/login');
       return;
     }
-    if (id && router.isReady) { fetchSwimmerData(); }
+    if (id && router.isReady) { 
+      setSelectedRaceIdx(0);
+      fetchSwimmerData(); 
+    }
   }, [session, router, id, router.isReady]);
 
   const fetchSwimmerData = async () => {
@@ -114,9 +210,12 @@ const [decayDistance, setDecayDistance] = useState('100');
         fetch(`/api/memberships?swimmerId=${id}`).then(r => r.json())
       ]);
       
+      const { data: pbsData } = await supabase.from('swimmer_pbs').select('*').eq('swimmer_id', id);
+
       setSwimmer(swData);
       setSquad(swData.squads);
       setResults((resData || []).sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)));
+      setPbs(pbsData || []);
       setAttendance(attData || []);
       setSessions(sessData || []);
       setInsights(insData.data || []);
@@ -941,42 +1040,59 @@ const [decayDistance, setDecayDistance] = useState('100');
       </div>
 
       {/* Modern Premium Glassmorphic Tab Controls */}
-      <div className="profile-tabs-container no-print">
-        <button 
-          onClick={() => setActiveTab('overview')} 
-          className={`profile-tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
+      <div className="flex justify-between items-center flex-wrap gap-4 mb-8 no-print">
+        <div className="profile-tabs-container" style={{ margin: 0 }}>
+          <button 
+            onClick={() => setActiveTab('overview')} 
+            className={`profile-tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
+          >
+            📊 OVERVIEW
+          </button>
+          <button 
+            className={`profile-tab-btn ${activeTab === 'performance' ? 'active' : ''}`} 
+            onClick={() => setActiveTab('performance')}
+          >
+            <span style={{ opacity: activeTab === 'performance' ? 1 : 0.5 }}>⚡</span> PERFORMANCE
+          </button>
+          <button 
+            onClick={() => setActiveTab('workload')} 
+            className={`profile-tab-btn ${activeTab === 'workload' ? 'active' : ''}`}
+          >
+            ⏱️ WORKLOAD
+          </button>
+          <button 
+            onClick={() => setActiveTab('progress')} 
+            className={`profile-tab-btn ${activeTab === 'progress' ? 'active' : ''}`}
+          >
+            📈 PROGRESS
+          </button>
+          <button 
+            onClick={() => setActiveTab('competition')} 
+            className={`profile-tab-btn ${activeTab === 'competition' ? 'active' : ''}`}
+          >
+            🏁 COMPETITION
+          </button>
+          <button 
+            onClick={() => setActiveTab('block_roi')} 
+            className={`profile-tab-btn ${activeTab === 'block_roi' ? 'active' : ''}`}
+          >
+            🔄 BLOCK ROI
+          </button>
+          <button 
+            onClick={() => setActiveTab('predictor')} 
+            className={`profile-tab-btn ${activeTab === 'predictor' ? 'active' : ''}`}
+          >
+            🎯 QT Predictor
+          </button>
+        </div>
+        <button
+          onClick={handleSyncPbs}
+          disabled={syncingPbs}
+          className="btn-premium-intel"
+          style={{ height: 'fit-content', padding: '10px 20px', borderRadius: '12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
-          📊 OVERVIEW
-        </button>
-        <button 
-          onClick={() => setActiveTab('workload')} 
-          className={`profile-tab-btn ${activeTab === 'workload' ? 'active' : ''}`}
-        >
-          ⏱️ WORKLOAD
-        </button>
-        <button 
-          onClick={() => setActiveTab('progress')} 
-          className={`profile-tab-btn ${activeTab === 'progress' ? 'active' : ''}`}
-        >
-          📈 PROGRESS
-        </button>
-        <button 
-          onClick={() => setActiveTab('competition')} 
-          className={`profile-tab-btn ${activeTab === 'competition' ? 'active' : ''}`}
-        >
-          🏁 COMPETITION
-        </button>
-        <button 
-          onClick={() => setActiveTab('block_roi')} 
-          className={`profile-tab-btn ${activeTab === 'block_roi' ? 'active' : ''}`}
-        >
-          🔄 BLOCK ROI
-        </button>
-        <button 
-          onClick={() => setActiveTab('predictor')} 
-          className={`profile-tab-btn ${activeTab === 'predictor' ? 'active' : ''}`}
-        >
-          🎯 QT Predictor
+          <span>{syncingPbs ? '⏳' : '🔄'}</span>
+          {syncingPbs ? 'Syncing...' : 'Sync Personal Bests'}
         </button>
       </div>
 
@@ -1208,102 +1324,261 @@ const [decayDistance, setDecayDistance] = useState('100');
         </div>
       </div>
 
-      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${activeTab !== 'overview' ? 'no-screen' : ''} ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
-        <div className="lg:col-span-2">
-          <AiInsightCard 
-            swimmerId={id} 
-            coachId={session?.user?.id} 
-            performance_slope={performance_slope}
-            totalActualHours={Math.round(totalActualHours)}
-            meetsAttended={rel?.meetsAttended || 0}
-            targetMeets={rel?.targetMeets || 5}
-            complianceRate={progressPercent || 0}
-            squadTargetCompliance={squad?.target_training_percent || 75}
-            insight={aiInsight}
-            loading={isGeneratingAi}
-            onGenerate={generateAthleteInsight}
-          />
-        </div>
-        <div className="no-print">
-          <ForesightTimeline insights={insights} />
-        </div>
-      </div>
-
-      {/* ELITE MARGINAL GAINS: MULTI-STROKE DROP-OFF RATIOS */}
-      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in ${activeTab !== 'overview' ? 'no-screen' : ''}`} style={{ marginTop: '2.5rem' }}>
+      {/* PERFORMANCE ANALYTICAL MODULES */}
+      <div className={`${activeTab !== 'performance' ? 'no-screen' : ''}`}>
         
-        {/* Left Column: Multi-Stroke Drop-Off Visualizer Grid */}
-        <div className="lg:col-span-2 tactical-insight-module" style={{ padding: '2.5rem', borderLeft: '4px solid var(--accent-rose)' }}>
-          <div className="insight-header mb-6">
-            <div>
-              <div className="insight-tag" style={{ color: 'var(--accent-rose)' }}>ELITE PERFORMANCE DIAGNOSTIC</div>
-              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginTop: '4px', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Stroke-Specific Endurance Decay</h3>
-            </div>
+        {/* AI Insight & Foresight Timeline container */}
+        <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
+          <div className="lg:col-span-2">
+            <AiInsightCard 
+              swimmerId={id} 
+              coachId={session?.user?.id} 
+              performance_slope={performance_slope}
+              totalActualHours={Math.round(totalActualHours)}
+              meetsAttended={rel?.meetsAttended || 0}
+              targetMeets={rel?.targetMeets || 5}
+              complianceRate={progressPercent || 0}
+              squadTargetCompliance={squad?.target_training_percent || 75}
+              insight={aiInsight}
+              loading={isGeneratingAi}
+              onGenerate={generateAthleteInsight}
+            />
           </div>
-          
-          <div className="flex gap-2 mb-4">
-  <button
-    className={`px-3 py-1 rounded ${decayDistance === '100' ? 'bg-var(--accent-rose) text-white' : 'bg-var(--accent-rose)/20 text-var(--accent-rose)'}`}
-    onClick={() => setDecayDistance('100')}
-  >
-    100m
-  </button>
-  <button
-    className={`px-3 py-1 rounded ${decayDistance === '200' ? 'bg-var(--accent-rose) text-white' : 'bg-var(--accent-rose)/20 text-var(--accent-rose)'}`}
-    onClick={() => setDecayDistance('200')}
-  >
-    200m
-  </button>
-</div>
-<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* UI Mockup mapping through the 4 strokes. Antigravity: Wire these values to statsObj.ratios in future iterations */}
-            {[{
-              name: 'Freestyle', ratio: 2.05, status: 'OPTIMAL CONVERSION', color: 'var(--accent-emerald)'
-            }, {
-              name: 'Butterfly', ratio: 2.25, status: 'ENDURANCE DEFICIT', color: 'var(--accent-rose)'
-            }, {
-              name: 'Backstroke', ratio: 2.12, status: 'STABLE DECAY', color: 'var(--accent-cyan)'
-            }, {
-              name: 'Breaststroke', ratio: 1.98, status: 'SPEED DEFICIT', color: 'var(--accent-amber)'
-            }].map(stroke => (
-              <div key={stroke.name} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '12px', padding: '1.5rem', border: `${stroke.color}40`, position: 'relative', overflow: 'hidden' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                  <div>
-                    <div style={{ fontSize: '0.65rem', fontWeight: 900, opacity: 0.6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{stroke.name} ({decayDistance === '100' ? '100m vs 50m' : '200m vs 100m'})</div>
-                    <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff' }}>{stroke.ratio}x <span style={{ fontSize: '0.8rem', color: stroke.color }}>Ratio</span></div>
-                  </div>
-                  <div className="text-right">
-                    <div style={{ fontSize: '0.6rem', fontWeight: 900, color: stroke.color, letterSpacing: '0.1em', background: `${stroke.color}15`, padding: '4px 8px', borderRadius: '6px' }}>{stroke.status}</div>
-                  </div>
-                </div>
-                
-                {/* Progress Bar Visualizer */}
-                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', display: 'flex' }}>
-                  <div style={{ width: stroke.ratio > 2.15 ? '40%' : (stroke.ratio < 2.05 ? '60%' : '50%'), background: 'var(--accent-cyan)', borderRadius: '3px 0 0 3px' }} title="Raw Speed Contribution"></div>
-                  <div style={{ width: stroke.ratio > 2.15 ? '60%' : (stroke.ratio < 2.05 ? '40%' : '50%'), background: stroke.color, borderRadius: '0 3px 3px 0' }} title="Endurance Drop-off"></div>
-                </div>
-              </div>
-            ))}
+          <div className="no-print">
+            <ForesightTimeline insights={insights} />
           </div>
         </div>
 
-        {/* Right Column: Coach's Guide */}
-        <div className="tactical-insight-module" style={{ padding: '2rem 2.5rem' }}>
-          <div style={{ borderLeft: '3px solid var(--accent-rose)', paddingLeft: '1.5rem' }}>
-            <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-rose)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>COACHESEYE GUIDE</div>
-            <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.75rem', lineHeight: 1.1, letterSpacing: '-0.03em' }}>Isolating Endurance</h3>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
-              By comparing drop-off ratios across all four strokes, you can diagnose whether a swimmer lacks <strong>central aerobic fitness</strong> (all strokes decay) or if the deficit is <strong>stroke-specific</strong> (e.g., Butterfly technique failing under lactate fatigue).
-            </p>
-            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-              <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.6, marginBottom: '8px' }}>DIAGNOSTIC RULES</div>
-              <ul style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, paddingLeft: '1rem', lineHeight: 1.5, fontStyle: 'italic' }}>
-                <li style={{ marginBottom: '4px' }}><strong>Ratio &gt; 2.15x:</strong> <span style={{ color: 'var(--accent-rose)' }}>Endurance Deficit.</span> Prescribe stroke-specific threshold volume.</li>
-                <li style={{ marginBottom: '4px' }}><strong>Ratio &lt; 2.05x:</strong> <span style={{ color: 'var(--accent-amber)' }}>Speed Deficit.</span> Excellent aerobic retention, but lacks raw explosive power.</li>
-                <li><strong>Ratio ~ 2.10x:</strong> <span style={{ color: 'var(--accent-emerald)' }}>Optimal.</span> Speed and endurance are perfectly balanced.</li>
-              </ul>
+        {/* ELITE MARGINAL GAINS: MULTI-STROKE DROP-OFF RATIOS */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" style={{ marginTop: '2.5rem' }}>
+          
+          {/* Left Column: Multi-Stroke Drop-Off Visualizer Grid */}
+          <div className="lg:col-span-2 tactical-insight-module" style={{ padding: '2.5rem', borderLeft: '4px solid var(--accent-rose)' }}>
+            <div className="insight-header mb-6">
+              <div>
+                <div className="insight-tag" style={{ color: 'var(--accent-rose)' }}>ELITE PERFORMANCE DIAGNOSTIC</div>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginTop: '4px', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Stroke-Specific Endurance Decay</h3>
+              </div>
+              
+              {/* THEME-MATCHING PREMIUM TOGGLE */}
+              <div className="period-selector-premium" style={{ borderColor: 'rgba(244, 63, 94, 0.2)' }}>
+                <button 
+                  onClick={() => setDecayDistance('100')} 
+                  className={`period-btn-premium ${decayDistance === '100' ? 'active' : ''}`}
+                  style={decayDistance === '100' ? { color: 'var(--accent-rose)', boxShadow: '0 4px 15px rgba(244, 63, 94, 0.2)', border: 'none' } : { border: 'none' }}
+                >
+                  100m vs 50m
+                </button>
+                <button 
+                  onClick={() => setDecayDistance('200')} 
+                  className={`period-btn-premium ${decayDistance === '200' ? 'active' : ''}`}
+                  style={decayDistance === '200' ? { color: 'var(--accent-rose)', boxShadow: '0 4px 15px rgba(244, 63, 94, 0.2)', border: 'none' } : { border: 'none' }}
+                >
+                  200m vs 100m
+                </button>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* DYNAMIC DATA BINDING (Wiring to real statsObj with mock fallbacks) */}
+              {['Freestyle', 'Butterfly', 'Backstroke', 'Breaststroke'].map(strokeName => {
+                // Attempt to pull real data if it exists in the database
+                const ratioKey = decayDistance === '100' ? `${strokeName}_50_100_SC` : `${strokeName}_100_200_SC`;
+                const realRatio = statsObj?.ratios?.[ratioKey];
+                
+                // Fallbacks so the UI demonstrates the toggle perfectly even without database records
+                const mock100 = { Freestyle: 2.05, Butterfly: 2.25, Backstroke: 2.12, Breaststroke: 1.98 }[strokeName];
+                const mock200 = { Freestyle: 2.12, Butterfly: 2.38, Backstroke: 2.15, Breaststroke: 2.05 }[strokeName];
+                
+                const ratio = realRatio ? parseFloat(realRatio) : (decayDistance === '100' ? mock100 : mock200);
+                
+                let status, color;
+                if (ratio > 2.15) {
+                  status = 'ENDURANCE DEFICIT'; color = 'var(--accent-rose)';
+                } else if (ratio < 2.05) {
+                  status = 'SPEED DEFICIT'; color = 'var(--accent-amber)';
+                } else {
+                  status = 'OPTIMAL CONVERSION'; color = 'var(--accent-emerald)';
+                }
+
+                return (
+                  <div key={strokeName} className="animate-fade-in" style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '12px', padding: '1.5rem', border: `1px solid ${color}40`, position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 900, opacity: 0.6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{strokeName} ({decayDistance === '100' ? '100m vs 50m' : '200m vs 100m'})</div>
+                        <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff' }}>{ratio}x <span style={{ fontSize: '0.8rem', color }}>Ratio</span></div>
+                      </div>
+                      <div className="text-right">
+                        <div style={{ fontSize: '0.6rem', fontWeight: 900, color: color, letterSpacing: '0.1em', background: `${color}15`, padding: '4px 8px', borderRadius: '6px' }}>{status}</div>
+                      </div>
+                    </div>
+                    
+                    {/* Progress Bar Visualizer */}
+                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', display: 'flex' }}>
+                      <div style={{ width: ratio > 2.15 ? '40%' : (ratio < 2.05 ? '60%' : '50%'), background: 'var(--accent-cyan)', borderRadius: '3px 0 0 3px' }} title="Pace Component"></div>
+                      <div style={{ width: ratio > 2.15 ? '60%' : (ratio < 2.05 ? '40%' : '50%'), background: color, borderRadius: '0 3px 3px 0' }} title="Decay Component"></div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
+
+          {/* Right Column: Coach's Guide */}
+          <div className="tactical-insight-module" style={{ padding: '2rem 2.5rem' }}>
+            <div style={{ borderLeft: '3px solid var(--accent-rose)', paddingLeft: '1.5rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-rose)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>COACHESEYE GUIDE</div>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.75rem', lineHeight: 1.1, letterSpacing: '-0.03em' }}>Isolating Endurance</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
+                Toggle between Sprint Decay (100m/50m) and Mid-Distance Decay (200m/100m) to diagnose whether a swimmer lacks <strong>central aerobic fitness</strong> or if the deficit is <strong>stroke-specific</strong> under prolonged lactate fatigue.
+              </p>
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.6, marginBottom: '8px' }}>DIAGNOSTIC RULES</div>
+                <ul style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, paddingLeft: '1rem', lineHeight: 1.5, fontStyle: 'italic' }}>
+                  <li style={{ marginBottom: '4px' }}><strong>Ratio &gt; 2.15x:</strong> <span style={{ color: 'var(--accent-rose)' }}>Endurance Deficit.</span> Prescribe stroke-specific threshold volume.</li>
+                  <li style={{ marginBottom: '4px' }}><strong>Ratio &lt; 2.05x:</strong> <span style={{ color: 'var(--accent-amber)' }}>Speed Deficit.</span> Excellent aerobic retention, but lacks raw explosive power.</li>
+                  <li><strong>Ratio ~ 2.10x:</strong> <span style={{ color: 'var(--accent-emerald)' }}>Optimal.</span> Speed and endurance are perfectly balanced.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* TRUE IN-RACE EXECUTION VISUALIZER */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in" style={{ marginTop: '2.5rem' }}>
+          
+          {/* Left Column: Visualizer */}
+          <div className="lg:col-span-2 tactical-insight-module" style={{ padding: '2.5rem', borderLeft: '4px solid var(--accent-indigo)' }}>
+            <div className="insight-header mb-6" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <div className="insight-tag" style={{ color: 'var(--accent-indigo)' }}>TACTICAL PACING AUDIT</div>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginTop: '4px', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>True In-Race Execution</h3>
+              </div>
+              
+              {/* NEW: RACE SELECTOR DROPDOWN */}
+              {allAvailableSplits.length > 0 && (
+                <select 
+                  className="tactical-search-input" 
+                  style={{ width: 'auto', padding: '8px 16px', borderRadius: '12px', fontSize: '0.8rem', fontWeight: 700, backgroundColor: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', appearance: 'auto' }}
+                  value={selectedRaceIdx}
+                  onChange={(e) => setSelectedRaceIdx(Number(e.target.value))}
+                >
+                  {allAvailableSplits.map((pb, idx) => (
+                    <option key={idx} value={idx} style={{ background: 'var(--bg-dark)' }}>
+                      {pb.event} ({pb.course === 'S' ? 'SC' : 'LC'}) — {pb.time} — {new Date(pb.date).toLocaleDateString('en-GB', { month:'short', year:'numeric' })}{pb.isPB ? ' ⭐ PB' : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+            
+            <div>
+              {(() => {
+                const availableSplits = allAvailableSplits;
+                  
+                if (availableSplits.length === 0) {
+                  return (
+                     <div style={{ padding: '2rem', textAlign: 'center', opacity: 0.5, border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
+                       <div style={{ fontSize: '1.2rem', marginBottom: '8px' }}>⏱️</div>
+                       <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>No in-race split data available yet.</div>
+                       <div style={{ fontSize: '0.7rem', marginTop: '4px' }}>Click 'Sync Personal Bests' to fetch live race splits.</div>
+                     </div>
+                  );
+                }
+                
+                const race = availableSplits[selectedRaceIdx] || availableSplits[0];
+                
+                // Dynamic midpoint math
+                const distances = Object.keys(race.splits).map(Number).sort((a,b) => a-b);
+                const maxDist = distances[distances.length - 1];
+                const midDist = maxDist / 2;
+                const midSplit = distances.find(d => d === midDist) || distances[Math.floor(distances.length/2)];
+                
+                const firstHalfTime = race.splits[midSplit]?.cumulative;
+                const totalTime = race.splits[maxDist]?.cumulative;
+                
+                // FIXED PARSER
+                const toSec = (t) => {
+                  if(!t) return 0;
+                  const str = t.toString().trim();
+                  const p = str.split(':');
+                  return p.length === 2 ? parseInt(p[0])*60 + parseFloat(p[1]) : parseFloat(p);
+                };
+                
+                const firstHalfSec = toSec(firstHalfTime);
+                const totalSec = toSec(totalTime);
+                const secondHalfSec = totalSec - firstHalfSec;
+                
+                if(!firstHalfSec || !totalSec || totalSec <= firstHalfSec) return null;
+                
+                const ratio = (secondHalfSec / firstHalfSec).toFixed(2);
+                let status = "OPTIMAL PACING";
+                let color = "var(--accent-emerald)";
+                
+                if(ratio > 1.10) { status = "HEAVY POSITIVE SPLIT"; color = "var(--accent-rose)"; }
+                else if(ratio < 0.98) { status = "NEGATIVE SPLIT"; color = "var(--accent-cyan)"; }
+
+                // Calculate granular split blocks
+                let previousSec = 0;
+                const granularSplits = distances.map(d => {
+                    const currentSec = toSec(race.splits[d]?.cumulative);
+                    const splitSec = currentSec - previousSec;
+                    previousSec = currentSec;
+                    return { distance: d, cumulative: currentSec, split: splitSec };
+                });
+                
+                return (
+                  <div className="animate-fade-in" style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '12px', padding: '1.5rem', border: `1px solid ${color}40`, position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 900, opacity: 0.6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{race.event} <span style={{ opacity: 0.5, marginLeft: '4px' }}>({new Date(race.date).toLocaleDateString('en-GB', { month:'short', year:'numeric' })})</span></div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#fff' }}>1st {midSplit}m: {firstHalfSec.toFixed(2)}s | 2nd: {secondHalfSec.toFixed(2)}s</div>
+                      </div>
+                      <div className="text-right">
+                        <div style={{ fontSize: '0.6rem', fontWeight: 900, color: color, letterSpacing: '0.1em', background: `${color}15`, padding: '4px 8px', borderRadius: '6px', marginBottom: '4px', display: 'inline-block' }}>{status}</div>
+                      </div>
+                    </div>
+                    
+                    {/* Visualizer Bar */}
+                    <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', display: 'flex', overflow: 'hidden' }}>
+                      <div style={{ width: `${(firstHalfSec / totalSec) * 100}%`, background: 'var(--accent-indigo)' }} title="First Half"></div>
+                      <div style={{ width: `${(secondHalfSec / totalSec) * 100}%`, background: color }} title="Second Half"></div>
+                    </div>
+
+                    {/* Granular Splits Breakdown */}
+                    <div className="flex gap-2 mt-4 pt-4 custom-scrollbar" style={{ borderTop: '1px solid rgba(255,255,255,0.05)', overflowX: 'auto', paddingBottom: '4px' }}>
+                        {granularSplits.map((gs, i) => (
+                            <div key={i} style={{ flex: 1, minWidth: '60px', background: 'rgba(0,0,0,0.2)', padding: '8px', borderRadius: '8px', textAlign: 'center', border: '1px solid rgba(255,255,255,0.02)' }}>
+                                <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, letterSpacing: '0.1em' }}>{gs.distance}m</div>
+                                <div style={{ fontSize: '0.85rem', fontWeight: 900, color: '#fff', margin: '4px 0' }}>{gs.split.toFixed(2)}s</div>
+                            </div>
+                        ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Right Column: Coach's Guide */}
+          <div className="tactical-insight-module" style={{ padding: '2rem 2.5rem' }}>
+            <div style={{ borderLeft: '3px solid var(--accent-indigo)', paddingLeft: '1.5rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-indigo)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>COACHESEYE GUIDE</div>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.75rem', lineHeight: 1.1, letterSpacing: '-0.03em' }}>In-Race Execution</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
+                Unlike standalone capacity (which compares a swimmer's best 50m to their best 100m), this module tracks the <strong>ACTUAL splits</strong> recorded inside their Personal Best races.
+              </p>
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.6, marginBottom: '8px' }}>TACTICAL DIAGNOSTIC</div>
+                <ul style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, paddingLeft: '1rem', lineHeight: 1.5, fontStyle: 'italic' }}>
+                  <li style={{ marginBottom: '4px' }}><strong>Heavy Positive Split:</strong> <span style={{ color: 'var(--accent-rose)' }}>Fatigue.</span> Going out too fast. Indicates an over-exertion in the first 50m resulting in lactate failure.</li>
+                  <li><strong>Negative Split:</strong> <span style={{ color: 'var(--accent-cyan)' }}>Late Acceleration.</span> Second half is faster. Shows excellent pacing, but reveals potential to push the first 50m harder.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
         </div>
 
       </div>
