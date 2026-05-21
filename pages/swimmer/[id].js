@@ -1581,6 +1581,80 @@ const [decayDistance, setDecayDistance] = useState('100');
 
         </div>
 
+        {/* LEAGUE SERIES TRACKER */}
+        {(() => {
+          const teamMeets = results.filter(r => r.meet?.type === 'team' || r.meet?.meet_type === 'team');
+          const teamMeetMap = {};
+          teamMeets.forEach(r => {
+            const key = r.meet?.id || r.meet_id;
+            if (!key) return;
+            if (!teamMeetMap[key]) {
+              teamMeetMap[key] = { name: r.meet?.name || 'Team Gala', date: r.meet?.date || r.date, races: 0, pbs: 0, waTotal: 0 };
+            }
+            teamMeetMap[key].races++;
+            if (r.is_pb) teamMeetMap[key].pbs++;
+            if (r.wa_points) teamMeetMap[key].waTotal += r.wa_points;
+          });
+          const teamMeetList = Object.values(teamMeetMap).sort((a, b) => new Date(b.date) - new Date(a.date));
+          return (
+            <div className="animate-fade-in" style={{ marginTop: '2.5rem' }}>
+              <div className="tactical-insight-module" style={{ padding: '2.5rem', borderLeft: '4px solid var(--accent-amber)' }}>
+                <div className="insight-header mb-6" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <div className="insight-tag" style={{ color: 'var(--accent-amber)' }}>TEAM COMPETITION AUDIT</div>
+                    <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginTop: '4px', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>League Series Tracker</h3>
+                  </div>
+                  <div style={{ padding: '6px 14px', borderRadius: '20px', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-amber)', letterSpacing: '0.1em' }}>
+                    {teamMeetList.length} TEAM {teamMeetList.length === 1 ? 'GALA' : 'GALAS'} THIS SEASON
+                  </div>
+                </div>
+                {teamMeetList.length === 0 ? (
+                  <div style={{ padding: '2.5rem', textAlign: 'center', opacity: 0.45, border: '1px dashed rgba(255,255,255,0.08)', borderRadius: '12px' }}>
+                    <div style={{ fontSize: '1.5rem', marginBottom: '8px' }}>🏆</div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700 }}>No team meets recorded yet.</div>
+                    <div style={{ fontSize: '0.7rem', marginTop: '4px', opacity: 0.6 }}>Team galas with type set to &quot;team&quot; will appear here automatically.</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {teamMeetList.map((meet, idx) => {
+                      const avgWA = meet.races > 0 ? Math.round(meet.waTotal / meet.races) : 0;
+                      const pbRate = meet.races > 0 ? Math.round((meet.pbs / meet.races) * 100) : 0;
+                      const trendColor = pbRate >= 50 ? 'var(--accent-emerald)' : pbRate >= 25 ? 'var(--accent-amber)' : 'var(--accent-rose)';
+                      const trendLabel = pbRate >= 50 ? 'STRONG' : pbRate >= 25 ? 'MODERATE' : 'DEVELOPING';
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', background: 'rgba(255,255,255,0.02)', padding: '1.25rem 1.5rem', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                        >
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.9rem', fontWeight: 900, color: '#fff', marginBottom: '2px' }}>{meet.name}</div>
+                            <div style={{ fontSize: '0.65rem', opacity: 0.45, fontWeight: 700 }}>{meet.date ? new Date(meet.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</div>
+                          </div>
+                          <div style={{ textAlign: 'center', minWidth: '48px' }}>
+                            <div style={{ fontSize: '1.1rem', fontWeight: 900, color: '#fff' }}>{meet.races}</div>
+                            <div style={{ fontSize: '0.55rem', opacity: 0.4, fontWeight: 900, letterSpacing: '0.08em' }}>RACES</div>
+                          </div>
+                          <div style={{ textAlign: 'center', minWidth: '48px' }}>
+                            <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{meet.pbs}</div>
+                            <div style={{ fontSize: '0.55rem', opacity: 0.4, fontWeight: 900, letterSpacing: '0.08em' }}>PBs</div>
+                          </div>
+                          <div style={{ textAlign: 'center', minWidth: '60px' }}>
+                            <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--accent-amber)' }}>{avgWA}</div>
+                            <div style={{ fontSize: '0.55rem', opacity: 0.4, fontWeight: 900, letterSpacing: '0.08em' }}>AVG WA</div>
+                          </div>
+                          <div style={{ padding: '4px 10px', borderRadius: '20px', background: `${trendColor}15`, border: `1px solid ${trendColor}40`, fontSize: '0.6rem', fontWeight: 900, color: trendColor, letterSpacing: '0.1em', whiteSpace: 'nowrap' }}>
+                            {trendLabel}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
       </div>
 
       {/* Progress Sub-Tab Navigation Toggle */}

@@ -5,6 +5,15 @@ export default function ChangelogModal({ isOpen, onClose }) {
 
   const updates = [
     {
+      version: "v2.7.0",
+      date: "May 2026",
+      features: [
+        { icon: "🏆", title: "League Series Tracker", desc: "Injected a dedicated Team Competition Audit module into the Performance tab. Automatically surfaces all team galas, displaying race count, PBs, average WA points, and a performance trend badge per meet." },
+        { icon: "🧬", title: "Team Meet AI Routing", desc: "The AI engine now detects team meets (type: 'team') and routes them to a specialized team dynamics prompt, producing club-points analysis, relay breakdowns, and league trajectory insights — distinct from the open meet celebratory audit." },
+        { icon: "📋", title: "Team Meet Audit Prompt", desc: "Created a new AI prompt (team_meet_audit.md) focused on team dynamics: club point scoring, relay performance, squad depth analysis, and year-over-year league series trajectory." }
+      ]
+    },
+    {
       version: "v2.6.0",
       date: "May 2026",
       features: [
