@@ -102,7 +102,7 @@ export default function Dashboard({ session }) {
       const [swimmers, squads, results, attendance, sessions, meets, pbs, exemptions, rankings] = await Promise.all([
         fetchPaged('swimmers', '*, squads(id,name,target_meets,target_sessions_per_week,target_training_percent,target_hours_per_week,require_weekend,use_or_logic)', q => q.order('full_name')),
         fetchPaged('squads', '*', q => q.eq('is_squad', true).order('name')),
-        fetchPaged('results', 'id, swimmer_id, wa_pts, is_pb, date, meet_id', q => q.gte('date', y1ago).order('date', { ascending: false })),
+        fetchPaged('results', 'id, swimmer_id, wa_pts, is_pb, date, meet_id, event, course, time, meets(name, license)', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('training_attendance', 'id, swimmer_id, session_id, date, status', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('sessions', '*', q => q.order('id')),
         fetchPaged('meets', '*', q => q.order('date', { ascending: false })),
