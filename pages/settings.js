@@ -3,6 +3,7 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'next/router';
 import toast from 'react-hot-toast';
+import { useTheme } from '../lib/ThemeContext';
 
 export default function Settings({ session, scmApiKey }) {
   const router = useRouter();
@@ -43,6 +44,7 @@ export default function Settings({ session, scmApiKey }) {
   const [newExemption, setNewExemption] = useState({ name: '', start_date: '', end_date: '', type: 'credit', squad_id: '' });
 
   const [activePanel, setActivePanel] = useState('system');
+  const { theme, toggleTheme, themes } = useTheme();
   const [attendanceSyncStatus, setAttendanceSyncStatus] = useState(null);
   const [csvFile, setCsvFile] = useState(null);
   const [csvHeaders, setCsvHeaders] = useState([]);
@@ -719,6 +721,7 @@ export default function Settings({ session, scmApiKey }) {
           <SidebarItem id="meets" label="Meets" icon="🏊" />
           <SidebarItem id="squads" label="Squads" icon="📋" />
           <SidebarItem id="coaches" label="Coaches" icon="👔" />
+          <SidebarItem id="appearance" label="Appearance" icon="🎨" />
         </div>
 
         {/* MAIN PANEL */}
@@ -795,6 +798,92 @@ export default function Settings({ session, scmApiKey }) {
                     {isReconcilingPbs ? 'Reconciling...' : 'Reconcile Historical PBs'}
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {activePanel === 'appearance' && (
+            <div className="panel-content">
+              <h1>Appearance & Theme</h1>
+              <p className="mb-8" style={{ color: 'var(--text-secondary)' }}>
+                Customize the visual interface of the Open Meet Dashboard. Select a color palette that suits your preferences.
+              </p>
+
+              <div className="theme-grid">
+                {[
+                  {
+                    id: themes.MIDNIGHT,
+                    name: 'Midnight Stealth',
+                    desc: 'The original dark mode. Sleek, high-contrast, and focused.',
+                    bg: '#050b10',
+                    deep: '#0a1921',
+                    accent: '#0096ff',
+                    teal: '#2dd4bf'
+                  },
+                  {
+                    id: themes.SOLAR,
+                    name: 'Solar Flare',
+                    desc: 'Warm and vibrant tones inspired by desert sunrises.',
+                    bg: '#120d0b',
+                    deep: '#1c1411',
+                    accent: '#f59e0b',
+                    teal: '#f97316'
+                  },
+                  {
+                    id: themes.NORDIC,
+                    name: 'Nordic Ice',
+                    desc: 'Cool slate blues and frosty whites for a calm aesthetic.',
+                    bg: '#0f172a',
+                    deep: '#1e293b',
+                    accent: '#38bdf8',
+                    teal: '#94a3b8'
+                  },
+                  {
+                    id: themes.EMERALD,
+                    name: 'Emerald Elite',
+                    desc: 'Deep forest greens and rich emeralds for a prestigious feel.',
+                    bg: '#06120e',
+                    deep: '#0b2119',
+                    accent: '#10b981',
+                    teal: '#059669'
+                  }
+                ].map((t) => {
+                  const isActive = theme === t.id;
+                  return (
+                    <div 
+                      key={t.id} 
+                      onClick={() => toggleTheme(t.id)}
+                      className={`theme-card ${isActive ? 'active' : ''}`}
+                    >
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>{t.name}</h3>
+                          {isActive && (
+                            <span className="theme-card-badge">Active</span>
+                          )}
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: '0.5rem 0 1rem 0' }}>{t.desc}</p>
+                      </div>
+
+                      <div className="flex justify-between items-center mt-auto pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div className="flex gap-2">
+                          <div className="color-dot" style={{ backgroundColor: t.bg }} title="Background" />
+                          <div className="color-dot" style={{ backgroundColor: t.deep }} title="Secondary Cards" />
+                          <div className="color-dot" style={{ backgroundColor: t.accent }} title="Primary Accent" />
+                          <div className="color-dot" style={{ backgroundColor: t.teal }} title="Secondary Accent" />
+                        </div>
+                        
+                        <div style={{ display: 'flex', gap: '4px', background: t.bg, padding: '4px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                          <div style={{ width: '8px', height: '16px', background: t.deep, borderRadius: '2px' }} />
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <div style={{ width: '24px', height: '6px', background: t.accent, borderRadius: '1px' }} />
+                            <div style={{ width: '16px', height: '4px', background: 'rgba(255,255,255,0.3)', borderRadius: '1px' }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1669,6 +1758,48 @@ export default function Settings({ session, scmApiKey }) {
         .panel-content h1 { font-size: 2rem; margin-bottom: 2rem; }
         .loading-spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent-primary); border-radius: 50%; animation: spin 1s linear infinite; margin: 100px auto; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+        .theme-card {
+          background: var(--glass-bg);
+          border: 1px solid var(--glass-border);
+          border-radius: 20px;
+          padding: 1.5rem;
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          position: relative;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          min-height: 190px;
+        }
+        .theme-card:hover {
+          transform: translateY(-4px);
+          border-color: var(--accent-cyan);
+          box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 15px var(--glass-glow);
+        }
+        .theme-card.active {
+          border: 2px solid var(--accent-cyan);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 20px var(--glass-glow);
+          background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+        }
+        .theme-card-badge {
+          background: var(--accent-cyan);
+          color: #000;
+          font-size: 0.7rem;
+          font-weight: 900;
+          padding: 3px 8px;
+          border-radius: 50px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .color-dot {
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          border: 1px solid rgba(255,255,255,0.1);
+        }
       `}</style>
     </Layout>
   );

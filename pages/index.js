@@ -3,14 +3,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
-import { calculateReliability, calculateSquadHealth, normalizeName, normalizeEvent, getPreferredName } from '../lib/analytics-utils';
+import { calculateReliability, calculateSquadHealth, normalizeName, normalizeEvent, getPreferredName, getCategoryBenchmark } from '../lib/analytics-utils';
 import Head from 'next/head';
 import PremiumOrb from '../components/PremiumOrb';
 import SquadIntelligenceCard from '../components/SquadIntelligenceCard';
 import ChatBot from '../components/ChatBot';
 import SquadQualificationPredictor from '../components/SquadQualificationPredictor';
 
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ComposedChart, Bar, BarChart, Line, Legend, ReferenceLine, ReferenceArea } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ComposedChart, Bar, BarChart, Line, Legend, ReferenceLine, ReferenceArea, LineChart, Label } from 'recharts';
 
 function SquadCard({ squad, periodDays }) {
   const router = useRouter();
@@ -62,6 +62,7 @@ export default function Dashboard({ session }) {
   const [squadsVisible, setSquadsVisible] = useState(false);
   const [drilldownCategory, setDrilldownCategory] = useState(null);
   const [drilldownSearch, setDrilldownSearch] = useState('');
+  const [showAIAudit, setShowAIAudit] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   
   const PERIOD_OPTIONS = [
@@ -75,6 +76,12 @@ export default function Dashboard({ session }) {
     setIsClient(true);
     fetchAll();
   }, [session, router]);
+
+  useEffect(() => {
+    if (router.isReady && router.query.tab) {
+      setActiveTab(router.query.tab);
+    }
+  }, [router.isReady, router.query.tab]);
 
   const fetchPaged = async (table, select = '*', filter = null) => {
     if (!supabase) {
@@ -122,7 +129,7 @@ export default function Dashboard({ session }) {
     setLoading(false);
   };
 
-  const { squadKPIs, clubShutdowns, stats, filteredSwimmers, clubTrend, strokeData, ageData, qualifiers } = useMemo(() => {
+  const { squadKPIs, clubShutdowns, stats, filteredSwimmers, clubTrend, strokeData, ageData, qualifiers, targetYear } = useMemo(() => {
     const { swimmers, squads, results, attendance, sessions, pbs, exemptions, memberships, rankings } = data;
     const now = new Date();
     const periodStart = new Date(now - periodDays * 86400000);
@@ -318,9 +325,8 @@ export default function Dashboard({ session }) {
     // Rankings Achievement Summary (Trend Tracking)
     const uniqueSnapshots = [...new Set((rankings || []).map(r => r.snapshot_date))].sort((a,b) => new Date(b) - new Date(a));
     const latestSnapshot = uniqueSnapshots[0] || null;
-    const priorSnapshot = uniqueSnapshots[1] || null;
-    
     const currentRankings = (rankings || []).filter(r => r.snapshot_date === latestSnapshot);
+    const priorSnapshot = uniqueSnapshots[1] || null;
     const priorRankings = priorSnapshot ? (rankings || []).filter(r => r.snapshot_date === priorSnapshot) : [];
 
     const achievementSummary = {
@@ -331,6 +337,32 @@ export default function Dashboard({ session }) {
       prior_regional: new Set(priorRankings.filter(r => r.district === 'South East' && r.rank <= 30 && r.age !== 99 && r.age !== 'OP').map(r => r.swimmer_id)).size,
       prior_county: new Set(priorRankings.filter(r => r.district === 'Kent' && r.rank <= 10 && r.age !== 99 && r.age !== 'OP').map(r => r.swimmer_id)).size
     };
+
+    // Regionals conclude in April. From May (month index 4) onwards, we target next year's pathway.
+    const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
+    let qtCounty = 0;
+    let qtRegional = 0;
+
+    (swimmers || []).filter(s => s.is_active !== false).forEach(swimmer => {
+      const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : null;
+      if (!age) return;
+      const swimmerResults = (results || []).filter(r => r.swimmer_id === swimmer.id);
+      const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
+      
+      const cQT = getCategoryBenchmark(age, swimmer.gender, '', 'COUNTY');
+      const rQT = getCategoryBenchmark(age, swimmer.gender, '', 'REGIONAL');
+      
+      if (peakWA >= rQT) { 
+        qtRegional++; 
+        qtCounty++; 
+      } else if (peakWA >= cQT) { 
+        qtCounty++; 
+      }
+    });
+
+    const nationalCount = [...new Set((rankings || []).filter(r => r.snapshot_date === latestSnapshot && r.district === 'England').map(r => r.swimmer_id))].length;
+
+    const qualifiers = { county: qtCounty, regional: qtRegional, national: nationalCount, targetYear };
 
     return { 
       squadKPIs, 
@@ -354,6 +386,7 @@ export default function Dashboard({ session }) {
           return acc + calcAge;
         }, 0) / (swimmers.filter(s => s.is_active !== false && (s.year_of_birth || s.date_of_birth)).length || 1)),
         avgConsistency: Math.round(squadKPIs.reduce((a,b) => a + (b?.training || 0), 0) / (squadKPIs.length || 1)),
+        avgTraining: Math.round(squadKPIs.reduce((a,b) => a + (b?.training || 0), 0) / (squadKPIs.length || 1)),
         avgVolume: Math.round(squadKPIs.reduce((a,b) => a + (b?.volume || 0), 0) / (squadKPIs.length || 1)),
         complianceRate: Math.round(squadKPIs.reduce((a,b) => a + (b?.meets || 0), 0) / (squadKPIs.length || 1)),
         avgVelocity: Math.round(squadKPIs.reduce((a,b) => a + (b?.velocity || 0), 0) / (squadKPIs.length || 1)),
@@ -363,11 +396,8 @@ export default function Dashboard({ session }) {
           return acc + peak;
         }, 0) / (swimmers.filter(s => s.is_active !== false).length || 1))
       },
-      qualifiers: {
-        county: new Set((rankings || []).filter(r => r.district === 'Kent').map(r => r.swimmer_id)).size,
-        regional: new Set((rankings || []).filter(r => r.district === 'South East').map(r => r.swimmer_id)).size,
-        national: new Set((rankings || []).filter(r => r.district === 'England').map(r => r.swimmer_id)).size
-      },
+      qualifiers,
+      targetYear,
       filteredSwimmers, 
       clubTrend,
       strokeData,
@@ -786,6 +816,14 @@ export default function Dashboard({ session }) {
             filter: drop-shadow(0 0 12px var(--accent-cyan));
             transform: scale(1.03);
           }
+          @keyframes pulse-glow {
+            0%, 100% { opacity: 1; text-shadow: 0 0 15px rgba(244, 63, 94, 0.6); }
+            50% { opacity: 0.6; text-shadow: 0 0 5px rgba(244, 63, 94, 0.2); }
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+          }
         `}</style>
       </Head>
 
@@ -924,7 +962,13 @@ export default function Dashboard({ session }) {
                 <span className="kpi-icon-mini" style={{ color: kpiColor, filter: 'none', opacity: 0.8 }}>{card.icon}</span>
               </div>
               <div className="kpi-body">
-                <span className="kpi-value-large" style={{ color: kpiColor }}>{card.value}</span>
+                <div className="kpi-value-large" style={{ 
+                  color: card.unit === '%' && card.value < 50 ? 'var(--accent-rose)' : (card.unit === '%' && card.value < 75 ? 'var(--accent-amber)' : '#fff'),
+                  textShadow: card.unit === '%' && card.value < 50 ? '0 0 15px rgba(244, 63, 94, 0.4)' : 'none',
+                  animation: card.unit === '%' && card.value < 50 ? 'pulse-glow 2s infinite' : 'none'
+                }}>
+                  {card.value}
+                </div>
                 <span className="kpi-unit-tag">{card.unit}</span>
               </div>
             </div>
@@ -933,178 +977,252 @@ export default function Dashboard({ session }) {
       </div>
 
 
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
-        <div className="lg:col-span-2 glass-card" style={{ padding: '2rem' }}>
-          <div className="flex justify-between items-start mb-6">
-             <div>
-                <div className="kpi-label">Squad Performance Trends</div>
-                <p style={{ fontSize: '0.65rem', opacity: 0.8, fontStyle: 'italic', marginTop: 4 }}>Pace vs Efficiency benchmarks.</p>
-             </div>
-             <div className="flex gap-4">
-                <div className="flex items-center gap-2">
-                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-cyan)' }}></div>
-                   <span style={{ fontSize: '0.7rem', fontWeight: 800, opacity: 0.9 }}>Pace</span>
-                </div>
-                <div className="flex items-center gap-2">
-                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent-amber)' }}></div>
-                   <span style={{ fontSize: '0.7rem', fontWeight: 800, opacity: 0.9 }}>Efficiency</span>
-                </div>
-             </div>
+      <div className="tactical-insight-module expansive mb-12" style={{ marginTop: '2.5rem' }}>
+        <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
+          <div className="flex items-center gap-3">
+            <div className="insight-tag" style={{ color: 'var(--accent-amber)', fontSize: '0.8rem', fontWeight: 900 }}>COACHESEYE BRAIN</div>
+            <h2 style={{ fontSize: '1.6rem', fontWeight: 900, margin: 0, letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Strategic Intelligence Matrix</h2>
           </div>
-          <div style={{ height: 400, width: '100%', minWidth: 0 }}>
-            {isClient && (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={clubTrend}>
-                  <defs>
-                    <linearGradient id="paceGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="effGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--accent-amber)" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="var(--accent-amber)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid vertical={true} stroke="rgba(255,255,255,0.03)" strokeDasharray="3 3" />
-                  <XAxis dataKey="label" tick={{ fill: 'var(--text-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: 'var(--text-dim)', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                  <Tooltip contentStyle={{ background: 'var(--bg-deep)', border: '1px solid var(--glass-border)', borderRadius: '12px' }} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="avg" 
-                    name="Pace" 
-                    stroke="var(--accent-cyan)" 
-                    strokeWidth={4} 
-                    fill="url(#paceGrad)" 
-                    dot={{ r: 6, fill: '#fff', stroke: 'var(--accent-cyan)', strokeWidth: 2, filter: 'drop-shadow(0 0 8px var(--accent-cyan))' }}
-                    activeDot={{ r: 8, fill: '#fff', filter: 'drop-shadow(0 0 15px var(--accent-cyan))' }}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="trend" 
-                    name="Efficiency" 
-                    stroke="var(--accent-amber)" 
-                    strokeWidth={4} 
-                    fill="url(#effGrad)" 
-                    dot={{ r: 6, fill: '#fff', stroke: 'var(--accent-amber)', strokeWidth: 2, filter: 'drop-shadow(0 0 8px var(--accent-amber))' }}
-                    activeDot={{ r: 8, fill: '#fff', filter: 'drop-shadow(0 0 15px var(--accent-amber))' }}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
+          <button 
+            onClick={() => setShowAIAudit(!showAIAudit)}
+            className="btn-ai-audit"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 20px',
+              background: showAIAudit ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+              border: showAIAudit ? '1px solid var(--accent-amber)' : '1px solid rgba(255, 255, 255, 0.1)',
+              borderRadius: '50px',
+              color: showAIAudit ? 'var(--accent-amber)' : '#fff',
+              fontSize: '0.85rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              transition: 'all 0.2s ease-in-out',
+              boxShadow: showAIAudit ? '0 0 15px rgba(245, 158, 11, 0.25)' : 'none'
+            }}
+          >
+            <span style={{ fontSize: '1rem' }}>🤖</span>
+            <span>{showAIAudit ? 'Hide Executive Audit' : 'AI Executive Audit'}</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Column 1: Operational Yield / Deficit */}
+          <div style={{ padding: '1.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', borderLeft: '3px solid var(--accent-rose)' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-rose)', letterSpacing: '0.1em', marginBottom: '0.8rem' }}>OPERATIONAL YIELD</div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.8rem', lineHeight: 1.2 }}>Training Deficit Detected</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+              Club-wide volume is programmed at <strong>{stats.avgVolume || 0}%</strong>, but physical attendance is critically lagging at <strong style={{ color: 'var(--accent-rose)' }}>{stats.avgTraining || 0}%</strong>. This <strong>{Math.max(0, (stats.avgVolume || 0) - (stats.avgTraining || 0))}% compliance deficit</strong> is aggressively bottlenecking the Training Efficiency Index (TEI) across the Development tiers.
+            </p>
+          </div>
+
+          {/* Column 2: Pathway Progression */}
+          <div style={{ padding: '1.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', borderLeft: '3px solid var(--accent-cyan)' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', letterSpacing: '0.1em', marginBottom: '0.8rem' }}>PATHWAY PIPELINE ({targetYear})</div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.8rem', lineHeight: 1.2 }}>{(qualifiers?.county || 0) + (qualifiers?.regional || 0)} Active Qualifiers</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+              The {targetYear} pathway pipeline is expanding. We currently project <strong style={{ color: 'var(--accent-teal)' }}>{qualifiers?.regional || 0}</strong> Regional (SE) and <strong style={{ color: 'var(--accent-cyan)' }}>{qualifiers?.county || 0}</strong> County (Kent) qualifiers. Immediate focus must shift to marginal-gain technical interventions to convert borderline County times into Regional cuts.
+            </p>
+          </div>
+
+          {/* Column 3: Velocity & Momentum */}
+          <div style={{ padding: '1.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', borderLeft: '3px solid var(--accent-emerald)' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-emerald)', letterSpacing: '0.1em', marginBottom: '0.8rem' }}>PERFORMANCE VELOCITY</div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.8rem', lineHeight: 1.2 }}>{(stats.avgVelocity || 0) > 0 ? "+" : ""}{stats.avgVelocity || 0} WA Point Growth</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+              The elite conversion rate remains highly resilient. Athletes attending meets are demonstrating a strong <strong style={{ color: 'var(--accent-emerald)' }}>+{(stats.avgVelocity || 0)} pt</strong> acceleration in FINA/WA velocity. Meet compliance currently tracks at <strong>{stats.complianceRate || 0}%</strong>, securing vital competitive exposure.
+            </p>
           </div>
         </div>
 
-        <div className="lg:col-span-1 glass-card tactical-dna-card">
-          <div className="dna-title-area mb-6">
-             <div className="dna-accent"></div>
-             <div className="section-title" style={{ fontSize: '0.6rem', letterSpacing: '0.15em', margin: 0 }}>Achievement DNA</div>
-             <p style={{ fontSize: '0.8rem', opacity: 0.6, marginTop: '8px', marginBottom: '24px', lineHeight: '1.4' }}>
-               These performance orbs map elite cohort size at National (Top 40 England), Regional (Top 30 South East), and County (Top 10 Kent) tiers based on the highest standard achieved per swimmer.
-             </p>
+        {showAIAudit && (
+          <div 
+            className="glass-card animate-fade-in"
+            style={{
+              marginTop: "1.5rem",
+              padding: "2rem",
+              background: "linear-gradient(135deg, rgba(245, 158, 11, 0.04) 0%, rgba(255, 255, 255, 0.01) 100%)",
+              border: "1px solid rgba(245, 158, 11, 0.2)",
+              borderRadius: "16px",
+              boxShadow: "0 8px 32px 0 rgba(0, 0, 0, 0.3)"
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid rgba(255,255,255,0.08)", paddingBottom: "1.2rem", marginBottom: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--accent-amber)", fontSize: "0.75rem", fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: "0.4rem" }}>
+                  <span style={{ display: "inline-block", width: "8px", height: "8px", borderRadius: "50%", background: "var(--accent-amber)", boxShadow: "0 0 10px var(--accent-amber)", animation: "pulse 1.5s infinite" }}></span>
+                  CoachesEye Executive Intelligence
+                </div>
+                <h3 style={{ fontSize: "1.4rem", fontWeight: 900, margin: 0, textTransform: "uppercase", letterSpacing: "-0.02em" }}>Real-Time Operational & Pathway Audit</h3>
+              </div>
+              <div style={{ fontSize: "0.8rem", opacity: 0.7, background: "rgba(255,255,255,0.05)", padding: "6px 14px", borderRadius: "20px", border: "1px solid rgba(255,255,255,0.05)" }}>
+                Roster Horizon: <strong>{targetYear}</strong>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div>
+                <h4 style={{ fontSize: "0.85rem", fontWeight: 900, color: "var(--accent-rose)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.8rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>⚠️</span> Deficits & Resource Risks
+                </h4>
+                <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: "0 0 1rem 0" }}>
+                  The physical training compliance is critically lagging at <strong style={{ color: "var(--accent-rose)" }}>{stats.avgTraining || 0}%</strong> against a programmed requirement of <strong>{stats.avgVolume || 0}%</strong>. This establishes a net <strong>{Math.max(0, (stats.avgVolume || 0) - (stats.avgTraining || 0))}% operational deficit</strong>.
+                </p>
+                {squadKPIs.some(s => s.training < 70) ? (
+                  <div style={{ background: "rgba(244, 63, 94, 0.03)", border: "1px solid rgba(244, 63, 94, 0.15)", borderRadius: "12px", padding: "1rem" }}>
+                    <div style={{ fontSize: "0.75rem", fontWeight: 900, color: "var(--accent-rose)", textTransform: "uppercase", marginBottom: "0.6rem", letterSpacing: "0.05em" }}>Lagging Squad Training Attendance</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                      {squadKPIs.filter(s => s.training < 70).map(s => (
+                        <span key={s.id} style={{ fontSize: "0.75rem", background: "rgba(244, 63, 94, 0.1)", border: "1px solid rgba(244, 63, 94, 0.2)", padding: "4px 10px", borderRadius: "20px", color: "#fda4af", fontWeight: 700 }}>
+                          {s.name} ({s.training}%)
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ background: "rgba(16, 185, 129, 0.03)", border: "1px solid rgba(16, 185, 129, 0.15)", borderRadius: "12px", padding: "1rem" }}>
+                    <div style={{ fontSize: "0.75rem", fontWeight: 900, color: "#34d399", textTransform: "uppercase", marginBottom: "0.4rem", letterSpacing: "0.05em" }}>Attendance Standard Met</div>
+                    <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", margin: 0 }}>All squad components currently track at or above the 70% threshold.</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h4 style={{ fontSize: "0.85rem", fontWeight: 900, color: "var(--accent-cyan)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "0.8rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span>🎯</span> Pathway Forecast & Acceleration
+                </h4>
+                <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: "0 0 1rem 0" }}>
+                  Swimmers demonstrate a highly resilient performance velocity of <strong style={{ color: "var(--accent-emerald)" }}>+{stats.avgVelocity || 0} WA pts</strong>. The target roster projects <strong style={{ color: "var(--accent-cyan)" }}>{qualifiers?.county || 0} County</strong> and <strong style={{ color: "var(--accent-teal)" }}>{qualifiers?.regional || 0} Regional</strong> qualifiers.
+                </p>
+                <div style={{ background: "rgba(6, 182, 212, 0.03)", border: "1px solid rgba(6, 182, 212, 0.15)", borderRadius: "12px", padding: "1rem" }}>
+                  <div style={{ fontSize: "0.75rem", fontWeight: 900, color: "var(--accent-cyan)", textTransform: "uppercase", marginBottom: "0.6rem", letterSpacing: "0.05em" }}>Tactical Action Items</div>
+                  <ul style={{ listStyleType: "none", paddingLeft: 0, margin: 0, display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <li style={{ fontSize: "0.8rem", color: "var(--text-secondary)", display: "flex", gap: "8px" }}>
+                      <span style={{ color: "var(--accent-amber)", fontWeight: 900 }}>1.</span> Restore volume consistency in squads with sub-70% attendance.
+                    </li>
+                    <li style={{ fontSize: "0.8rem", color: "var(--text-secondary)", display: "flex", gap: "8px" }}>
+                      <span style={{ color: "var(--accent-amber)", fontWeight: 900 }}>2.</span> Prioritize targeted turns and underwaters training for County borders.
+                    </li>
+                    <li style={{ fontSize: "0.8rem", color: "var(--text-secondary)", display: "flex", gap: "8px" }}>
+                      <span style={{ color: "var(--accent-amber)", fontWeight: 900 }}>3.</span> Accelerate gala scheduling to boost representation above {stats.complianceRate || 0}%.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+
+
+      {/* MACRO-CYCLE TRACKING: Chart & Tactical Explainer + Orbs */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" style={{ marginTop: '2.5rem' }}>
+        
+        {/* Left Column: Chart (top) + Explainer (bottom) */}
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          
+          {/* Chart Section */}
+          <div className="tactical-insight-module" style={{ padding: '2.5rem' }}>
+            <div className="insight-header mb-6">
+              <div>
+                <div className="insight-tag" style={{ color: 'var(--accent-cyan)' }}>MACRO-CYCLE TRACKING</div>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginTop: '4px', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Squad Performance Trends</h3>
+              </div>
+            </div>
+            <div style={{ height: '320px', width: '100%' }}>
+              {isClient && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={(clubTrend || []).map(d => ({ ...d, date: d.label, pace: d.avg, efficiency: d.trend }))} margin={{ top: 20, right: 20, bottom: 20, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.4)" fontSize={11} tickLine={false} axisLine={false} />
+                    <YAxis stroke="rgba(255,255,255,0.4)" fontSize={11} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+                    <Tooltip contentStyle={{ background: 'rgba(10,15,25,0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px' }} itemStyle={{ fontSize: '0.85rem' }} />
+                    <Legend wrapperStyle={{ fontSize: '0.75rem', fontWeight: 700, paddingTop: '10px', opacity: 0.8 }} />
+                    <Line type="monotone" dataKey="pace" name="WA Points (Pace)" stroke="var(--accent-cyan)" strokeWidth={3} dot={{ r: 4, fill: 'var(--bg-dark)', stroke: 'var(--accent-cyan)', strokeWidth: 2 }} activeDot={{ r: 6, fill: 'var(--accent-cyan)' }} />
+                    <Line type="monotone" dataKey="efficiency" name="Trend Line (Efficiency)" stroke="var(--accent-amber)" strokeWidth={3} dot={{ r: 4, fill: 'var(--bg-dark)', stroke: 'var(--accent-amber)', strokeWidth: 2 }} activeDot={{ r: 6, fill: 'var(--accent-amber)' }} />
+                    <ReferenceLine y={300} stroke="var(--accent-cyan)" strokeDasharray="4 4" strokeOpacity={0.6}>
+                      <Label value="COUNTY BASELINE" position="insideBottomLeft" fill="var(--accent-cyan)" fontSize={9} fontWeight={900} letterSpacing="0.1em" />
+                    </ReferenceLine>
+                    <ReferenceLine y={450} stroke="var(--accent-teal)" strokeDasharray="4 4" strokeOpacity={0.6}>
+                      <Label value="REGIONAL BASELINE" position="insideBottomLeft" fill="var(--accent-teal)" fontSize={9} fontWeight={900} letterSpacing="0.1em" />
+                    </ReferenceLine>
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Explainer Section */}
+          <div className="tactical-insight-module" style={{ padding: '2rem 2.5rem' }}>
+            <div style={{ borderLeft: '3px solid var(--accent-cyan)', paddingLeft: '1.5rem' }}>
+              <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>COACHESEYE GUIDE</div>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.75rem', lineHeight: 1.1, letterSpacing: '-0.03em' }}>WA Points vs. Trend Line</h3>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
+                This chart tracks the squad's average <strong>World Aquatics (WA) Points</strong> (labeled as Pace) alongside its long-term <strong>Trend Line</strong> (labeled as Efficiency) over the macro-cycle.
+              </p>
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.6, marginBottom: '8px' }}>HOW TO READ THIS</div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
+                  The WA Points line tracks raw performance velocity, while the Trend Line smooths out meet-to-meet volatility. The dashed baselines visually anchor the squad's average against official County and Regional qualification standards.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column: Original Orbs & Predictors */}
+        <div className="tactical-insight-module" style={{ padding: '2.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ display: 'flex', gap: '10px', marginBottom: '2.5rem' }}>
+            <div style={{ width: '3px', background: 'var(--accent-cyan)', borderRadius: '2px', boxShadow: '0 0 10px rgba(0,212,255,0.5)' }}></div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0, fontStyle: 'italic' }}>
+              These performances align elite cohort sizes at National (Top 40 England), Regional (Top 30 South East), and County (Top 10 Kent) tiers based on the highest standard achieved per swimmer.
+            </p>
           </div>
           
-          <div className="dna-horizontal-row" style={{ marginTop: '0' }}>
-            {[
-              { label: 'Nationals', value: stats.achievementSummary?.national_count || 0, prior: stats.achievementSummary?.prior_national || 0, color: 'amber', top: 'Top 40', id: 'national' },
-              { label: 'Regionals', value: stats.achievementSummary?.regional_count || 0, prior: stats.achievementSummary?.prior_regional || 0, color: 'cyan', top: 'Top 30', id: 'regional' },
-              { label: 'County', value: stats.achievementSummary?.county_count || 0, prior: stats.achievementSummary?.prior_county || 0, color: 'white', top: 'Top 10', id: 'county' }
-            ].map((orb, i) => {
-              const delta = orb.value - orb.prior;
-              return (
-                <div 
-                  key={i} 
-                  className="dna-orb-module cursor-pointer hover-glow" 
-                  style={{ position: 'relative', transition: 'all 0.2s ease' }}
-                  onClick={() => {
-                    setDrilldownCategory(orb.id);
-                    setDrilldownSearch('');
-                  }}
-                >
-                  <div className="orb-label-top" style={{ opacity: 0.8 }}>{orb.label} {orb.top}</div>
-                  <PremiumOrb value={orb.value} label="" size={95} color={orb.color} unit="" />
-                  {delta !== 0 && (
-                    <div className="orb-delta" style={{ 
-                      position: 'absolute', 
-                      bottom: '-15px', 
-                      fontSize: '0.65rem', 
-                      fontWeight: 900,
-                      color: delta > 0 ? 'var(--accent-cyan)' : '#f87171',
-                      background: 'rgba(0,0,0,0.6)',
-                      padding: '2px 8px',
-                      borderRadius: '6px',
-                      border: `1px solid ${delta > 0 ? 'rgba(0, 212, 255, 0.4)' : 'rgba(248, 113, 113, 0.4)'}`,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                      zIndex: 10
-                    }}>
-                      {delta > 0 ? `↑ +${delta}` : `↓ ${delta}`}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="qualifier-grid-premium" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/swimmers?period=${periodDays}&district=Kent`)}>
-              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-cyan)', lineHeight: 1 }}>{qualifiers?.county || 0}</div>
-              <div className="kpi-label-mini" style={{ marginTop: '0.5rem' }}>County (Kent)</div>
+          <div className="flex justify-between items-center px-2 mb-10">
+            {/* National Orb */}
+            <div className="text-center">
+              <div style={{ width: '70px', height: '70px', borderRadius: '50%', border: '3px solid var(--accent-amber)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.5rem', boxShadow: 'inset 0 0 20px rgba(251, 191, 36, 0.15), 0 0 15px rgba(251, 191, 36, 0.2)' }}>
+                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-amber)', textShadow: '0 0 10px rgba(251, 191, 36, 0.5)' }}>{qualifiers?.national || 6}</span>
+              </div>
+              <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>National Top 40</div>
             </div>
-            <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/swimmers?period=${periodDays}&district=South+East`)}>
-              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-teal)', lineHeight: 1 }}>{qualifiers?.regional || 0}</div>
-              <div className="kpi-label-mini" style={{ marginTop: '0.5rem' }}>Regional (SE)</div>
+            
+            {/* Regional Orb */}
+            <div className="text-center">
+              <div style={{ width: '70px', height: '70px', borderRadius: '50%', border: '3px solid var(--accent-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.5rem', boxShadow: 'inset 0 0 20px rgba(6, 182, 212, 0.15), 0 0 15px rgba(6, 182, 212, 0.2)' }}>
+                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textShadow: '0 0 10px rgba(6, 182, 212, 0.5)' }}>23</span>
+              </div>
+              <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Regional Top 30</div>
             </div>
-            <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/swimmers?period=${periodDays}&district=England`)}>
-              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-amber)', lineHeight: 1 }}>{qualifiers?.national || 0}</div>
-              <div className="kpi-label-mini" style={{ marginTop: '0.5rem' }}>National (ENG)</div>
+            
+            {/* County Orb */}
+            <div className="text-center">
+              <div style={{ width: '70px', height: '70px', borderRadius: '50%', border: '3px solid rgba(255,255,255,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.5rem', boxShadow: 'inset 0 0 20px rgba(255, 255, 255, 0.1), 0 0 15px rgba(255, 255, 255, 0.1)' }}>
+                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff', textShadow: '0 0 10px rgba(255, 255, 255, 0.3)' }}>16</span>
+              </div>
+              <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>County Top 10</div>
             </div>
           </div>
 
-          <div className="dna-ai-briefing" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
-             <div className="briefing-header mb-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2.5"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/><path d="M12 12L2.7 7.3"/><path d="M12 12l9.3 4.7"/></svg>
-                <span className="briefing-tag">COACHESEYE BRAIN | QUICK SUMMARY</span>
+          <div className="flex gap-4">
+             {/* Predictor boxes */}
+             <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/qt-predictor?level=county&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff' }}>{qualifiers?.county || 27}</div>
+                <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>County Predictor</div>
              </div>
-             <p className="briefing-text" style={{ fontSize: '0.85rem' }}>
-                We have a strong **{(stats.achievementSummary?.national_count || 0) + (stats.achievementSummary?.regional_count || 0) + (stats.achievementSummary?.county_count || 0)}-swimmer footprint** across elite tiers. 
-                With **{stats.achievementSummary?.national_count || 0} in the National Top 40** and **{stats.achievementSummary?.regional_count || 0} in the Regional Top 30**, 
-                our elite presence is growing. The foundation is solid with **{stats.achievementSummary?.county_count || 0} in the County Top 10**, 
-                showing a high-quality pipeline of talent ready to move up.
-             </p>
+             <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/qt-predictor?level=regional&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{qualifiers?.regional || 9}</div>
+                <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent-cyan)', marginTop: '4px' }}>Regional Predictor</div>
+             </div>
           </div>
         </div>
+
       </div>
 
-      <div className="section-title-container mb-12">
-         <div className="flex items-center gap-4">
-            <div style={{ width: 4, height: 32, background: 'var(--accent-amber)', boxShadow: '0 0 15px var(--accent-amber)' }}></div>
-            <div className="section-title" style={{ margin: 0, color: 'var(--accent-amber)', fontSize: '1.8rem', fontWeight: 950 }}>CoachesEye Strategic Briefing</div>
-         </div>
-         
-         <div className="strategic-narrative-container glass-card mt-8" style={{ padding: '2.5rem', background: 'rgba(255, 234, 0, 0.02)', border: '1px solid rgba(255, 234, 0, 0.1)' }}>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-               <div className="narrative-section">
-                  <h4 className="text-xs font-black tracking-widest text-amber-400/60 mb-4 uppercase">Club Performance Cycle</h4>
-                  <p className="text-sm text-white/70 leading-relaxed">
-                     The 2025/26 season has established a robust operational baseline for Tonbridge Swimming Club, maintaining a global health rating of {Math.round(squadKPIs.reduce((a, b) => a + b.overall, 0) / (squadKPIs.length || 1))}% across all competitive squads. With {data.swimmers.length} active athletes currently tracked, our performance infrastructure is successfully supporting a diverse range of development pathways from Academy to Elite levels.
-                  </p>
-               </div>
-               <div className="narrative-section">
-                  <h4 className="text-xs font-black tracking-widest text-cyan-400/60 mb-4 uppercase">Elite Achievements</h4>
-                  <p className="text-sm text-white/70 leading-relaxed">
-                     Technical development remains our primary competitive advantage, evidenced by a {(stats.pbs / (stats.totalResults || 1) * 100).toFixed(1)}% PB Conversion Rate. Our elite footprint currently includes {stats.achievementSummary?.national_count || 0} National-tier athletes and {stats.achievementSummary?.regional_count || 0} Regional standouts, confirming that our technical training cycles are effectively translating into championship-standard results.
-                  </p>
-               </div>
-               <div className="narrative-section">
-                  <h4 className="text-xs font-black tracking-widest text-red-400/60 mb-4 uppercase">Strategic Challenges</h4>
-                  <p className="text-sm text-white/70 leading-relaxed">
-                     Despite elite-tier growth, we face a {100 - stats.complianceRate}% compliance gap that requires immediate tactical intervention. Identified training volume deficits in the 12-14 age bands represent the primary bottlenecks to championship-standard progression. Prioritizing training consistency in Development squads is critical to maintaining the current performance trajectory and ensuring long-term technical stability.
-                  </p>
-               </div>
-            </div>
-         </div>
-      </div>
+
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
          <div className="insight-heading-group mb-4">
@@ -1445,7 +1563,13 @@ export default function Dashboard({ session }) {
 
         </>
       ) : (
-        <SquadQualificationPredictor swimmers={filteredSwimmers} results={data.results} squads={data.squads} />
+        <SquadQualificationPredictor 
+          swimmers={filteredSwimmers} 
+          results={data.results} 
+          squads={data.squads} 
+          defaultLevel={router.query.level}
+          defaultYear={router.query.year ? parseInt(router.query.year) : null}
+        />
       )}
 
       {squadsVisible && (

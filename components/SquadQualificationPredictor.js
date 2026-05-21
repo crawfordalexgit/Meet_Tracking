@@ -21,14 +21,26 @@ function getStandardEventName(event) {
   return event;
 }
 
-export default function SquadQualificationPredictor({ swimmers = [], results = [], squads = [] }) {
-  const [targetLevel, setTargetLevel] = useState('COUNTY');
-  const [manualYearOverride, setManualYearOverride] = useState(null);
+export default function SquadQualificationPredictor({ swimmers = [], results = [], squads = [], defaultLevel, defaultYear }) {
+  const [targetLevel, setTargetLevel] = useState(defaultLevel || 'COUNTY');
+  const [manualYearOverride, setManualYearOverride] = useState(defaultYear || null);
   const [eventCategory, setEventCategory] = useState('sprints');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState('all'); // 'all', 'auto_met', 'cons_met'
   const [selectedSquad, setSelectedSquad] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+
+  React.useEffect(() => {
+    if (defaultLevel) {
+      setTargetLevel(defaultLevel);
+    }
+  }, [defaultLevel]);
+
+  React.useEffect(() => {
+    if (defaultYear) {
+      setManualYearOverride(defaultYear);
+    }
+  }, [defaultYear]);
 
   const requestSort = (key) => {
     let direction = 'asc';
@@ -60,7 +72,7 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
 
   const currentMonth = new Date().getMonth(); // 0-indexed
   const rolloverMonth = 4; // May
-  const calculatedYear = currentMonth > rolloverMonth 
+  const calculatedYear = currentMonth >= rolloverMonth 
     ? new Date().getFullYear() + 1 
     : new Date().getFullYear();
   const targetYear = manualYearOverride || calculatedYear;

@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { getPreferredName, calculateReliability } from '../lib/analytics-utils';
+import { getPreferredName, calculateReliability, getCategoryBenchmark } from '../lib/analytics-utils';
 
 export default function SwimmersRegistry({ session }) {
   const router = useRouter();
@@ -51,8 +51,21 @@ export default function SwimmersRegistry({ session }) {
         const swimmerResults = (rRes.data || []).filter(r => r.swimmer_id === swimmer.id);
         const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
         
-        const swimmerRankings = (rankRes.data || []).filter(r => r.swimmer_id === swimmer.id);
-        const districts = [...new Set(swimmerRankings.map(r => r.district))];
+        const now = new Date();
+        const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
+        const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : (swimmer.date_of_birth ? targetYear - new Date(swimmer.date_of_birth).getFullYear() : null);
+
+        const districts = [];
+        if (age) {
+          const cQT = getCategoryBenchmark(age, swimmer.gender, '', 'COUNTY');
+          const rQT = getCategoryBenchmark(age, swimmer.gender, '', 'REGIONAL');
+          if (peakWA >= rQT) {
+            districts.push('South East');
+            districts.push('Kent');
+          } else if (peakWA >= cQT) {
+            districts.push('Kent');
+          }
+        }
 
         const rel = calculateReliability(
           swimmer, 
@@ -69,7 +82,8 @@ export default function SwimmersRegistry({ session }) {
           peakWA, 
           attendancePct: rel.percentage || 0, 
           meetCompliance: rel.complianceRate || 0,
-          districts
+          districts,
+          age
         };
       });
 
@@ -181,9 +195,9 @@ export default function SwimmersRegistry({ session }) {
                        <td className="p-6 text-center font-bold" style={{ color: sw.meetCompliance >= 100 ? 'var(--accent-cyan)' : 'white' }}>
                           {sw.meetCompliance}%
                        </td>
-                       <td className="p-6 text-center font-bold opacity-60">
-                          {sw.date_of_birth ? (new Date().getFullYear() - new Date(sw.date_of_birth).getFullYear()) : sw.year_of_birth ? (new Date().getFullYear() - sw.year_of_birth) : 'N/A'}
-                       </td>
+                        <td className="p-6 text-center font-bold opacity-60">
+                           {sw.age || 'N/A'}
+                        </td>
                        <td className="p-6 text-right">
                           <div className="text-2xl font-black text-white">{sw.peakWA}</div>
                           <div className="text-[0.6rem] font-black tracking-widest opacity-20 uppercase">WA POINTS</div>

@@ -39,6 +39,7 @@ export default function SwimmerDetail({ session }) {
   const [squad, setSquad] = useState(null);
   const [selectedStroke, setSelectedStroke] = useState('All');
   const [selectedMonth, setSelectedMonth] = useState('All');
+const [decayDistance, setDecayDistance] = useState('100');
   const [narrative, setNarrative] = useState([]);
   const [healthData, setHealthData] = useState({ total: 0, components: [] });
   const [personalStats, setPersonalStats] = useState({});
@@ -1226,6 +1227,85 @@ export default function SwimmerDetail({ session }) {
         <div className="no-print">
           <ForesightTimeline insights={insights} />
         </div>
+      </div>
+
+      {/* ELITE MARGINAL GAINS: MULTI-STROKE DROP-OFF RATIOS */}
+      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in ${activeTab !== 'overview' ? 'no-screen' : ''}`} style={{ marginTop: '2.5rem' }}>
+        
+        {/* Left Column: Multi-Stroke Drop-Off Visualizer Grid */}
+        <div className="lg:col-span-2 tactical-insight-module" style={{ padding: '2.5rem', borderLeft: '4px solid var(--accent-rose)' }}>
+          <div className="insight-header mb-6">
+            <div>
+              <div className="insight-tag" style={{ color: 'var(--accent-rose)' }}>ELITE PERFORMANCE DIAGNOSTIC</div>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginTop: '4px', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Stroke-Specific Endurance Decay</h3>
+            </div>
+          </div>
+          
+          <div className="flex gap-2 mb-4">
+  <button
+    className={`px-3 py-1 rounded ${decayDistance === '100' ? 'bg-var(--accent-rose) text-white' : 'bg-var(--accent-rose)/20 text-var(--accent-rose)'}`}
+    onClick={() => setDecayDistance('100')}
+  >
+    100m
+  </button>
+  <button
+    className={`px-3 py-1 rounded ${decayDistance === '200' ? 'bg-var(--accent-rose) text-white' : 'bg-var(--accent-rose)/20 text-var(--accent-rose)'}`}
+    onClick={() => setDecayDistance('200')}
+  >
+    200m
+  </button>
+</div>
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* UI Mockup mapping through the 4 strokes. Antigravity: Wire these values to statsObj.ratios in future iterations */}
+            {[{
+              name: 'Freestyle', ratio: 2.05, status: 'OPTIMAL CONVERSION', color: 'var(--accent-emerald)'
+            }, {
+              name: 'Butterfly', ratio: 2.25, status: 'ENDURANCE DEFICIT', color: 'var(--accent-rose)'
+            }, {
+              name: 'Backstroke', ratio: 2.12, status: 'STABLE DECAY', color: 'var(--accent-cyan)'
+            }, {
+              name: 'Breaststroke', ratio: 1.98, status: 'SPEED DEFICIT', color: 'var(--accent-amber)'
+            }].map(stroke => (
+              <div key={stroke.name} style={{ background: 'rgba(255,255,255,0.02)', borderRadius: '12px', padding: '1.5rem', border: `${stroke.color}40`, position: 'relative', overflow: 'hidden' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <div>
+                    <div style={{ fontSize: '0.65rem', fontWeight: 900, opacity: 0.6, letterSpacing: '0.1em', textTransform: 'uppercase' }}>{stroke.name} ({decayDistance === '100' ? '100m vs 50m' : '200m vs 100m'})</div>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff' }}>{stroke.ratio}x <span style={{ fontSize: '0.8rem', color: stroke.color }}>Ratio</span></div>
+                  </div>
+                  <div className="text-right">
+                    <div style={{ fontSize: '0.6rem', fontWeight: 900, color: stroke.color, letterSpacing: '0.1em', background: `${stroke.color}15`, padding: '4px 8px', borderRadius: '6px' }}>{stroke.status}</div>
+                  </div>
+                </div>
+                
+                {/* Progress Bar Visualizer */}
+                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', display: 'flex' }}>
+                  <div style={{ width: stroke.ratio > 2.15 ? '40%' : (stroke.ratio < 2.05 ? '60%' : '50%'), background: 'var(--accent-cyan)', borderRadius: '3px 0 0 3px' }} title="Raw Speed Contribution"></div>
+                  <div style={{ width: stroke.ratio > 2.15 ? '60%' : (stroke.ratio < 2.05 ? '40%' : '50%'), background: stroke.color, borderRadius: '0 3px 3px 0' }} title="Endurance Drop-off"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Column: Coach's Guide */}
+        <div className="tactical-insight-module" style={{ padding: '2rem 2.5rem' }}>
+          <div style={{ borderLeft: '3px solid var(--accent-rose)', paddingLeft: '1.5rem' }}>
+            <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-rose)', letterSpacing: '0.1em', marginBottom: '0.5rem' }}>COACHESEYE GUIDE</div>
+            <h3 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '0.75rem', lineHeight: 1.1, letterSpacing: '-0.03em' }}>Isolating Endurance</h3>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1rem' }}>
+              By comparing drop-off ratios across all four strokes, you can diagnose whether a swimmer lacks <strong>central aerobic fitness</strong> (all strokes decay) or if the deficit is <strong>stroke-specific</strong> (e.g., Butterfly technique failing under lactate fatigue).
+            </p>
+            <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.6, marginBottom: '8px' }}>DIAGNOSTIC RULES</div>
+              <ul style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', margin: 0, paddingLeft: '1rem', lineHeight: 1.5, fontStyle: 'italic' }}>
+                <li style={{ marginBottom: '4px' }}><strong>Ratio &gt; 2.15x:</strong> <span style={{ color: 'var(--accent-rose)' }}>Endurance Deficit.</span> Prescribe stroke-specific threshold volume.</li>
+                <li style={{ marginBottom: '4px' }}><strong>Ratio &lt; 2.05x:</strong> <span style={{ color: 'var(--accent-amber)' }}>Speed Deficit.</span> Excellent aerobic retention, but lacks raw explosive power.</li>
+                <li><strong>Ratio ~ 2.10x:</strong> <span style={{ color: 'var(--accent-emerald)' }}>Optimal.</span> Speed and endurance are perfectly balanced.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       {/* Progress Sub-Tab Navigation Toggle */}
