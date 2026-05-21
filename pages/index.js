@@ -1047,17 +1047,17 @@ export default function Dashboard({ session }) {
           </div>
 
           <div className="qualifier-grid-premium" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ textAlign: 'center' }}>
-               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>County Qualifiers</div>
-               <div style={{ fontSize: '1.4rem', fontWeight: 955, color: 'white', marginTop: '4px' }}>{qualifiers?.county || 0}</div>
+            <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/swimmers?period=${periodDays}&district=Kent`)}>
+              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-cyan)', lineHeight: 1 }}>{qualifiers?.county || 0}</div>
+              <div className="kpi-label-mini" style={{ marginTop: '0.5rem' }}>County (Kent)</div>
             </div>
-            <div style={{ textAlign: 'center' }}>
-               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Regional Qualifiers</div>
-               <div style={{ fontSize: '1.4rem', fontWeight: 955, color: 'var(--accent-cyan)', marginTop: '4px' }}>{qualifiers?.regional || 0}</div>
+            <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/swimmers?period=${periodDays}&district=South+East`)}>
+              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-teal)', lineHeight: 1 }}>{qualifiers?.regional || 0}</div>
+              <div className="kpi-label-mini" style={{ marginTop: '0.5rem' }}>Regional (SE)</div>
             </div>
-            <div style={{ textAlign: 'center' }}>
-               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>National Qualifiers</div>
-               <div style={{ fontSize: '1.4rem', fontWeight: 955, color: 'var(--accent-amber)', marginTop: '4px' }}>{qualifiers?.national || 0}</div>
+            <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/swimmers?period=${periodDays}&district=England`)}>
+              <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-amber)', lineHeight: 1 }}>{qualifiers?.national || 0}</div>
+              <div className="kpi-label-mini" style={{ marginTop: '0.5rem' }}>National (ENG)</div>
             </div>
           </div>
 

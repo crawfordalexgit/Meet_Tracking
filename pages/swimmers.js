@@ -35,13 +35,14 @@ export default function SwimmersRegistry({ session }) {
       const period = parseInt(router.query.period) || 365;
       setPeriodDays(period);
       const y1ago = new Date(new Date() - period * 86400000).toISOString();
-      const [swRes, rRes, aRes, sessRes, exRes, memRes] = await Promise.all([
+      const [swRes, rRes, aRes, sessRes, exRes, memRes, rankRes] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
         supabase.from('results').select('swimmer_id, wa_pts, date, meets(id,name,type)').gte('date', y1ago),
         supabase.from('training_attendance').select('*').gte('date', y1ago),
         supabase.from('sessions').select('*'),
         supabase.from('club_exemptions').select('*'),
-        supabase.from('session_memberships').select('*')
+        supabase.from('session_memberships').select('*'),
+        supabase.from('rankings').select('swimmer_id, district')
       ]);
 
       if (swRes.error) throw swRes.error;
@@ -50,6 +51,9 @@ export default function SwimmersRegistry({ session }) {
         const swimmerResults = (rRes.data || []).filter(r => r.swimmer_id === swimmer.id);
         const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
         
+        const swimmerRankings = (rankRes.data || []).filter(r => r.swimmer_id === swimmer.id);
+        const districts = [...new Set(swimmerRankings.map(r => r.district))];
+
         const rel = calculateReliability(
           swimmer, 
           aRes.data || [], 
@@ -64,7 +68,8 @@ export default function SwimmersRegistry({ session }) {
           ...swimmer, 
           peakWA, 
           attendancePct: rel.percentage || 0, 
-          meetCompliance: rel.complianceRate || 0 
+          meetCompliance: rel.complianceRate || 0,
+          districts
         };
       });
 
@@ -77,12 +82,16 @@ export default function SwimmersRegistry({ session }) {
   };
 
   const filtered = useMemo(() => {
-    return swimmers.filter(s => 
+    let list = swimmers;
+    if (router.query.district) {
+      list = list.filter(s => s.districts?.includes(router.query.district));
+    }
+    return list.filter(s => 
       getPreferredName(s).toLowerCase().includes(search.toLowerCase()) ||
       s.full_name.toLowerCase().includes(search.toLowerCase()) ||
       s.squads?.name?.toLowerCase().includes(search.toLowerCase())
     );
-  }, [swimmers, search]);
+  }, [swimmers, search, router.query.district]);
 
   return (
     <Layout session={session}>
@@ -101,16 +110,30 @@ export default function SwimmersRegistry({ session }) {
              ))}
           </div>
         </div>
-        <div className="tactical-search-container">
-           <svg className="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-           <input 
-             type="text" 
-             placeholder="Search by name or squad..." 
-             className="tactical-search-input"
-             style={{ width: '400px' }}
-             value={search}
-             onChange={(e) => setSearch(e.target.value)}
-           />
+        <div className="flex items-center gap-4">
+          {router.query.district && (
+             <button 
+               onClick={() => {
+                 const { district, ...rest } = router.query;
+                 router.push({ pathname: '/swimmers', query: rest }, undefined, { shallow: true });
+               }}
+               className="period-btn-premium active"
+               style={{ background: 'rgba(248, 113, 113, 0.2)', border: '1px solid rgba(248, 113, 113, 0.4)', color: '#f87171' }}
+             >
+               Clear {router.query.district} Filter
+             </button>
+          )}
+          <div className="tactical-search-container">
+             <svg className="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+             <input 
+               type="text" 
+               placeholder="Search by name or squad..." 
+               className="tactical-search-input"
+               style={{ width: '400px' }}
+               value={search}
+               onChange={(e) => setSearch(e.target.value)}
+             />
+          </div>
         </div>
       </div>
 
