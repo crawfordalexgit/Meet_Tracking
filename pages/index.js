@@ -122,7 +122,7 @@ export default function Dashboard({ session }) {
     setLoading(false);
   };
 
-  const { squadKPIs, clubShutdowns, stats, filteredSwimmers, clubTrend, strokeData, ageData } = useMemo(() => {
+  const { squadKPIs, clubShutdowns, stats, filteredSwimmers, clubTrend, strokeData, ageData, qualifiers } = useMemo(() => {
     const { swimmers, squads, results, attendance, sessions, pbs, exemptions, memberships, rankings } = data;
     const now = new Date();
     const periodStart = new Date(now - periodDays * 86400000);
@@ -362,7 +362,12 @@ export default function Dashboard({ session }) {
           const peak = swRes.length ? Math.max(...swRes.map(r => r.wa_pts || 0)) : 0;
           return acc + peak;
         }, 0) / (swimmers.filter(s => s.is_active !== false).length || 1))
-      }, 
+      },
+      qualifiers: {
+        county: new Set((rankings || []).filter(r => r.district === 'Kent').map(r => r.swimmer_id)).size,
+        regional: new Set((rankings || []).filter(r => r.district === 'South East').map(r => r.swimmer_id)).size,
+        national: new Set((rankings || []).filter(r => r.district === 'England').map(r => r.swimmer_id)).size
+      },
       filteredSwimmers, 
       clubTrend,
       strokeData,
@@ -992,12 +997,15 @@ export default function Dashboard({ session }) {
         </div>
 
         <div className="lg:col-span-1 glass-card tactical-dna-card">
-          <div className="dna-title-area mb-12">
+          <div className="dna-title-area mb-6">
              <div className="dna-accent"></div>
              <div className="section-title" style={{ fontSize: '0.6rem', letterSpacing: '0.15em', margin: 0 }}>Achievement DNA</div>
+             <p style={{ fontSize: '0.8rem', opacity: 0.6, marginTop: '8px', marginBottom: '24px', lineHeight: '1.4' }}>
+               These performance orbs map elite cohort size at National (Top 40 England), Regional (Top 30 South East), and County (Top 10 Kent) tiers based on the highest standard achieved per swimmer.
+             </p>
           </div>
           
-          <div className="dna-horizontal-row" style={{ marginTop: '-2rem' }}>
+          <div className="dna-horizontal-row" style={{ marginTop: '0' }}>
             {[
               { label: 'Nationals', value: stats.achievementSummary?.national_count || 0, prior: stats.achievementSummary?.prior_national || 0, color: 'amber', top: 'Top 40', id: 'national' },
               { label: 'Regionals', value: stats.achievementSummary?.regional_count || 0, prior: stats.achievementSummary?.prior_regional || 0, color: 'cyan', top: 'Top 30', id: 'regional' },
@@ -1036,6 +1044,21 @@ export default function Dashboard({ session }) {
                 </div>
               );
             })}
+          </div>
+
+          <div className="qualifier-grid-premium" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '24px', paddingTop: '20px', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <div style={{ textAlign: 'center' }}>
+               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>County Qualifiers</div>
+               <div style={{ fontSize: '1.4rem', fontWeight: 955, color: 'white', marginTop: '4px' }}>{qualifiers?.county || 0}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Regional Qualifiers</div>
+               <div style={{ fontSize: '1.4rem', fontWeight: 955, color: 'var(--accent-cyan)', marginTop: '4px' }}>{qualifiers?.regional || 0}</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>National Qualifiers</div>
+               <div style={{ fontSize: '1.4rem', fontWeight: 955, color: 'var(--accent-amber)', marginTop: '4px' }}>{qualifiers?.national || 0}</div>
+            </div>
           </div>
 
           <div className="dna-ai-briefing" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
