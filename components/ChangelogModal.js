@@ -5,6 +5,83 @@ export default function ChangelogModal({ isOpen, onClose }) {
 
   const updates = [
     {
+      version: "v4.3.0",
+      date: "May 2026",
+      features: [
+        { icon: "🌐", title: "Commercial Landing Page Deployed", desc: "Refactored application routing to introduce a premium SaaS marketing page at the root URL. Highlighted core product virtues to support future monetization, and securely moved the operational dashboard to a dedicated authenticated route." }
+      ]
+    },
+    {
+      version: "v4.0.0",
+      date: "May 2026",
+      features: [
+        { icon: "🚀", title: "Product Commercialization Master Update", desc: "Overhauled PDF Dossier into a premium monetizable product with a dark-mode cover and strict book-style pagination. Removed the legacy Audit Trail, added UI scrolling to the app's Meet Log, and excluded Block ROI from printing. Built a visual QT Predictor print layout, injected dedicated CoachesEye educational guides & AI modules across all tabs, and created automated Appendices for Tactical Splits and the Meet Log." }
+      ]
+    },
+    {
+      version: "v3.7.0",
+      date: "May 2026",
+      features: [
+        { icon: "🖨️", title: "PDF Print Engine Overhaul", desc: "Fixed A4 layout constraints, eliminated blank pages, added club branding, and implemented the Advanced Print Configuration Modal allowing coaches to select specific AI insights and new data tabs for a unified export." }
+      ]
+    },
+    {
+      version: "v3.6.0",
+      date: "May 2026",
+      features: [
+        { icon: "🧹", title: "UI Decluttering", desc: "Removed the historical CoachesEye Foresight Timeline from the Athlete Profile Performance tab to streamline the interface and reduce visual clutter." }
+      ]
+    },
+    {
+      version: "v3.5.0",
+      date: "May 2026",
+      features: [
+        { icon: "🧠", title: "AI Prompt Engine Overhaul", desc: "Rewrote the core AI intelligence prompts to strictly output data in crisp, scannable bullet points and SWOT formats. This eliminates dense paragraphs, making exported PDF dossiers much easier for parents and coaches to digest." }
+      ]
+    },
+    {
+      version: "v3.4.0",
+      date: "May 2026",
+      features: [
+        { icon: "📄", title: "PDF Dossier Overhaul", desc: "Completely rebuilt the print engine. Exported reports now feature a professional Tonbridge SC cover sheet, strict A4 layout formatting to prevent cut-off charts, and an Educational Glossary appendix to help parents understand the data." }
+      ]
+    },
+    {
+      version: "v3.3.0",
+      date: "May 2026",
+      features: [
+        { icon: "👪", title: "Decoupled Parent Audits", desc: "Fixed a routing bug in the AI engine. Parent Audits now correctly generate Vorontsov-based developmental advice and render seamlessly below the main Performance Insight instead of overwriting it." }
+      ]
+    },
+    {
+      version: "v3.2.0",
+      date: "May 2026",
+      features: [
+        { icon: "🔄", title: "Persistent AI Controls", desc: "Fixed a UX oversight on the Performance tab. The Performance Insight, Burnout Check, and Parent Audit buttons now remain permanently pinned to the top of the report card, allowing you to hot-swap AI analyses instantly." }
+      ]
+    },
+    {
+      version: "v3.1.0",
+      date: "May 2026",
+      features: [
+        { icon: "👪", title: "Breakpoint Volume & Parental Audits", desc: "Added the Gender-Dimorphic Break Point Volume Calculator to track critical seasonal mileage and prevent plateaus. Deployed the Parental Expectation Auditing System to generate psychologically supportive reports using Vorontsov's 'Do's and Don'ts' for navigating growth spurts." }
+      ]
+    },
+    {
+      version: "v3.0.0",
+      date: "May 2026",
+      features: [
+        { icon: "🧬", title: "Vorontsov LTAD & Biological Maturation Engine", desc: "Major scientific upgrade. Swimmer profiles now feature a dedicated Biometrics tab that shifts away from chronological age to track Biological Maturation. It dynamically maps Andrei Vorontsov's 'Sensitive Periods' (Windows of Opportunity) for Aerobic, Anaerobic, and Maximal Strength development based on gender and maturity offset." }
+      ]
+    },
+    {
+      version: "v2.8.0",
+      date: "May 2026",
+      features: [
+        { icon: "🔮", title: "Cockpit Orbs Restored", desc: "Fixed a UI regression where the global club health and attendance premium orbs disappeared from the executive dashboard header." }
+      ]
+    },
+    {
       version: "v2.7.0",
       date: "May 2026",
       features: [

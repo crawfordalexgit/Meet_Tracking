@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { getNormalizedWA } from '../lib/wa-points';
+import { getCategoryBenchmark } from '../lib/analytics-utils';
 import PremiumOrb from '../components/PremiumOrb';
 import {
   ResponsiveContainer,
@@ -19,6 +22,8 @@ export default function ReportsCenter({ session }) {
   // Navigation & Loading States
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('briefings');
+  const [normalizeWA, setNormalizeWA] = useState(false);
+
   const [squads, setSquads] = useState([]);
   
   // Selection Filters
@@ -30,6 +35,32 @@ export default function ReportsCenter({ session }) {
 
   // Loaded Data
   const [reportData, setReportData] = useState(null);
+
+  const normalizedSwimmersData = useMemo(() => {
+    if (!reportData || !reportData.swimmersData) return [];
+    return reportData.swimmersData.map(s => {
+      const yob = s.year_of_birth ? parseInt(s.year_of_birth) : null;
+      const age = yob ? (new Date().getFullYear() - yob) : 15;
+      const gender = s.gender || 'F';
+      const multiplier = getNormalizedWA(1000, age, gender, normalizeWA) / 1000;
+      const peakPoints = Math.round((s.peakPoints || 0) * multiplier);
+      const primaryStroke = s.primaryGroup || 'Free';
+      const ageTarget = getCategoryBenchmark(age, gender, primaryStroke, 'COUNTY');
+      const seniorTarget = getCategoryBenchmark(17, gender, primaryStroke, 'COUNTY');
+      const scalingFactor = (ageTarget > 0 && seniorTarget > 0) ? (seniorTarget / ageTarget) : 1;
+      const virtualWA = Math.round(peakPoints * scalingFactor);
+      return {
+        ...s,
+        age,
+        gender,
+        peakPoints,
+        virtualWA,
+        avgWA: Math.round((s.avgWA || 0) * multiplier),
+        teiDelta: s.teiDelta ? s.teiDelta * multiplier : 0
+      };
+    });
+  }, [reportData, normalizeWA]);
+
   const [aiReport, setAiReport] = useState(null);
   const [generatingBrief, setGeneratingBrief] = useState(false);
   const [compilingBooklet, setCompilingBooklet] = useState(false);
@@ -199,22 +230,22 @@ export default function ReportsCenter({ session }) {
 
   // PB Conversion Leaderboard Calculation
   const pbLeaderboard = useMemo(() => {
-    if (!reportData || !reportData.swimmersData) return [];
-    return [...reportData.swimmersData]
+    if (!normalizedSwimmersData) return [];
+    return [...normalizedSwimmersData]
       .filter(s => s.pbCount > 0 || s.wa_pts > 0)
       .map(s => {
-        const totalRaces = s.pbCount + (s.avgPoints > 0 ? Math.round(s.totalHours / 12) : 2); // Approximation of competitive history in period
+        const totalRaces = s.pbCount + (s.avgPoints > 0 ? Math.round(s.totalHours / 12) : 2);
         const convRate = totalRaces > 0 ? Math.round((s.pbCount / totalRaces) * 100) : 0;
         return { ...s, totalRaces, convRate };
       })
       .sort((a, b) => b.convRate - a.convRate);
-  }, [reportData]);
+  }, [normalizedSwimmersData]);
 
 
   // Scatter plot data compiling with TEI as x and TEI-Δ as y
   const scatterData = useMemo(() => {
-    if (!reportData || !reportData.swimmersData) return [];
-    return reportData.swimmersData.map(sw => ({
+    if (!normalizedSwimmersData) return [];
+    return normalizedSwimmersData.map(sw => ({
       x: sw.efficiency,
       y: sw.teiDelta,
       name: sw.preferred_name,
@@ -225,7 +256,45 @@ export default function ReportsCenter({ session }) {
       efficiency: sw.efficiency,
       teiDelta: sw.teiDelta
     }));
-  }, [reportData]);
+  }, [normalizedSwimmersData]);
+
+  // Pathway Transition & Retention Audit
+  const transitionCandidates = useMemo(() => {
+    if (!normalizedSwimmersData) return [];
+    return normalizedSwimmersData.filter(s => {
+      const actualMeets = s.meetCount || s.meetsAttended || 0;
+      const isLowTraining = s.trainingPct < 50;
+      const isLowRacing = s.targetMeets > 0 && actualMeets === 0;
+      const isStagnating = s.peakPoints < 250 && s.teiDelta <= 0 && s.totalHours > 0;
+      return isLowTraining || isLowRacing || isStagnating;
+    }).sort((a, b) => a.trainingPct - b.trainingPct).map(s => {
+      const actualMeets = s.meetCount || s.meetsAttended || 0;
+      return {
+        ...s,
+        actualMeets,
+        reason: s.trainingPct < 50 ? 'Chronic Low Training' : ((s.targetMeets > 0 && actualMeets === 0) ? 'Zero Competitive Engagement' : 'Performance Plateau / Low Engagement')
+      };
+    });
+  }, [normalizedSwimmersData]);
+
+  // Squad Promotion / Upward Transition Candidates
+  const promotionCandidates = useMemo(() => {
+    if (!normalizedSwimmersData) return [];
+    return normalizedSwimmersData.filter(s => {
+      const actualMeets = s.meetCount || s.meetsAttended || 0;
+      const isHighTraining = s.trainingPct >= 75;
+      const isImproving = s.teiDelta > 0 || s.deltaWA >= 15;
+      const hasMeetEngagement = actualMeets > 0;
+      return isHighTraining && isImproving && hasMeetEngagement;
+    }).sort((a, b) => b.teiDelta - a.teiDelta).map(s => {
+      const actualMeets = s.meetCount || s.meetsAttended || 0;
+      return {
+        ...s,
+        actualMeets,
+        reason: 'High Consistency & Positive Velocity'
+      };
+    });
+  }, [normalizedSwimmersData]);
 
   // Get swimmer cohort badge helper mapped to the 4 quadrants
   const getSwimmerCohortBadge = (swimmerId) => {
@@ -250,6 +319,56 @@ export default function ReportsCenter({ session }) {
     <Layout session={session}>
       <Head>
         <title>Performance Reporting Center | CoachesEye</title>
+        <style>{`
+          @media print {
+            @page { size: A4 landscape; margin: 1.2cm; }
+            html, body {
+              background: white !important;
+              color: black !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            h1, h2, h3, h4, p, span, div, th, td {
+              color: black !important;
+            }
+            .no-print { display: none !important; }
+
+            /* Clean up the card containers */
+            .glass-card {
+              border: none !important;
+              background: white !important;
+              box-shadow: none !important;
+              padding: 0 !important;
+              margin-top: 20px !important;
+            }
+
+            /* Prevent the table from being horizontally scrollable on paper */
+            .overflow-x-auto { overflow: visible !important; }
+
+            /* Compress the table to fit A4 Landscape */
+            .stats-table-glass {
+              width: 100% !important;
+              font-size: 10pt !important;
+              border-collapse: collapse;
+            }
+            .stats-table-glass th {
+              color: black !important;
+              border-bottom: 2px solid #000 !important;
+              padding: 8px 4px !important;
+            }
+            .stats-table-glass td {
+              color: black !important;
+              border-bottom: 1px solid #ccc !important;
+              padding: 8px 4px !important;
+            }
+
+            /* Hide the Action column (buttons) as they are useless on a printed PDF */
+            .stats-table-glass th:last-child,
+            .stats-table-glass td:last-child {
+              display: none !important;
+            }
+          }
+        `}</style>
       </Head>
 
       {/* Hero Section */}
@@ -338,26 +457,48 @@ export default function ReportsCenter({ session }) {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="flex border-b border-white/5 mb-10 overflow-x-auto select-none no-scrollbar">
-        {[
-          { id: 'briefings', label: 'AI Intel Briefings' },
-          { id: 'efficiency', label: 'Load & Efficiency Matrix' },
-          { id: 'pathway', label: 'Championship Pathway Audit' },
-          { id: 'temperament', label: 'Competitive Temperament' },
-          { id: 'export', label: 'PDF Export Cockpit' }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`py-4 px-6 text-xs font-black tracking-widest uppercase transition-all duration-300 relative border-b-2 ${
-              activeTab === tab.id
-                ? 'text-cyan-400 border-cyan-400'
-                : 'text-white/60 hover:text-white border-transparent'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="mb-8 border-b border-white/10 pb-4 flex items-center">
+        <label style={{ fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-secondary)', marginRight: '1rem' }}>
+          Select Intelligence Report:
+        </label>
+        <select
+          value={activeTab}
+          onChange={(e) => setActiveTab(e.target.value)}
+          className="tactical-search-input"
+          style={{ width: '320px', padding: '10px 16px', fontWeight: 700, cursor: 'pointer' }}
+        >
+          <option value="briefings">AI Strategic Briefings</option>
+          <option value="athletes">Athlete Intelligence Directory</option>
+          <option value="efficiency">Load & Efficiency Matrix</option>
+          <option value="pathway">Championship Pathway Audit</option>
+          <option value="temperament">Competitive Temperament</option>
+          <option value="promotions">Squad Promotions (Upward Ready)</option>
+          <option value="transitions">Squad Transitions (Risk Audit)</option>
+          <option value="export">PDF Export Cockpit</option>
+        </select>
+        <button
+          onClick={() => window.print()}
+          className="no-print ml-4 hover-glow"
+          style={{
+            padding: '10px 16px', borderRadius: '12px', fontWeight: 900, fontSize: '0.75rem', cursor: 'pointer',
+            background: 'rgba(255, 255, 255, 0.05)', color: '#fff', border: '1px solid rgba(255, 255, 255, 0.1)', transition: 'all 0.3s'
+          }}
+        >
+          <span style={{ marginRight: '6px' }}>📄</span> EXPORT PDF
+        </button>
+        <button
+          onClick={() => setNormalizeWA(!normalizeWA)}
+          className="ml-auto"
+          style={{
+            padding: '8px 16px', borderRadius: '12px', fontWeight: 900, fontSize: '0.75rem', cursor: 'pointer',
+            background: normalizeWA ? 'var(--accent-violet)' : 'rgba(139, 92, 246, 0.1)',
+            color: normalizeWA ? '#fff' : 'var(--accent-violet)',
+            border: '1px solid var(--accent-violet)',
+            transition: 'all 0.3s'
+          }}
+        >
+          {normalizeWA ? 'WA NORMALISATION: ON' : 'WA NORMALISATION: OFF'}
+        </button>
       </div>
 
       {/* Tab Panels */}
@@ -369,6 +510,25 @@ export default function ReportsCenter({ session }) {
       ) : reportData ? (
         <div className="space-y-12">
           
+          {/* COACHESEYE GUIDE: DATA NORMALISATION */}
+          <div className="glass-card mb-8 animate-fade-in" style={{ borderLeft: '4px solid var(--accent-violet)', padding: '1.5rem 2rem' }}>
+            <div className="section-title" style={{ color: 'var(--accent-violet)', margin: '0 0 12px 0' }}>CoachesEye Guide: Intelligence Engine Normalisation</div>
+            <div className="grid md:grid-cols-2 gap-8">
+              <div>
+                <h4 style={{ fontSize: '1.1rem', fontWeight: 900, marginBottom: '8px' }}>1. Virtual Senior Scaling (vPts)</h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Because WA points anchor to adult World Records, older athletes naturally dominate leaderboards. The <strong>Virtual Senior (vPts)</strong> metric mathematically projects a younger swimmer's current performance to its 17-year-old equivalent using the Regional qualification curve. This creates a true "pound-for-pound" virtual ranking table, where a highly skilled 12-year-old can rightfully outrank an average 16-year-old.
+                </p>
+              </div>
+              <div>
+                <h4 style={{ fontSize: '1.1rem', fontWeight: 900, marginBottom: '8px' }}>2. Biological Maturation (Vorontsov LTAD)</h4>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  According to Vorontsov's models, girls hit Peak Height Velocity (PHV) ~2 years earlier than boys (ages 11-12 vs 13-14). When the <strong>WA Normalisation</strong> toggle is active, the engine applies a ±10% biological scaling factor during this window to strip away temporary pubertal growth advantages and reveal true underlying skill.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* TAB 1: AI INTEL BRIEFINGS */}
           {activeTab === 'briefings' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
@@ -890,6 +1050,208 @@ export default function ReportsCenter({ session }) {
                   </div>
                 ) : (
                   <div className="text-center py-12 italic text-white/40 text-xs">No cusp swimmers identified in the selected period and squad combination.</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: ATHLETE INTELLIGENCE DIRECTORY */}
+          {activeTab === 'athletes' && (
+            <div className="animate-fade-in">
+              <div className="glass-card mb-8" style={{ borderLeft: '4px solid var(--accent-cyan)' }}>
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h2 className="text-2xl font-black uppercase tracking-tight text-white mb-2">Athlete Intelligence Directory</h2>
+                    <p className="text-white/50 text-sm max-w-2xl">
+                      A complete performance and compliance audit of all athletes in the selected cohort. Review training consistency, racing engagement, and peak World Aquatics standards.
+                    </p>
+                  </div>
+                  <div className="bg-cyan-400/10 text-cyan-400 border border-cyan-400/20 px-4 py-2 rounded-lg font-black text-xl">
+                    {reportData?.swimmersData?.length || 0} ATHLETES
+                  </div>
+                </div>
+
+                {reportData?.swimmersData?.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="stats-table-glass w-full">
+                      <thead>
+                        <tr>
+                          <th>Athlete Name</th>
+                          <th>Current Squad</th>
+                          <th>Consistency</th>
+                          <th>Volume</th>
+                          <th>Racing</th>
+                          <th>Velocity (TEI-Δ)</th>
+                          <th>Peak Standard</th>
+                          <th>Virtual Senior (vPts)</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...normalizedSwimmersData]
+                          .sort((a, b) => (b.virtualWA || 0) - (a.virtualWA || 0))
+                          .map((swimmer, idx) => {
+                          const actualMeets = swimmer.meetCount || swimmer.meetsAttended || 0;
+                          return (
+                          <tr key={idx} className="hover:bg-white/5">
+                            <td className="font-bold">{swimmer.preferred_name || swimmer.name || swimmer.full_name}</td>
+                            <td className="text-white/60">{swimmer.squad_name || 'Unassigned'}</td>
+                            <td className={swimmer.trainingPct < 50 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
+                              {swimmer.trainingPct}%
+                            </td>
+                            <td className="text-white/80">{swimmer.volumePct}%</td>
+                            <td className={actualMeets === 0 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
+                              {actualMeets} Meets
+                            </td>
+                            <td className={swimmer.teiDelta >= 0 ? 'text-cyan-400 font-bold' : 'text-rose-400 font-bold'}>
+                              {swimmer.teiDelta >= 0 ? '+' : ''}{swimmer.teiDelta ? swimmer.teiDelta.toFixed(3) : 0}
+                            </td>
+                            <td className="text-white/80 font-bold">{swimmer.peakPoints} pts</td>
+                            <td className="text-violet-400 font-bold">{swimmer.virtualWA} vPts</td>
+                            <td>
+                              <Link href={`/swimmer/${swimmer.id}`}>
+                                <button className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded transition-colors">
+                                  Review Profile
+                                </button>
+                              </Link>
+                            </td>
+                          </tr>
+                        )})}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 border border-white/5 rounded-xl bg-white/5">
+                    <p className="text-white/50 font-bold tracking-widest uppercase">No athletes found in this cohort.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: SQUAD PROMOTIONS */}
+          {activeTab === 'promotions' && (
+            <div className="animate-fade-in">
+              <div className="glass-card mb-8" style={{ borderLeft: '4px solid var(--accent-emerald)' }}>
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h2 className="text-2xl font-black uppercase tracking-tight text-white mb-2">Squad Promotion Readiness</h2>
+                    <p className="text-white/50 text-sm max-w-2xl">
+                      Automatically flags athletes who are meeting or exceeding training expectations (75%+) and showing aggressive performance acceleration. These swimmers possess the aerobic baseline and racing momentum required for promotion to the next competitive squad tier.
+                    </p>
+                  </div>
+                  <div className="bg-emerald-400/10 text-emerald-400 border border-emerald-400/20 px-4 py-2 rounded-lg font-black text-xl">
+                    {promotionCandidates.length} READY
+                  </div>
+                </div>
+
+                {promotionCandidates.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="stats-table-glass w-full">
+                      <thead>
+                        <tr>
+                          <th>Athlete Name</th>
+                          <th>Current Squad</th>
+                          <th>Training Consistency</th>
+                          <th>Racing Engagement</th>
+                          <th>Trajectory (Velocity)</th>
+                          <th>Peak Standard</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {promotionCandidates.map((swimmer, idx) => (
+                          <tr key={idx} className="hover:bg-white/5">
+                            <td className="font-bold">{swimmer.preferred_name || swimmer.name || swimmer.full_name}</td>
+                            <td className="text-white/60">{swimmer.squad_name || 'Unassigned'}</td>
+                            <td className="text-emerald-400 font-bold">
+                              {swimmer.trainingPct}%
+                            </td>
+                            <td className="text-emerald-400 font-bold">
+                              {swimmer.actualMeets} / {swimmer.targetMeets || 0} Meets
+                            </td>
+                            <td className="text-cyan-400 font-bold">+{swimmer.deltaWA >= 0 ? swimmer.deltaWA : 0} pts</td>
+                            <td className="text-white/80">{swimmer.peakPoints} pts</td>
+                            <td>
+                              <Link href={`/swimmer/${swimmer.id}`}>
+                                <button className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded transition-colors">
+                                  Review Profile
+                                </button>
+                              </Link>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 border border-white/5 rounded-xl bg-white/5">
+                    <p className="text-white/50 font-bold tracking-widest uppercase">No promotion candidates flagged in this period.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: PATHWAY TRANSITIONS */}
+          {activeTab === 'transitions' && (
+            <div className="animate-fade-in">
+              <div className="glass-card mb-8" style={{ borderLeft: '4px solid var(--accent-amber)' }}>
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h2 className="text-2xl font-black uppercase tracking-tight text-white mb-2">Pathway Transition Audit</h2>
+                    <p className="text-white/50 text-sm max-w-2xl">
+                      Automatically flags athletes who may be better suited for a non-competitive, fitness, or Club 2 squad. Candidates are identified through chronic low attendance (&lt;50%) or sustained performance plateaus at a developmental level.
+                    </p>
+                  </div>
+                  <div className="bg-amber-400/10 text-amber-400 border border-amber-400/20 px-4 py-2 rounded-lg font-black text-xl">
+                    {transitionCandidates.length} FLAGGED
+                  </div>
+                </div>
+
+                {transitionCandidates.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="stats-table-glass w-full">
+                      <thead>
+                        <tr>
+                          <th>Athlete Name</th>
+                          <th>Current Squad</th>
+                          <th>Primary Flag</th>
+                          <th>Training</th>
+                          <th>Racing</th>
+                          <th>Peak Standard</th>
+                          <th>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {transitionCandidates.map((swimmer, idx) => (
+                          <tr key={idx} className="hover:bg-white/5">
+                            <td className="font-bold">{swimmer.preferred_name || swimmer.name}</td>
+                            <td className="text-white/60">{swimmer.squad_name || 'Unassigned'}</td>
+                            <td className="text-amber-400 font-bold text-xs">{swimmer.reason}</td>
+                            <td className={swimmer.trainingPct < 50 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
+                              {swimmer.trainingPct}%
+                            </td>
+                            <td className={(swimmer.targetMeets > 0 && swimmer.actualMeets === 0) ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
+                              {swimmer.actualMeets} / {swimmer.targetMeets || 0} Meets
+                            </td>
+                            <td className="text-white/80">{swimmer.peakPoints} pts</td>
+                            <td>
+                              <Link href={`/swimmer/${swimmer.id}`}>
+                                <button className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded transition-colors">
+                                  Review Profile
+                                </button>
+                              </Link>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="text-center py-12 border border-white/5 rounded-xl bg-white/5">
+                    <p className="text-white/50 font-bold tracking-widest uppercase">No transition candidates flagged in this period.</p>
+                  </div>
                 )}
               </div>
             </div>

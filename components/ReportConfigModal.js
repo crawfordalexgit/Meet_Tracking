@@ -9,7 +9,14 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
     aiDeepDive: true,
     performanceNarrative: true,
     strokeRoadmap: true,
-    progression: true
+    progression: true,
+    aiPerformance: true,
+    aiBurnout: false,
+    aiParent: false,
+    progress: true,
+    competition: true,
+    qtPredictor: false,
+    biometrics: false
   });
   const [audience, setAudience] = useState('Coach');
 
@@ -133,17 +140,34 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
           </div>
 
           <div>
-            <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '16px' }}>Data Inclusions</label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              {Object.entries(sections).map(([key, val]) => (
+            <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-violet)', display: 'block', marginBottom: '12px' }}>AI Insight Modules</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '24px' }}>
+              {[
+                { key: 'aiPerformance', label: '✨ Performance' },
+                { key: 'aiBurnout', label: '🔥 Burnout Check' },
+                { key: 'aiParent', label: '👪 Parent Audit' },
+              ].map(({ key, label }) => (
                 <div key={key} style={checkboxCardStyle} onClick={() => handleToggle(key)}>
-                  <input 
-                    type="checkbox" 
-                    checked={val} 
-                    onChange={() => {}} 
-                    style={{ width: '16px', height: '16px', accentColor: 'var(--accent-cyan)' }}
-                  />
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, textTransform: 'capitalize' }}>{key.replace(/([A-Z])/g, ' $1')}</span>
+                  <input type="checkbox" checked={sections[key]} onChange={() => {}} style={{ width: '16px', height: '16px', accentColor: 'var(--accent-violet)' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{label}</span>
+                </div>
+              ))}
+            </div>
+            <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '12px' }}>Data Analytics Modules</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              {[
+                { key: 'progress', label: '📈 Progress' },
+                { key: 'competition', label: '🏅 Competition' },
+                { key: 'performanceNarrative', label: '📋 Narrative' },
+                { key: 'strokeRoadmap', label: '🏊 Stroke Roadmap' },
+                { key: 'attendance', label: '📅 Attendance' },
+                { key: 'openMeets', label: '🌊 Open Meets' },
+                { key: 'qtPredictor', label: '🎯 QT Predictor' },
+                { key: 'biometrics', label: '🧬 Biometrics' },
+              ].map(({ key, label }) => (
+                <div key={key} style={checkboxCardStyle} onClick={() => handleToggle(key)}>
+                  <input type="checkbox" checked={sections[key]} onChange={() => {}} style={{ width: '16px', height: '16px', accentColor: 'var(--accent-cyan)' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>{label}</span>
                 </div>
               ))}
             </div>

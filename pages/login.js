@@ -16,7 +16,7 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin
+          redirectTo: window.location.origin + '/dashboard'
         }
       });
       if (error) throw error;
@@ -34,7 +34,7 @@ export default function Login() {
     if (authMode === 'magic_link') {
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: window.location.origin },
+        options: { emailRedirectTo: window.location.origin + '/dashboard' },
       });
       if (error) {
         setMessage({ type: 'error', text: error.message });
@@ -49,7 +49,7 @@ export default function Login() {
       if (error) {
         setMessage({ type: 'error', text: error.message });
       } else {
-        window.location.href = '/';
+        window.location.href = '/dashboard';
       }
     }
     setLoading(false);

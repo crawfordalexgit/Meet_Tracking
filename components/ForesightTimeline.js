@@ -79,7 +79,7 @@ export default function ForesightTimeline({ insights, pbs = {} }) {
                    
                    <div style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', marginBottom: '8px', opacity: 0.6 }}>Strategic Targets:</div>
                    <div className="space-y-2">
-                      {insight.full_report.recommendations.slice(0, 5).map((rec, i) => (
+                      {(insight.full_report.recommendations || []).slice(0, 5).map((rec, i) => (
                         <div key={i} style={{ 
                           fontSize: '0.7rem', 
                           display: 'flex', 

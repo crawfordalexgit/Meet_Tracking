@@ -20,6 +20,8 @@ export default function AiInsightCard({
   const [correction, setCorrection] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [coachNotes, setCoachNotes] = useState('');
+  const [parentInsight, setParentInsight] = useState(null);
+  const [loadingParent, setLoadingParent] = useState(false);
 
   useEffect(() => {
     if (swimmerId) fetchLatestInsight();
@@ -56,6 +58,21 @@ export default function AiInsightCard({
   const generateInsight = async (type = 'general') => {
     if (onGenerate) {
       await onGenerate(type, coachNotes);
+    }
+  };
+
+  const generateParentInsight = async () => {
+    setLoadingParent(true);
+    setParentInsight(null);
+    try {
+      if (onGenerate) {
+        const result = await onGenerate('parent_audit', coachNotes, true);
+        if (result) setParentInsight(result);
+      }
+    } catch (e) {
+      setParentInsight({ error: true, headline: 'Generation failed', overview: e.message });
+    } finally {
+      setLoadingParent(false);
     }
   };
 
@@ -148,6 +165,9 @@ export default function AiInsightCard({
             >
               <span>🔥</span> Burnout Check
             </button>
+            <button className="intel-toggle w-full" onClick={generateParentInsight} style={{ borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)', background: 'rgba(245,158,11,0.1)', padding: '10px 16px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>👪</span> Parent Audit
+            </button>
           </div>
         </div>
       </div>
@@ -165,6 +185,7 @@ export default function AiInsightCard({
   }
 
   return (
+    <div className="flex flex-col gap-6">
     <div className="group relative overflow-hidden rounded-xl bg-slate-900/40 border border-slate-800/50 p-6 transition-all hover:bg-slate-900/60 hover:border-blue-500/30 hover:shadow-[0_0_20px_rgba(59,130,246,0.1)]">
       {/* Subtle Glow Effect */}
       <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-blue-500/5 blur-3xl transition-all group-hover:bg-blue-500/10" />
@@ -178,10 +199,18 @@ export default function AiInsightCard({
             </div>
           )}
         </div>
-        <div className="flex gap-2 no-print">
-          <button className="period-btn" onClick={() => handleFeedback(true)} style={{ fontSize: '0.6rem', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>👍 Precise</button>
-          <button className="period-btn" onClick={() => handleFeedback(false)} style={{ fontSize: '0.6rem', background: 'rgba(244, 63, 94, 0.1)', color: 'var(--accent-rose)' }}>👎 Correct</button>
-          <button className="period-btn" onClick={() => generateInsight(insight?.type || 'general')} style={{ fontSize: '0.6rem', background: 'rgba(0, 150, 255, 0.15)', color: 'var(--accent-cyan)' }}>🔄 Refresh</button>
+        <div className="flex gap-2 items-center no-print flex-wrap" style={{ zIndex: 10 }}>
+          <button className="btn-premium-action" style={{ padding: '6px 12px', fontSize: '0.65rem' }} onClick={() => generateInsight('general')}>
+            <span>✨</span> PERFORMANCE
+          </button>
+          <button className="btn-premium-intel" style={{ padding: '6px 12px', fontSize: '0.65rem', borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }} onClick={() => generateInsight('burnout')}>
+            <span>🔥</span> BURNOUT
+          </button>
+          <button className="btn-premium-intel" style={{ padding: '6px 12px', fontSize: '0.65rem', borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)' }} onClick={generateParentInsight}>
+            <span>👪</span> PARENT
+          </button>
+          <button className="period-btn" onClick={() => handleFeedback(true)} style={{ fontSize: '0.6rem', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>👍</button>
+          <button className="period-btn" onClick={() => handleFeedback(false)} style={{ fontSize: '0.6rem', background: 'rgba(244, 63, 94, 0.1)', color: 'var(--accent-rose)' }}>👎</button>
           <button className="period-btn" onClick={() => onGenerate('reset')} style={{ fontSize: '0.6rem' }}>Reset</button>
         </div>
       </div>
@@ -207,15 +236,15 @@ export default function AiInsightCard({
 
       <div className="mb-10">
         <h2 style={{ fontSize: '2.2rem', fontWeight: 900, marginBottom: '1.5rem', color: 'var(--accent-cyan)', letterSpacing: '-0.03em' }}>{insight.headline}</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+
+      {insight.summary && <><div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           <div className="md:col-span-2">
              <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Executive Profile</h4>
              <p style={{ fontSize: '1rem', lineHeight: '1.6', color: 'var(--text-primary)', marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
              
              <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Technical Review</h4>
              <div style={{ lineHeight: '1.7', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-               {insight.analysis.split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1rem' }}>{p}</p>)}
+               {(insight.analysis || '').split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1rem' }}>{p}</p>)}
              </div>
           </div>
 
@@ -255,7 +284,7 @@ export default function AiInsightCard({
           <div>
             <h4 className="section-title" style={{ fontSize: '0.6rem' }}>Strategic Recommendations</h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {insight.recommendations.map((rec, i) => (
+              {(insight.recommendations || []).map((rec, i) => (
                 <li key={i} style={{ fontSize: '0.85rem', display: 'flex', gap: '12px', marginBottom: '10px' }}>
                   <div style={{ minWidth: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '8px' }}></div>
                   <span style={{ color: 'var(--text-secondary)' }}>{rec}</span>
@@ -264,6 +293,7 @@ export default function AiInsightCard({
             </ul>
         </div>
       </div>
+      </>}
       </div>
 
       <div className="no-print mt-8 pt-6 border-t border-white/5">
@@ -313,6 +343,49 @@ export default function AiInsightCard({
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
+    </div>
+
+    {/* Parent Audit Section — outside main card, inside flex wrapper */}
+    {(loadingParent || parentInsight) && (
+      <div className="glass-card animate-fade-in" style={{ padding: '2rem 2.5rem', borderLeft: '4px solid var(--accent-amber)' }}>
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <div className="insight-tag" style={{ color: 'var(--accent-amber)' }}>VORONTSOV PARENTAL FRAMEWORK</div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', margin: 0 }}>Parent Development Audit</h3>
+          </div>
+          <button className="period-btn" onClick={() => setParentInsight(null)} style={{ fontSize: '0.6rem' }}>✕ Close</button>
+        </div>
+        {loadingParent && <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--accent-amber)', fontSize: '0.85rem' }}>👪 Generating parental guidance report...</div>}
+        {parentInsight && !parentInsight.error && (
+          <div className="space-y-4">
+            <h4 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff', margin: 0 }}>{parentInsight.headline}</h4>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{parentInsight.overview}</p>
+            {parentInsight.development_context && (
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6, background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '10px' }}>{parentInsight.development_context}</p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {parentInsight.vorontsov_dos?.length > 0 && (
+                <div style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.2)', padding: '1rem', borderRadius: '10px' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-emerald)', marginBottom: '0.75rem' }}>✅ DO</div>
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                    {parentInsight.vorontsov_dos.map((d, i) => <li key={i} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', lineHeight: 1.5 }}>• {d}</li>)}
+                  </ul>
+                </div>
+              )}
+              {parentInsight.vorontsov_donts?.length > 0 && (
+                <div style={{ background: 'rgba(244,63,94,0.07)', border: '1px solid rgba(244,63,94,0.2)', padding: '1rem', borderRadius: '10px' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-rose)', marginBottom: '0.75rem' }}>🚫 AVOID</div>
+                  <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                    {parentInsight.vorontsov_donts.map((d, i) => <li key={i} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px', lineHeight: 1.5 }}>• {d}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {parentInsight?.error && <p style={{ color: 'var(--accent-rose)', fontSize: '0.85rem' }}>{parentInsight.overview}</p>}
+      </div>
+    )}
     </div>
   );
 }
