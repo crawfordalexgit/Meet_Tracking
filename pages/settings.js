@@ -1819,7 +1819,7 @@ export default function Settings({ session, scmApiKey }) {
 
       <style jsx>{`
         .settings-container { display: flex; gap: 2rem; min-height: 80vh; margin-top: -1rem; }
-        .settings-sidebar { width: 260px; background: rgba(255,255,255,0.02); border-radius: 20px; border: 1px solid var(--surface-border); padding: 1rem 0; height: fit-content; }
+        .settings-sidebar { width: 260px; background: rgba(255,255,255,0.02); border-radius: 20px; border: 1px solid var(--surface-border); padding: 1rem 0; max-height: calc(100vh - 4rem); overflow-y: auto; position: sticky; top: 2rem; }
         .sidebar-item { padding: 0.85rem 1.5rem; display: flex; align-items: center; gap: 1rem; cursor: pointer; transition: all 0.2s; color: var(--text-secondary); font-weight: 500; font-size: 0.95rem; }
         .sidebar-item:hover { color: white; background: rgba(255,255,255,0.03); }
         .sidebar-item.active { color: white; background: rgba(59, 130, 246, 0.1); border-right: 3px solid var(--accent-primary); }

@@ -3,18 +3,20 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import PremiumOrb from '../../components/PremiumOrb';
 import Layout from '../../components/Layout';
+import CoachesEyeGlossary from '../../components/CoachesEyeGlossary';
 import BenchmarkModal from '../../components/BenchmarkModal';
 import { supabase } from '../../lib/supabase';
 import { calculateWorkload, isGalaDate, getSessionDuration, isExemptDate, isShutdownDate, calculateReliability, generateSwimmerNarrative, calculateSquadHealth, getKentBenchmark, getCategoryBenchmark, getWeekKey, toLocalISO } from '../../lib/analytics-utils';
+import { getNormalizedWA } from '../../lib/wa-points';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Cell, ComposedChart, Area, LabelList, ReferenceLine, ReferenceArea } from 'recharts';
 import Link from 'next/link';
 import AiInsightCard from '../../components/AiInsightCard';
-import ForesightTimeline from '../../components/ForesightTimeline';
 import ReportConfigModal from '../../components/ReportConfigModal';
 import WeeklyWorkloadModal from '../../components/WeeklyWorkloadModal';
 import ReadinessBreakdownCard from '../../components/ReadinessBreakdownCard';
 import TrainingBlockTracker from '../../components/TrainingBlockTracker';
 import SquadQualificationPredictor from '../../components/SquadQualificationPredictor';
+import VorontsovLTADModule from '../../components/VorontsovLTADModule';
 
 
 export default function SwimmerDetail({ session }) {
@@ -63,14 +65,11 @@ const [decayDistance, setDecayDistance] = useState('100');
   const [progressSubTab, setProgressSubTab] = useState('charts');
   const [reportConfig, setReportConfig] = useState({
     sections: {
-      attendance: true,
-      openMeets: true,
-      internalGalas: true,
-      aiTechnical: true,
-      aiDeepDive: true,
-      performanceNarrative: true,
-      strokeRoadmap: true,
-      progression: true
+      attendance: true, openMeets: true, internalGalas: true,
+      aiTechnical: true, aiDeepDive: true, performanceNarrative: true,
+      strokeRoadmap: true, progression: true,
+      aiPerformance: true, aiBurnout: false, aiParent: false,
+      progress: true, competition: true, qtPredictor: false, biometrics: false
     },
     audience: 'Coach'
   });
@@ -78,6 +77,7 @@ const [decayDistance, setDecayDistance] = useState('100');
   const [aiInsight, setAiInsight] = useState(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [syncingPbs, setSyncingPbs] = useState(false);
+  const [normalizeWA, setNormalizeWA] = useState(false);
 
   const allAvailableSplits = useMemo(() => {
     const list = [];
@@ -266,6 +266,15 @@ const [decayDistance, setDecayDistance] = useState('100');
   const period = parseInt(router.query.period) || 365;
   const periodWeeks = Math.floor(period / 7);
 
+  const normalizedResults = useMemo(() => {
+    if (!results) return [];
+    const age = swimmer?.year_of_birth ? (new Date().getFullYear() - swimmer.year_of_birth) : 12;
+    return results.map(r => ({
+      ...r,
+      wa_pts: getNormalizedWA(r.wa_pts, age, swimmer?.gender, normalizeWA)
+    }));
+  }, [results, swimmer, normalizeWA]);
+
   const { rollingMeets, rollingTarget, progressPercent, rollingPeak, rollingAvg, workloadChartData, attendancePct, seasonVolumePct, totalActualHours, annualTargetHours, seasonPBs, isCompliant, velocity, filteredMeets, statsObj, progressionData, performance_slope, periodCompliance, rel, uniqueMeetsList, meetTimelineData, openMeetsCount, totalMeetsCount, totalAbsentSessions, rawAbsentCount, periodMeets } = useMemo(() => {
     if (!swimmer) return { attendancePct: 0, seasonVolumePct: 0, workloadChartData: [], filteredMeets: [], rel: {}, uniqueMeetsList: [], meetTimelineData: [], openMeetsCount: 0, totalMeetsCount: 0, seasonPBs: 0 };
     const now = new Date();
@@ -273,7 +282,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     
     // COMPREHENSIVE MEET ANALYTICS: Smart Deduplication (Match engine logic)
-    const sortedRawMeets = results
+    const sortedRawMeets = normalizedResults
       .filter(r => new Date(r.date) >= START)
       .sort((a, b) => new Date(a.date) - new Date(b.date));
     
@@ -408,7 +417,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       shutdowns: includeShutdowns,
       complianceMode
     });
-    const yearResults = results.filter(r => new Date(r.meets?.date || 0) >= START);
+    const yearResults = normalizedResults.filter(r => new Date(r.meets?.date || 0) >= START);
     
     // Generate continuous rolling timeline based on the reliability analysis window
     const chartData = [];
@@ -620,7 +629,7 @@ const [decayDistance, setDecayDistance] = useState('100');
 
     const half = Math.floor(period / 2);
     const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
-    const velocity = Math.round(avg(results.filter(r => new Date(r.date) >= new Date(now - half * 86400000)).map(r => r.wa_pts || 0)) - avg(results.filter(r => new Date(r.date) >= new Date(now - period * 86400000) && new Date(r.date) < new Date(now - half * 86400000)).map(r => r.wa_pts || 0)));
+    const velocity = Math.round(avg(normalizedResults.filter(r => new Date(r.date) >= new Date(now - half * 86400000)).map(r => r.wa_pts || 0)) - avg(normalizedResults.filter(r => new Date(r.date) >= new Date(now - period * 86400000) && new Date(r.date) < new Date(now - half * 86400000)).map(r => r.wa_pts || 0)));
 
     // Stroke-specific analysis
     const strokeMap = {};
@@ -652,7 +661,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     const age = swimmer?.year_of_birth ? new Date().getFullYear() - swimmer.year_of_birth : null;
 
     // Window-based current average (90 days) for "Current Form"
-    const recentResults = results.filter(r => new Date(r.date) >= new Date(now - 90 * 86400000));
+    const recentResults = normalizedResults.filter(r => new Date(r.date) >= new Date(now - 90 * 86400000));
     const recentAvg = Math.round(recentResults.reduce((a,r)=>a+(r.wa_pts||0),0)/(recentResults.length || 1));
 
     // Personal Best Tracking (Lifetime bests achieved in the selected period)
@@ -694,7 +703,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       holidayAllowance: rel.holidayAllowance
     };
 
-    const finalFiltered = results.filter(r => {
+    const finalFiltered = normalizedResults.filter(r => {
       const monthMatch = selectedMonth === 'All' || new Date(r.date).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) === selectedMonth;
       const strokeMatch = selectedStroke === 'All' || r.event?.toLowerCase().includes(selectedStroke.toLowerCase());
       return monthMatch && strokeMatch;
@@ -752,7 +761,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       rawAbsentCount: attendance.filter(a => a.status === 'absent' && new Date(a.date) >= START).length,
       periodMeets: uniqueMeetsList.filter(m => new Date(m.date) >= START)
     };
-  }, [results, swimmer, squad, attendance, sessions, exemptions, sessionMemberships, period, periodWeeks, selectedMonth, selectedStroke, router.query.period, sortConfig, includeShutdowns, includeSessionCredits, includeHolidays, includeGalas, complianceMode]);
+  }, [normalizedResults, swimmer, squad, attendance, sessions, exemptions, sessionMemberships, period, periodWeeks, selectedMonth, selectedStroke, router.query.period, sortConfig, includeShutdowns, includeSessionCredits, includeHolidays, includeGalas, complianceMode]);
 
   const requestSort = (key) => {
     let direction = 'desc';
@@ -800,6 +809,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     }, 500);
   };
 
+
   const renderCustomBarLabel = (props) => {
     const { x, y, width, index } = props;
     const entry = workloadChartData[index];
@@ -836,10 +846,274 @@ const [decayDistance, setDecayDistance] = useState('100');
 
   return (
     <Layout session={session}>
+      {/* ═══════════════════════════════════════════════
+          PRINT REPORT — hidden on screen, shown on print
+          ═══════════════════════════════════════════════ */}
+
+      {/* ── COVER PAGE ── */}
+      <div className="print-only roster-cover-page">
+        {/* Top accent bar */}
+        <div style={{ background: '#00d4ff', height: '6px', width: '100%', flexShrink: 0 }} />
+        {/* Body */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '0 48px', textAlign: 'center' }}>
+          {/* Logo */}
+          <div style={{ marginBottom: '32px' }}>
+            <svg width="72" height="72" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 16px rgba(0,212,255,0.5))' }}>
+              <defs><linearGradient id="rptGrad" x1="0%" y1="50%" x2="100%" y2="50%"><stop offset="0%" stopColor="#00E5FF"/><stop offset="100%" stopColor="#E8FF00"/></linearGradient></defs>
+              <path d="M10 50C10 50 25 25 50 25C75 25 90 50 90 50C90 50 75 75 50 75C25 75 10 50 10 50Z" stroke="url(#rptGrad)" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
+              <circle cx="50" cy="50" r="16" stroke="url(#rptGrad)" strokeWidth="5"/>
+              <path d="M41 55L48 42L53 48L62 38" stroke="url(#rptGrad)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
+              <line x1="50" y1="15" x2="50" y2="23" stroke="url(#rptGrad)" strokeWidth="5" strokeLinecap="round"/>
+            </svg>
+          </div>
+          <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#00d4ff', marginBottom: '8px' }}>COACHESEYE · TONBRIDGE SWIMMING CLUB</div>
+          <div style={{ width: '60px', height: '2px', background: 'rgba(0,212,255,0.4)', margin: '0 auto 28px' }} />
+          <h1 style={{ fontSize: '44px', fontWeight: 900, color: '#ffffff', margin: '0 0 6px', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{swimmer.full_name}</h1>
+          <h2 className="subtitle" style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', margin: '0 0 8px' }}>Athlete Performance Report</h2>
+          <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', marginBottom: '40px', fontWeight: 700 }}>
+            Report Focus: {Object.keys(reportConfig?.sections || {}).filter(k => reportConfig.sections[k]).map(k => ({ aiPerformance: 'Performance', aiBurnout: 'Burnout Check', aiParent: 'Parent Audit', progress: 'Progress', competition: 'Competition', performanceNarrative: 'Narrative', strokeRoadmap: 'Stroke Roadmap', attendance: 'Attendance', openMeets: 'Open Meets', qtPredictor: 'QT Predictor', biometrics: 'Biometrics' }[k] || k)).join(' · ')}
+          </div>
+          {/* Key metrics */}
+          <div style={{ display: 'flex', gap: '20px', marginBottom: '40px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            {[
+              { label: 'Squad', value: swimmer?.squads?.name || 'Unassigned' },
+              { label: 'Season', value: '2025/26' },
+              { label: 'Compliance', value: `${Math.round(progressPercent || 0)}%` },
+              { label: 'Training Hours', value: `${Math.round(totalActualHours || 0)}h` },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ textAlign: 'center', padding: '14px 20px', border: '1px solid rgba(0,212,255,0.2)', borderRadius: '10px', minWidth: '100px', background: 'rgba(0,212,255,0.05)' }}>
+                <div style={{ fontSize: '8px', color: '#00d4ff', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '8px' }}>{label}</div>
+                <div style={{ fontSize: '18px', color: '#ffffff', fontWeight: 900 }}>{value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            Issued {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })} · Private &amp; Confidential
+          </div>
+        </div>
+        {/* Bottom bar */}
+        <div style={{ background: 'rgba(0,212,255,0.08)', borderTop: '1px solid rgba(0,212,255,0.15)', height: '44px', width: '100%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: '8px', color: '#00d4ff', fontWeight: 900, letterSpacing: '0.25em', textTransform: 'uppercase' }}>COACHESEYE PERFORMANCE INTELLIGENCE · AUTHORIZED COPY</div>
+        </div>
+      </div>
+
+      {/* ── TABLE OF CONTENTS ── */}
+      <div className="print-only rpt-section" style={{ pageBreakBefore: 'always' }}>
+        <div style={{ borderLeft: '4px solid #1e40af', paddingLeft: '14px', marginBottom: '2rem' }}>
+          <div style={{ fontSize: '7pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#1e40af', marginBottom: '4px' }}>COACHESEYE REPORT</div>
+          <h2 style={{ fontSize: '20pt', fontWeight: 900, color: '#0a1628', margin: 0 }}>Contents</h2>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <tbody>
+            {[
+              { num: '01', title: 'Performance Overview', sub: 'KPIs, trajectory & AI coaching intelligence' },
+              { num: '02', title: 'Stroke Performance Roadmap', sub: 'WA points by stroke vs county & regional benchmarks' },
+              { num: '03', title: 'Training Workload & Consistency', sub: 'Weekly compliance, hours & 12-week history' },
+              { num: '04', title: 'Competition Record', sub: 'Meet-by-meet results and peak scoring' },
+              { num: 'A', title: 'Appendix — Tactical Race Splits', sub: 'Full split-by-split race breakdown' },
+              { num: 'G', title: 'Glossary', sub: 'CoachesEye metrics, methodology & benchmarks explained' },
+            ].map(({ num, title, sub }) => (
+              <tr key={num} style={{ borderBottom: '1px solid #f0f4f8' }}>
+                <td style={{ padding: '10px 14px 10px 0', width: '36px', fontWeight: 900, fontSize: '13pt', color: '#1e40af', verticalAlign: 'top' }}>{num}</td>
+                <td style={{ padding: '10px 0', verticalAlign: 'top' }}>
+                  <div style={{ fontWeight: 900, fontSize: '10pt', color: '#0a1628', marginBottom: '2px' }}>{title}</div>
+                  <div style={{ fontSize: '8pt', color: '#64748b' }}>{sub}</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: '2.5rem', padding: '14px 18px', background: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd' }}>
+          <div style={{ fontSize: '7.5pt', color: '#0369a1', fontWeight: 800, letterSpacing: '0.05em' }}>CONFIDENTIALITY NOTICE</div>
+          <div style={{ fontSize: '7.5pt', color: '#374151', marginTop: '4px', lineHeight: 1.5 }}>This report is prepared exclusively for {swimmer.full_name} and authorised coaching staff at Tonbridge Swimming Club. Data is drawn from the CoachesEye platform and reflects the {period === 365 ? '52-week' : period === 180 ? '6-month' : period === 90 ? '90-day' : '30-day'} analysis window ending {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}.</div>
+        </div>
+      </div>
+
+      {/* ── SECTION 1: PERFORMANCE OVERVIEW ── */}
+      <div className="print-only rpt-section">
+        <div className="rpt-section-header">
+          <div className="rpt-eyebrow">Section 1</div>
+          <h2>Performance Overview</h2>
+        </div>
+        {/* KPI row */}
+        <div className="rpt-grid4" style={{ marginBottom: '1.5rem' }}>
+          {[
+            { label: 'Training Compliance', value: `${Math.round(progressPercent || 0)}%`, sub: `vs ${squad?.target_training_percent || 75}% target` },
+            { label: 'Total Training Hours', value: `${Math.round(totalActualHours || 0)}h`, sub: 'This season' },
+            { label: 'Meets Attended', value: rel?.meetsAttended ?? '—', sub: `of ${rel?.targetMeets || 5} targeted` },
+            { label: 'Performance Trend', value: performance_slope > 0.5 ? '📈 Rising' : performance_slope < -0.5 ? '📉 Falling' : '→ Stable', sub: 'WA point trajectory' },
+          ].map(({ label, value, sub }) => (
+            <div key={label} className="rpt-kpi rpt-avoid">
+              <div className="rpt-kpi-label">{label}</div>
+              <div className="rpt-kpi-value">{value}</div>
+              <div className="rpt-kpi-sub">{sub}</div>
+            </div>
+          ))}
+        </div>
+        {/* Performance narrative */}
+        {narrative?.length > 0 && (
+          <>
+            <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#1e40af', marginBottom: '8px' }}>Personal Performance Story</div>
+            {narrative.map((item, i) => (
+              <div key={i} className={`rpt-narrative-item ${item.type === 'improvement' ? 'rpt-positive' : item.type === 'decline' ? 'rpt-negative' : ''}`}>
+                <div style={{ fontSize: '8.5pt', fontWeight: 900, color: '#0a1628', marginBottom: '2px' }}>{item.event}</div>
+                <div style={{ fontSize: '8pt', color: '#374151' }}>{item.summary}</div>
+              </div>
+            ))}
+          </>
+        )}
+        {/* AI insight if available */}
+        {aiInsight?.summary && (
+          <>
+            <hr className="rpt-rule" />
+            <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#1e40af', marginBottom: '10px' }}>AI Coaching Intelligence</div>
+            <div className="rpt-ai-text" style={{ marginBottom: '12px' }}>
+              {typeof aiInsight.summary === 'string'
+                ? aiInsight.summary
+                : Object.entries(aiInsight.summary || {}).map(([k, v]) => (
+                    <div key={k} style={{ marginBottom: '8px' }}>
+                      <div style={{ fontSize: '7.5pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#1e40af', marginBottom: '3px' }}>{k}</div>
+                      {Array.isArray(v)
+                        ? v.map((item, i) => (
+                            <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '2px' }}>
+                              <span style={{ color: '#1e40af', flexShrink: 0 }}>›</span>
+                              <span>{typeof item === 'object' ? JSON.stringify(item) : item}</span>
+                            </div>
+                          ))
+                        : <div>{typeof v === 'object' ? Object.entries(v).map(([sk, sv]) => <span key={sk}><strong>{sk}:</strong> {String(sv)} </span>) : String(v)}</div>
+                      }
+                    </div>
+                  ))
+              }
+            </div>
+            {(aiInsight.recommendations || []).length > 0 && (
+              <>
+                <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#1e40af', marginBottom: '6px' }}>Key Recommendations</div>
+                {(aiInsight.recommendations || []).slice(0, 5).map((r, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', fontSize: '8.5pt' }}>
+                    <span style={{ color: '#1e40af', fontWeight: 900, flexShrink: 0 }}>›</span>
+                    <span style={{ color: '#1e293b' }}>{r}</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── SECTION 2: STROKE PERFORMANCE ROADMAP ── */}
+      {statsObj?.strokeData && Object.values(statsObj.strokeData).some(d => d.count > 0) && (
+        <div className="print-only rpt-section">
+          <div className="rpt-section-header">
+            <div className="rpt-eyebrow">Section 2</div>
+            <h2>Stroke Performance Roadmap</h2>
+          </div>
+          <table className="rpt-table rpt-avoid" style={{ marginBottom: '1rem' }}>
+            <thead>
+              <tr>
+                {['Stroke / Event', 'Races', 'Peak WA Pts', 'Season Avg', 'County AQT', 'Regional Auto', 'Status'].map(h => <th key={h}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(statsObj.strokeData)
+                .filter(([, d]) => d.count > 0)
+                .map(([name, d]) => {
+                  const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY');
+                  const regional = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'REGIONAL');
+                  const peak = Math.round(d.peak);
+                  const avg = Math.round(d.avg);
+                  const status = peak >= regional ? '✓ Regional' : peak >= county ? '✓ County' : peak >= county * 0.9 ? '→ Near AQT' : '· Building';
+                  const statusClass = peak >= regional ? 'rpt-good' : peak >= county ? 'rpt-accent' : 'rpt-warn';
+                  return (
+                    <tr key={name}>
+                      <td className="rpt-bold">{name}</td>
+                      <td className="rpt-muted">{d.count}</td>
+                      <td className="rpt-accent rpt-bold">{peak}</td>
+                      <td>{avg}</td>
+                      <td className="rpt-muted">{county || '—'}</td>
+                      <td className="rpt-muted">{regional || '—'}</td>
+                      <td className={statusClass}>{status}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+          {/* Visual bars */}
+          {Object.entries(statsObj.strokeData).filter(([, d]) => d.count > 0).map(([name, d]) => {
+            const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY') || 500;
+            const scale = (v) => Math.min(Math.round((v / 600) * 100), 100);
+            const peak = Math.round(d.peak);
+            return (
+              <div key={name} className="rpt-avoid" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <div style={{ width: '130px', fontSize: '7.5pt', fontWeight: 800, color: '#1e40af' }}>{name}</div>
+                <div style={{ flex: 1, position: 'relative' }}>
+                  <div className="rpt-bar-bg">
+                    <div className="rpt-bar-fill" style={{ width: `${scale(peak)}%` }} />
+                    {county && <div style={{ position: 'absolute', left: `${scale(county)}%`, top: '-3px', bottom: '-3px', width: '2px', background: '#64748b' }} />}
+                  </div>
+                </div>
+                <div style={{ width: '50px', fontSize: '7.5pt', fontWeight: 900, color: '#1e40af', textAlign: 'right' }}>{peak} pts</div>
+              </div>
+            );
+          })}
+          <div style={{ display: 'flex', gap: '20px', marginTop: '8px', fontSize: '7pt', color: '#64748b' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ display: 'inline-block', width: '12px', height: '8px', background: '#1e40af', borderRadius: '2px' }}></span>Peak WA Points</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ display: 'inline-block', width: '2px', height: '12px', background: '#64748b' }}></span>County AQT threshold</span>
+          </div>
+        </div>
+      )}
+
+      {/* ── SECTION 3: TRAINING WORKLOAD ── */}
+      <div className="print-only rpt-section">
+        <div className="rpt-section-header">
+          <div className="rpt-eyebrow">Section 3</div>
+          <h2>Training Workload &amp; Consistency</h2>
+        </div>
+        {/* Summary row */}
+        <div className="rpt-grid3" style={{ marginBottom: '1.2rem' }}>
+          {[
+            { label: 'Total Weeks Tracked', value: workloadChartData?.length ?? 0 },
+            { label: 'Compliant Weeks', value: workloadChartData?.filter(w => w.isMet || w.isExempt || w.holidayUsed).length ?? 0 },
+            { label: 'Total Training Hours', value: `${Math.round(totalActualHours || 0)}h` },
+          ].map(({ label, value }) => (
+            <div key={label} className="rpt-kpi rpt-avoid">
+              <div className="rpt-kpi-label">{label}</div>
+              <div className="rpt-kpi-value">{value}</div>
+            </div>
+          ))}
+        </div>
+        {/* Recent weeks table */}
+        <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#1e40af', marginBottom: '6px' }}>Recent 12 Weeks</div>
+        <table className="rpt-table rpt-avoid">
+          <thead>
+            <tr>{['Week', 'Hours', 'Target', 'Sessions', 'Req.', 'Status'].map(h => <th key={h}>{h}</th>)}</tr>
+          </thead>
+          <tbody>
+            {[...(workloadChartData || [])].slice(-12).map((w, i) => {
+              const status = w.isExempt ? 'Shutdown' : w.holidayUsed ? 'Holiday' : w.isMet ? '✓ Met' : '✗ Missed';
+              const statusClass = w.isExempt || w.holidayUsed ? 'rpt-muted' : w.isMet ? 'rpt-good' : 'rpt-warn';
+              return (
+                <tr key={i}>
+                  <td className="rpt-muted">{w.week}</td>
+                  <td className="rpt-bold">{w.trainingHours ?? w.totalHours ?? 0}h</td>
+                  <td className="rpt-muted">{w.target ?? '—'}h</td>
+                  <td>{w.sessions ?? '—'}</td>
+                  <td className="rpt-muted">{w.requiredSessions ?? '—'}</td>
+                  <td className={statusClass}>{status}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Sections 4 & 5 moved to end — after CoachesEyeGlossary */}
+
       <Head>
         <title>{swimmer.full_name} | Athlete Profile</title>
         <style>{`
           @media screen {
+            .print-only { display: none !important; }
             .no-screen { display: none !important; }
             .profile-tabs-container {
               display: flex;
@@ -930,75 +1204,58 @@ const [decayDistance, setDecayDistance] = useState('100');
             }
           }
           @media print {
-            .no-print, button, nav, .profile-header { display: none !important; }
-            .print-only { display: block !important; }
-            .hide-in-report { display: none !important; }
-            @page { margin: 2cm; }
-            body { 
-               background: white !important; 
-               color: #111 !important; 
-               padding: 0 !important; 
-               -webkit-print-color-adjust: exact !important; 
-               print-color-adjust: exact !important; 
-            }
-            .glass-card { 
-               border: 1px solid #eee !important; 
-               background: white !important; 
-               box-shadow: none !important; 
-               color: black !important; 
-               page-break-inside: avoid; 
-               padding: 2.5rem !important;
-               margin-bottom: 2rem !important;
-               border-radius: 12px !important;
-            }
-            .kpi-label, .section-title, h1, h2, h3 { 
-               color: #000 !important; 
-               font-weight: 900 !important; 
-               text-transform: uppercase !important;
-               letter-spacing: 0.05em !important;
-            }
-            
-            div, span, p { color: #333 !important; }
-            
-            /* Chart Adjustments */
-            .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: #e0e0e0 !important; }
-            .recharts-line-curve { stroke: #1a56db !important; stroke-width: 3px !important; }
-            .recharts-line-dot { display: none !important; }
-            .recharts-reference-line-line { stroke: #000 !important; stroke-width: 2px !important; }
-            .recharts-text { fill: #000 !important; font-weight: 900 !important; }
-            .recharts-cartesian-axis-tick-value { fill: #444 !important; font-size: 10px !important; }
-            .recharts-label { fill: #000 !important; font-weight: 900 !important; font-size: 12px !important; }
-            
-            /* Roadmap Specifics - Professional Print Palette */
-            .roadmap-bar { 
-               background: #1a56db !important; 
-               border: none !important;
-               -webkit-print-color-adjust: exact !important;
-            }
-            .roadmap-track { 
-               background: #f8fafc !important; 
-               border: 1px solid #e2e8f0 !important; 
-               height: 12px !important;
-               -webkit-print-color-adjust: exact !important;
-            }
-            .roadmap-avg { 
-               background: #000 !important; 
-               width: 2px !important;
-               z-index: 20 !important;
-            }
-            .roadmap-target { 
-               border-left: 2px solid #64748b !important; 
-               z-index: 25 !important;
-            }
-            .roadmap-regional { 
-               border-left: 2px solid #1a56db !important; 
-               z-index: 25 !important;
-            }
-            .roadmap-label { 
-               color: #1a56db !important; 
-               font-size: 0.8rem !important;
-               text-decoration: none !important;
-            }
+            @page { size: A4 portrait; margin: 15mm; }
+            html, body, main, .layout-root, .container { width: 100% !important; background: white !important; color: #111 !important; padding: 0 !important; margin: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; font-family: 'Inter', sans-serif !important; }
+            .no-print, nav, button, .profile-tabs-container, .search-container, .orb-liquid, footer, .btn-premium-action { display: none !important; }
+            .print-only, .no-screen { display: block !important; }
+            .print-page-section { page-break-before: always; break-before: page; padding-top: 1rem; margin-bottom: 2rem; }
+            .roster-cover-page { background: #050b10 !important; color: white !important; height: 100vh !important; display: flex !important; flex-direction: column; justify-content: center; align-items: center; page-break-after: always; margin: 0 !important; padding: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .roster-cover-page h1, .roster-cover-page div, .roster-cover-page span { color: #fff !important; }
+            .roster-cover-page h2.subtitle { color: #00d4ff !important; }
+            .glass-card { background: transparent !important; color: #000 !important; border: none !important; border-left: 4px solid #1e40af !important; border-radius: 0 !important; box-shadow: none !important; padding: 0 0 0 1.5rem !important; margin-bottom: 3rem !important; page-break-inside: avoid !important; }
+            h1, h2, h3, h4, .section-title, .text-white, td, th, p { color: #000 !important; }
+            .insight-tag { color: #1e40af !important; font-weight: 900 !important; border-bottom: 2px solid #eee; padding-bottom: 4px; display: inline-block; margin-bottom: 1rem; }
+            .recharts-responsive-container { display: block !important; width: 100% !important; height: 350px !important; min-height: 350px !important; }
+            .recharts-wrapper, .recharts-surface { width: 100% !important; height: 100% !important; display: block !important; }
+            .recharts-text { fill: #000 !important; font-weight: 800 !important; font-size: 10px !important; }
+            .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: #ccc !important; }
+            .recharts-line-curve, .recharts-area-area { stroke: #000 !important; stroke-width: 3px !important; }
+            .recharts-bar-rectangle path { fill: #000 !important; }
+
+            /* ── rpt-* compat ── */
+            .rpt-flex   { display: flex !important; }
+            .rpt-grid4  { display: grid !important; grid-template-columns: repeat(4,1fr); gap: 10px; }
+            .rpt-grid3  { display: grid !important; grid-template-columns: repeat(3,1fr); gap: 10px; }
+            .rpt-grid2  { display: grid !important; grid-template-columns: repeat(2,1fr); gap: 12px; }
+            .rpt-section { page-break-before: always; break-before: page; padding-top: 0.5rem; }
+            .rpt-section-header { border-left: 4px solid #1e40af; padding-left: 12px; margin-bottom: 1.2rem; page-break-after: avoid; }
+            .rpt-section-header .rpt-eyebrow { font-size: 7pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; color: #1e40af !important; margin-bottom: 2px; }
+            .rpt-section-header h2 { font-size: 15pt; font-weight: 900; color: #0a1628 !important; margin: 0; }
+            .rpt-kpi { border: 1px solid #dbeafe; border-radius: 8px; padding: 10px 12px; background: #eff6ff !important; -webkit-print-color-adjust: exact !important; break-inside: avoid; }
+            .rpt-kpi .rpt-kpi-label { font-size: 6.5pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.12em; color: #3b82f6 !important; margin-bottom: 4px; }
+            .rpt-kpi .rpt-kpi-value { font-size: 17pt; font-weight: 900; color: #0a1628 !important; line-height: 1; }
+            .rpt-kpi .rpt-kpi-sub   { font-size: 7pt; color: #64748b !important; margin-top: 3px; }
+            .rpt-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
+            .rpt-table thead tr { background: #0a1628 !important; -webkit-print-color-adjust: exact !important; }
+            .rpt-table th { padding: 7px 10px; text-align: left; font-size: 7pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; color: #ffffff !important; }
+            .rpt-table td { padding: 6px 10px; border-bottom: 1px solid #f0f4f8; color: #1e293b !important; vertical-align: top; }
+            .rpt-table tr:nth-child(even) td { background: #f8faff !important; -webkit-print-color-adjust: exact !important; }
+            .rpt-table .rpt-accent { color: #1e40af !important; font-weight: 800; }
+            .rpt-table .rpt-good   { color: #15803d !important; font-weight: 800; }
+            .rpt-table .rpt-warn   { color: #b45309 !important; font-weight: 800; }
+            .rpt-narrative-item { padding: 8px 10px; margin-bottom: 6px; border-left: 3px solid #1e40af; background: #eff6ff !important; border-radius: 0 5px 5px 0; break-inside: avoid; -webkit-print-color-adjust: exact !important; }
+            .rpt-narrative-item.rpt-positive { border-left-color: #15803d !important; background: #f0fdf4 !important; }
+            .rpt-narrative-item.rpt-negative { border-left-color: #b45309 !important; background: #fffbeb !important; }
+            .rpt-bar-bg   { background: #e0e7ff !important; height: 10px; border-radius: 5px; position: relative; overflow: visible; -webkit-print-color-adjust: exact !important; }
+            .rpt-bar-fill { background: #1e40af !important; height: 10px; border-radius: 5px; -webkit-print-color-adjust: exact !important; }
+            .rpt-ai-text { font-size: 9pt; line-height: 1.65; color: #1e293b !important; }
+            .rpt-ai-text strong { color: #0a1628 !important; }
+            .rpt-rule { border: none; border-top: 1px solid #e0e7ff; margin: 0.8rem 0; }
+            .rpt-avoid { break-inside: avoid; page-break-inside: avoid; }
+            .rpt-muted  { color: #64748b !important; }
+            .rpt-bold   { font-weight: 800; }
+
+            body::after { content: "© COACHESEYE PERFORMANCE ANALYTICS | TONBRIDGE SC | AUTHORIZED COPY"; position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 0.65rem; font-weight: 800; letter-spacing: 0.15em; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
           }
         `}</style>
       </Head>
@@ -1078,11 +1335,17 @@ const [decayDistance, setDecayDistance] = useState('100');
           >
             🔄 BLOCK ROI
           </button>
-          <button 
-            onClick={() => setActiveTab('predictor')} 
+          <button
+            onClick={() => setActiveTab('predictor')}
             className={`profile-tab-btn ${activeTab === 'predictor' ? 'active' : ''}`}
           >
             🎯 QT Predictor
+          </button>
+          <button
+            onClick={() => setActiveTab('biometrics')}
+            className={`profile-tab-btn ${activeTab === 'biometrics' ? 'active' : ''}`}
+          >
+            🧬 BIOMETRICS
           </button>
         </div>
         <button
@@ -1096,13 +1359,8 @@ const [decayDistance, setDecayDistance] = useState('100');
         </button>
       </div>
 
-      <div className="print-only" style={{ display: 'none', textAlign: 'center', marginBottom: 40 }}>
-         <h1 style={{ fontSize: '2.5rem', marginBottom: 8, fontWeight: 900 }}>{reportConfig.audience.toUpperCase()}'S PERFORMANCE REVIEW</h1>
-         <h2 style={{ fontSize: '1.5rem', color: '#666' }}>{swimmer.full_name} - {new Date().toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</h2>
-         <p style={{ fontSize: '0.9rem', color: '#999' }}>Report Focus: {reportConfig.audience} Perspective | {Object.entries(reportConfig.sections).filter(([_,v])=>v).map(([k])=>k).join(', ')}</p>
-      </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }} className={`mb-16 ${activeTab !== 'overview' ? 'no-screen' : ''} ${!reportConfig.sections.performanceNarrative ? 'hide-in-report' : ''}`}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '2rem' }} className={`mb-16 no-print ${activeTab !== 'overview' ? 'no-screen' : ''} ${!reportConfig.sections.performanceNarrative ? 'hide-in-report' : ''}`}>
         <div className="glass-card" style={{ gridColumn: 'span 1', borderLeft: '4px solid var(--accent-cyan)', padding: '2rem 2.5rem' }}>
           <div className="section-title" style={{ fontSize: '0.75rem', marginBottom: 24, fontWeight: 900, letterSpacing: '0.2em', opacity: 0.9, color: 'var(--accent-cyan)' }}>PERSONAL PERFORMANCE STORY</div>
           <div style={{ display: 'grid', gap: '1rem' }}>
@@ -1325,7 +1583,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       </div>
 
       {/* PERFORMANCE ANALYTICAL MODULES */}
-      <div className={`${activeTab !== 'performance' ? 'no-screen' : ''}`}>
+      <div className={`no-print ${activeTab !== 'performance' ? 'no-screen' : ''}`}>
         
         {/* AI Insight & Foresight Timeline container */}
         <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
@@ -1343,9 +1601,6 @@ const [decayDistance, setDecayDistance] = useState('100');
               loading={isGeneratingAi}
               onGenerate={generateAthleteInsight}
             />
-          </div>
-          <div className="no-print">
-            <ForesightTimeline insights={insights} />
           </div>
         </div>
 
@@ -1682,7 +1937,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       )}
 
       {/* Progression Chart Section */}
-      <div className={`mb-16 ${activeTab !== 'progress' || progressSubTab !== 'charts' ? 'no-screen' : ''}`}>
+      <div className={`mb-16 no-print ${activeTab !== 'progress' || progressSubTab !== 'charts' ? 'no-screen' : ''}`}>
         <div className="glass-card" style={{ padding: '2rem', minHeight: '400px', position: 'relative', overflow: 'hidden' }}>
            {/* Background Glow */}
            <div style={{ position: 'absolute', top: '-10%', right: '-10%', width: '40%', height: '40%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.05) 0%, transparent 70%)', filter: 'blur(50px)', zIndex: 0 }}></div>
@@ -1752,8 +2007,40 @@ const [decayDistance, setDecayDistance] = useState('100');
         </div>
       </div>
       
+      {/* COACHESEYE GUIDE: BIOLOGICAL NORMALISATION */}
+      <div className={`mb-8 ${activeTab !== 'progress' || progressSubTab !== 'roadmap' ? 'no-screen' : ''}`}>
+        <div className="glass-card" style={{ borderLeft: '4px solid var(--accent-violet)' }}>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <div className="section-title" style={{ color: 'var(--accent-violet)', margin: 0 }}>CoachesEye Guide: Biological Maturation</div>
+              <h3 style={{ fontSize: '1.4rem', fontWeight: 900, marginTop: '8px' }}>Pubertal Smoothing & Age Benchmarking</h3>
+            </div>
+            <button
+              onClick={() => setNormalizeWA(!normalizeWA)}
+              style={{
+                padding: '8px 16px', borderRadius: '12px', fontWeight: 900, cursor: 'pointer',
+                background: normalizeWA ? 'var(--accent-violet)' : 'rgba(139, 92, 246, 0.1)',
+                color: normalizeWA ? '#fff' : 'var(--accent-violet)',
+                border: '1px solid var(--accent-violet)',
+                transition: 'all 0.3s'
+              }}
+            >
+              {normalizeWA ? 'NORMALISATION: ACTIVE' : 'NORMALISATION: OFF'}
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+              <strong>1. The Maturation Gap (Vorontsov):</strong> According to Vorontsov's LTAD models, girls experience Peak Height Velocity (PHV) around ages 11-12, approximately 2 years earlier than boys. Because World Aquatics (WA) points compare times to adult world records, early developers naturally score higher. Toggling <strong>Normalisation</strong> applies a biological scaling factor (±10%) to balance this pubertal growth gap, allowing coaches to fairly compare underlying skill and aerobic progression between genders before they reach full maturation at 15+.
+            </p>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+              <strong>2. Age-Adjusted Benchmarking:</strong> To further normalize raw WA points, the <strong>Roadmap</strong> below anchors the athlete's current Peak Performance directly against the official Regional Automatic Standard for their exact chronological age. This provides a "pound-for-pound" visual representation of how close they are to elite pathway qualification, regardless of whether they are 11 or 17.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Stroke Performance Roadmap Section */}
-      <div className={`mb-16 ${activeTab !== 'progress' || progressSubTab !== 'roadmap' ? 'no-screen' : ''}`}>
+      <div className={`mb-16 no-print ${activeTab !== 'progress' || progressSubTab !== 'roadmap' ? 'no-screen' : ''}`}>
         <div className="glass-card" style={{ padding: '2.5rem' }}>
            <div className="flex justify-between items-center mb-2">
              <div className="kpi-label">Stroke Performance Roadmap</div>
@@ -1871,6 +2158,10 @@ const [decayDistance, setDecayDistance] = useState('100');
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><div style={{ width: '1px', height: '12px', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)' }}></div> Regional Auto</div>
            </div>
         </div>
+        <div className="glass-card mt-6" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+          <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: PERFORMANCE ROADMAP</h4>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>The Roadmap visually anchors the athlete's current 'Peak Performance' (solid bar) against official County and Regional World Aquatics benchmarks. This highlights exactly how close they are to the next elite pathway qualification tier.</p>
+        </div>
       </div>
 
       {/* Readiness & Health Section */}
@@ -1880,13 +2171,23 @@ const [decayDistance, setDecayDistance] = useState('100');
         </div>
       )}
 
-      <div className={`${activeTab !== 'workload' ? 'no-screen' : ''} ${!reportConfig.sections.attendance ? 'hide-in-report' : ''}`}>
+      <div className={`no-print ${activeTab !== 'workload' ? 'no-screen' : ''} ${!reportConfig.sections.attendance ? 'hide-in-report' : ''}`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', minHeight: '400px' }}>
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
-                   <div className="section-title">Consistency Engine</div>
-                   <h3 className="text-xl font-black tracking-tight">Training Workload & Compliance</h3>
+                  <div className="flex justify-between items-end mb-6">
+                    <div>
+                      <div className="section-title" style={{ margin: '0 0 8px 0' }}>Consistency Engine</div>
+                      <h3 style={{ fontSize: '1.8rem', fontWeight: 900, margin: 0, letterSpacing: '-0.03em' }}>Training Workload & Compliance</h3>
+                    </div>
+                    {rel?.effectiveJoinDate && new Date(rel.effectiveJoinDate) > new Date(new Date().getTime() - period * 86400000) && (
+                      <div className="animate-fade-in" style={{ padding: '8px 14px', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)', borderRadius: '12px', color: 'var(--accent-amber)', fontSize: '0.75rem', fontWeight: 900, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        TARGETS PRORATED FROM: {new Date(rel.effectiveJoinDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </div>
+                    )}
+                  </div>
                    <div className="flex gap-4 items-center mt-2">
                      <div className="flex items-center gap-2">
                        <div style={{ width: 10, height: 10, background: 'var(--accent-cyan)', borderRadius: '2px' }}></div>
@@ -2049,27 +2350,33 @@ const [decayDistance, setDecayDistance] = useState('100');
                </ResponsiveContainer>
              </div>
           </div>
-          <div className="lg:col-span-1 glass-card" style={{ padding: 0, overflow: 'hidden', height: '600px', display: 'flex', flexDirection: 'column' }}>
+          <div className="lg:col-span-2 glass-card mt-6" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+            <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: WORKLOAD</h4>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+  Consistent workload is the primary driver of aerobic adaptation. This section tracks volume compliance against the athlete's specific squad targets and LTAD stage. <strong>If an athlete joins a squad mid-season, the system automatically truncates the timeline and prorates their target hours to ensure fair compliance grading.</strong>
+</p>
+          </div>
+          <div className="lg:col-span-1 glass-card no-print" style={{ padding: 0, overflow: 'hidden', height: '600px', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, transparent 100%)' }}>
                <div className="section-title" style={{ marginBottom: 4 }}>Intelligence Trace</div>
-               <h3 className="text-lg font-black tracking-tight">Audit Trail & {rel.creditedSessions || 0} Credits</h3>
-               <div style={{ fontSize: '0.6rem', opacity: 0.4, marginTop: 4, fontWeight: 800 }}>LIVE RELIABILITY CALCULATION FEED</div>
+               <h3 className="text-lg font-black tracking-tight">Session Log & {rel.creditedSessions || 0} Credits</h3>
+               <div style={{ fontSize: '0.6rem', opacity: 0.4, marginTop: 4, fontWeight: 800 }}>CLICK A WEEK TO INSPECT</div>
             </div>
             <div className="custom-scrollbar" style={{ padding: '1rem', overflowY: 'auto', flex: 1 }}>
 
               <div className="space-y-3">
                 {[...workloadChartData].reverse().map((w, idx) => (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     onClick={() => {
                       setSelectedWeek(w);
                       setIsWorkloadModalOpen(true);
                     }}
                     className="hover:bg-white/[0.04] hover:border-cyan-500/30 hover:scale-[1.01]"
-                    style={{ 
-                      padding: '1rem', 
-                      background: 'rgba(255,255,255,0.02)', 
-                      borderRadius: '12px', 
+                    style={{
+                      padding: '1rem',
+                      background: 'rgba(255,255,255,0.02)',
+                      borderRadius: '12px',
                       border: w.isMet ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)',
                       position: 'relative',
                       cursor: 'pointer',
@@ -2126,7 +2433,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         </div>
       </div>
 
-      <div className={`${activeTab !== 'competition' ? 'no-screen' : ''} ${!reportConfig.sections.openMeets ? 'hide-in-report' : ''}`}>
+      <div className={`no-print ${activeTab !== 'competition' ? 'no-screen' : ''} ${!reportConfig.sections.openMeets ? 'hide-in-report' : ''}`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', position: 'relative', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: '-10%', left: '-10%', width: '60%', height: '60%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.08) 0%, transparent 70%)', filter: 'blur(50px)', zIndex: 0 }}></div>
@@ -2157,12 +2464,12 @@ const [decayDistance, setDecayDistance] = useState('100');
               </ResponsiveContainer>
             </div>
           </div>
-          <div className="lg:col-span-1 glass-card" style={{ padding: 0, overflow: 'hidden', height: '500px', display: 'flex', flexDirection: 'column' }}>
+          <div className="lg:col-span-1 glass-card no-print" style={{ padding: 0, overflow: 'hidden', height: '500px', display: 'flex', flexDirection: 'column' }}>
             <div style={{ padding: '2rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, transparent 100%)' }}>
                <div className="section-title" style={{ marginBottom: 4 }}>Competitive History</div>
                <h3 className="text-lg font-black tracking-tight">Meet Attendance Log</h3>
             </div>
-            <div className="overflow-y-auto flex-1" style={{ padding: '1rem' }}>
+            <div className="table-wrapper custom-scrollbar" style={{ maxHeight: '400px', overflowY: 'auto', padding: '1rem' }}>
               <table className="w-full text-left" style={{ borderCollapse: 'separate', borderSpacing: '0 4px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
@@ -2208,6 +2515,10 @@ const [decayDistance, setDecayDistance] = useState('100');
               </table>
             </div>
           </div>
+        </div>
+        <div className="glass-card mt-6" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+          <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: COMPETITION & RACING</h4>
+          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>Tracks the athlete's competitive rhythm and 'Big Meet Temperament'. Regular racing builds race-execution skills, while tracking Point Progression indicates whether training is converting into race speed. A steep, positive trendline tells the story of an athlete successfully adapting to their training load.</p>
         </div>
       </div>
 
@@ -2268,7 +2579,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       </details>
 
       {activeTab === 'block_roi' && swimmer && (
-        <div className="mb-16 animate-fade-in">
+        <div className="mb-16 animate-fade-in no-print">
           <TrainingBlockTracker 
             swimmer={swimmer}
             results={results}
@@ -2279,8 +2590,85 @@ const [decayDistance, setDecayDistance] = useState('100');
       )}
 
       {activeTab === 'predictor' && swimmer && (
-        <div className="mb-16 animate-fade-in">
+        <div className="mb-16 animate-fade-in no-print">
           <SquadQualificationPredictor swimmers={[swimmer]} results={results} />
+        </div>
+      )}
+
+      {activeTab === 'biometrics' && swimmer && (
+        <div className="mb-16 animate-fade-in no-print">
+          <VorontsovLTADModule swimmer={swimmer} totalActualHours={totalActualHours || 0} />
+        </div>
+      )}
+
+      {/* ── GLOSSARY (print only) ── */}
+      <div className="print-only">
+        <CoachesEyeGlossary />
+      </div>
+
+      {/* ── SECTION 4: COMPETITION RECORD (Appendix) ── */}
+      {uniqueMeetsList?.length > 0 && (
+        <div className="print-only rpt-section">
+          <div className="rpt-section-header">
+            <div className="rpt-eyebrow">Section 4</div>
+            <h2>Competition Record</h2>
+          </div>
+          <div className="rpt-grid3" style={{ marginBottom: '1.2rem' }}>
+            {[
+              { label: 'Meets Attended', value: uniqueMeetsList.length },
+              { label: 'Total Races', value: uniqueMeetsList.reduce((a, m) => a + (m.raceCount || m.results?.length || 0), 0) },
+              { label: 'Best WA Score', value: `${Math.max(...uniqueMeetsList.map(m => m.peakWA || 0))} pts` },
+            ].map(({ label, value }) => (
+              <div key={label} className="rpt-kpi rpt-avoid">
+                <div className="rpt-kpi-label">{label}</div>
+                <div className="rpt-kpi-value">{value}</div>
+              </div>
+            ))}
+          </div>
+          <table className="rpt-table">
+            <thead>
+              <tr>{['Date', 'Competition', 'Type', 'Level', 'Races', 'Peak WA Points'].map(h => <th key={h}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {uniqueMeetsList.map((m, i) => (
+                <tr key={i}>
+                  <td className="rpt-muted">{new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</td>
+                  <td className="rpt-bold">{m.name}</td>
+                  <td>{m.type || '—'}</td>
+                  <td className="rpt-muted">{m.level || '—'}</td>
+                  <td>{m.raceCount ?? m.results?.length ?? '—'}</td>
+                  <td className="rpt-accent rpt-bold">{m.peakWA ? `${m.peakWA} pts` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── SECTION 5: RACE SPLITS APPENDIX ── */}
+      {filteredMeets?.length > 0 && (
+        <div className="print-only rpt-section">
+          <div className="rpt-section-header">
+            <div className="rpt-eyebrow">Appendix A</div>
+            <h2>Tactical Race Splits</h2>
+          </div>
+          <table className="rpt-table">
+            <thead>
+              <tr>{['Event', 'Meet', 'Date', 'Time', 'WA Pts', 'Split Ratio'].map(h => <th key={h}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {filteredMeets.slice(0, 40).map((r, i) => (
+                <tr key={i}>
+                  <td className="rpt-bold">{r.event || '—'}</td>
+                  <td>{r.meet_name || '—'}</td>
+                  <td className="rpt-muted">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
+                  <td className="rpt-bold">{r.swim_time || '—'}</td>
+                  <td className="rpt-accent rpt-bold">{r.wa_pts || '—'}</td>
+                  <td className="rpt-muted">{r.split_ratio ? `${r.split_ratio.toFixed(2)}×` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

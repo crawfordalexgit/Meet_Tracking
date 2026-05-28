@@ -37,14 +37,14 @@ export default async function handler(req, res) {
     const [results, attendance, sessions, feedback] = await Promise.all([
       fetchPaged('results', '*, meets(name,license,date,course,level)', q => q.eq('swimmer_id', swimmerId).order('date', { ascending: false })),
       fetchPaged('training_attendance', '*', q => q.eq('swimmer_id', swimmerId).order('date', { ascending: false })),
-      supabase.from('sessions').select('*'),
+      fetchPaged('sessions', '*'),
       fetchPaged('swimmer_ai_feedback', '*', q => q.eq('swimmer_id', swimmerId).order('created_at', { ascending: false }))
     ]);
 
     // Convert to the format expected by getSwimmerDNA
     const resultsData = results || [];
     const attendanceData = attendance || [];
-    const sessionsData = (sessions.data || []);
+    const sessionsData = sessions || [];
     const feedbackData = feedback || [];
 
 

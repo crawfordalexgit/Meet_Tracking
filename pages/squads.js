@@ -211,23 +211,33 @@ export default function SquadsRegistry({ session }) {
       setPeriodDays(period);
       const startStr = new Date(new Date() - period * 86400000).toISOString();
 
+      const fetchPaged = async (table, select = '*', filter = null) => {
+        let all = []; let page = 0; let more = true;
+        while (more && page < 20) {
+          let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
+          if (filter) q = filter(q);
+          const { data } = await q;
+          if (!data || data.length === 0) break;
+          all = [...all, ...data];
+          if (data.length < 1000) more = false;
+          page++;
+        }
+        return all;
+      };
+
       // 1. Fetch data
-      const [sRes, swRes, rRes, aRes, sessionsRes, membershipsArr, exRes, rankingsRes] = await Promise.all([
+      const [sRes, swimmersArr, resultsArr, attendanceArr, sessionsArr, membershipsArr, exRes, rankingsRes] = await Promise.all([
         supabase.from('squads').select('*').eq('is_squad', true).order('name'),
-        supabase.from('swimmers').select('*'),
-        supabase.from('results').select('*, meets(id,name,type)').gte('date', startStr),
-        supabase.from('training_attendance').select('*').gte('date', startStr),
-        supabase.from('sessions').select('*'),
+        fetchPaged('swimmers', '*'),
+        fetchPaged('results', '*, meets(id,name,type)', q => q.gte('date', startStr)),
+        fetchPaged('training_attendance', '*', q => q.gte('date', startStr)),
+        fetchPaged('sessions', '*'),
         fetch('/api/memberships').then(r => r.ok ? r.json() : []),
         supabase.from('club_exemptions').select('*'),
         supabase.from('rankings').select('*').order('snapshot_date', { ascending: false })
       ]);
 
       const squadsArr = sRes.data || [];
-      const swimmersArr = swRes.data || [];
-      const resultsArr = rRes.data || [];
-      const attendanceArr = aRes.data || [];
-      const sessionsArr = sessionsRes.data || [];
       const exemptionsArr = exRes.data || [];
       const rankings = rankingsRes.data || [];
 

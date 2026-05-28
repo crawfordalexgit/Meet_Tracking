@@ -7,6 +7,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // Vercel Cron Security Check
+  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}` && req.method === 'GET' && !req.headers.host?.includes('localhost')) {
+    return res.status(401).json({ error: 'Unauthorized Cron Invocation' });
+  }
+
   const isSSE = req.method === 'GET';
 
   if (isSSE) {

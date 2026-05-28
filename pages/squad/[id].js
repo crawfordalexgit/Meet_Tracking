@@ -34,8 +34,22 @@ export async function getServerSideProps(context) {
 
   const { data: swimmers } = await supabase.from('swimmers').select('*, squads(*)').eq('squad_id', id);
 
-  const [sessions, exemptions, meets] = await Promise.all([
-    supabase.from('sessions').select('*').limit(1000),
+  const fetchAll = async (table, select = '*', filter = null) => {
+    let all = []; let page = 0; let more = true;
+    while (more && page < 20) {
+      let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
+      if (filter) q = filter(q);
+      const { data } = await q;
+      if (!data || data.length === 0) break;
+      all = [...all, ...data];
+      if (data.length < 1000) more = false;
+      page++;
+    }
+    return all;
+  };
+
+  const [sessionsData, exemptions, meets] = await Promise.all([
+    fetchAll('sessions', '*'),
     supabase.from('club_exemptions').select('*'),
     supabase.from('meets').select('*'),
   ]);
@@ -45,7 +59,7 @@ export async function getServerSideProps(context) {
       id,
       initialSwimmers: swimmers || [],
       initialSquad: squad || null,
-      initialSessions: sessions.data || [],
+      initialSessions: sessionsData || [],
       initialExemptions: exemptions.data || [],
       initialMeets: meets.data || [],
       initialAttendance: [],

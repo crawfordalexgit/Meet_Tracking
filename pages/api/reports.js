@@ -16,15 +16,28 @@ export default async function handler(req, res) {
     const supabase = getServiceSupabase();
 
     // 1. Fetch all static baseline tables in parallel
-    const [squadsRes, sessionsRes, exemptionsRes, benchmarksRes] = await Promise.all([
-      supabase.from('squads').select('*').eq('is_squad', true).order('name'),
-      supabase.from('sessions').select('*').limit(1000),
+    // fetchAll is defined later in this function — inline a quick fetchAll for the static tables
+    const fetchStatic = async (table, select = '*', filter = null) => {
+      let all = []; let page = 0; let more = true;
+      while (more && page < 20) {
+        let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
+        if (filter) q = filter(q);
+        const { data } = await q;
+        if (!data || data.length === 0) break;
+        all = [...all, ...data];
+        if (data.length < 1000) more = false;
+        page++;
+      }
+      return all;
+    };
+
+    const [squads, sessions, exemptionsRes, benchmarksRes] = await Promise.all([
+      fetchStatic('squads', '*', q => q.eq('is_squad', true).order('name')),
+      fetchStatic('sessions', '*'),
       supabase.from('club_exemptions').select('*'),
       supabase.from('benchmarks').select('*').order('category')
     ]);
 
-    const squads = squadsRes.data || [];
-    const sessions = sessionsRes.data || [];
     const exemptions = exemptionsRes.data || [];
     const benchmarks = benchmarksRes.data || [];
 
@@ -87,13 +100,13 @@ export default async function handler(req, res) {
     const [attendanceRes, resultsRes, membershipsRes, rankingsRes] = await Promise.all([
       fetchAll('training_attendance', '*', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
       fetchAll('results', '*, meets(*)', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
-      supabase.from('session_memberships').select('*').in('swimmer_id', swimmerIds),
+      fetchAll('session_memberships', '*', q => q.in('swimmer_id', swimmerIds)),
       fetchAll('rankings', '*', q => q.in('swimmer_id', swimmerIds).order('snapshot_date', { ascending: false }))
     ]);
 
     const attendance = attendanceRes || [];
     const results = resultsRes || [];
-    const memberships = membershipsRes.data || [];
+    const memberships = membershipsRes || [];
     const rankings = rankingsRes || [];
 
     // Get latest snapshot for Swim England rankings
@@ -260,7 +273,8 @@ export default async function handler(req, res) {
         velocity,
         rankings: swRankings,
         isMet: rel.complianceRate >= 100 && (rel.percentage >= (sw.squads?.target_training_percent || 75) || rel.volumePct >= (sw.squads?.target_training_percent || 75)),
-        isExempt: sw.is_exempt
+        isExempt: sw.is_exempt,
+        year_of_birth: sw.year_of_birth
       };
     });
 

@@ -35,22 +35,36 @@ export default function SwimmersRegistry({ session }) {
       const period = parseInt(router.query.period) || 365;
       setPeriodDays(period);
       const y1ago = new Date(new Date() - period * 86400000).toISOString();
-      const [swRes, rRes, aRes, sessRes, exRes, memRes, rankRes] = await Promise.all([
+      const fetchPaged = async (table, select = '*', filter = null) => {
+        let all = []; let page = 0; let more = true;
+        while (more && page < 20) {
+          let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
+          if (filter) q = filter(q);
+          const { data } = await q;
+          if (!data || data.length === 0) break;
+          all = [...all, ...data];
+          if (data.length < 1000) more = false;
+          page++;
+        }
+        return all;
+      };
+
+      const [swRes, results, attendance, sessions, exRes, memberships, rankRes] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
-        supabase.from('results').select('swimmer_id, wa_pts, date, meets(id,name,type)').gte('date', y1ago),
-        supabase.from('training_attendance').select('*').gte('date', y1ago),
-        supabase.from('sessions').select('*'),
+        fetchPaged('results', 'swimmer_id, wa_pts, date, meets(id,name,type)', q => q.gte('date', y1ago)),
+        fetchPaged('training_attendance', '*', q => q.gte('date', y1ago)),
+        fetchPaged('sessions', '*'),
         supabase.from('club_exemptions').select('*'),
-        supabase.from('session_memberships').select('*'),
+        fetchPaged('session_memberships', '*'),
         supabase.from('rankings').select('swimmer_id, district')
       ]);
 
       if (swRes.error) throw swRes.error;
 
       const enrichedSwimmers = (swRes.data || []).map(swimmer => {
-        const swimmerResults = (rRes.data || []).filter(r => r.swimmer_id === swimmer.id);
+        const swimmerResults = results.filter(r => r.swimmer_id === swimmer.id);
         const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
-        
+
         const now = new Date();
         const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
         const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : (swimmer.date_of_birth ? targetYear - new Date(swimmer.date_of_birth).getFullYear() : null);
@@ -68,13 +82,13 @@ export default function SwimmersRegistry({ session }) {
         }
 
         const rel = calculateReliability(
-          swimmer, 
-          aRes.data || [], 
-          sessRes.data || [], 
-          swimmerResults, 
-          period, 
-          exRes.data || [], 
-          (memRes.data || []).filter(m => m.swimmer_id === swimmer.id)
+          swimmer,
+          attendance,
+          sessions,
+          swimmerResults,
+          period,
+          exRes.data || [],
+          memberships.filter(m => m.swimmer_id === swimmer.id)
         );
         
         return { 
