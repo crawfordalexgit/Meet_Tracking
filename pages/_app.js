@@ -7,25 +7,23 @@ import { ThemeProvider } from '../lib/ThemeContext';
 import { Toaster } from 'react-hot-toast';
 
 export default function MyApp({ Component, pageProps }) {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(undefined);
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
+    // 1. Grab the session if they just returned from Google
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      checkProfile(session);
     });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    // 2. Listen for any future login/logout events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      checkProfile(session);
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => subscription?.unsubscribe();
+  }, [router]);
 
   const checkProfile = async (currentSession) => {
     if (!currentSession?.user) {
