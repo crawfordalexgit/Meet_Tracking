@@ -192,6 +192,15 @@ const [decayDistance, setDecayDistance] = useState('100');
     setIsClient(true);
   }, []);
 
+  useEffect(() => {
+    if (printTheme) {
+      document.body.classList.add(`theme-${printTheme}`);
+      return () => {
+        document.body.classList.remove(`theme-dark`, `theme-light`);
+      };
+    }
+  }, [printTheme]);
+
   const allAvailableSplits = useMemo(() => {
     const list = [];
     const seen = new Set();
@@ -1208,7 +1217,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'overview',
         title: '1. Executive Overview & KPIs',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="overview">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="overview">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
               <div className="glass-card" style={{ marginBottom: '2rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '1rem' }}>
@@ -1243,7 +1252,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'ai',
         title: '2. Performance AI Report',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="ai">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="ai">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Performance AI Report</h2>
               <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
           </div>
@@ -1257,7 +1266,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'workload',
         title: '3. Training Workload & Compliance',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="workload">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="workload">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>3. Training Workload</h2>
               <div className="glass-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -1293,7 +1302,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'competition',
         title: '4. Competition Record',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="competition">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="competition">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>4. Competition Record</h2>
               
               <div className="flex justify-between items-center mb-6">
@@ -1355,7 +1364,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'readiness',
         title: '5. Readiness & Health Audit',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="readiness">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="readiness">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>5. Readiness & Health Audit</h2>
               <div className="glass-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
@@ -1384,7 +1393,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'qt',
         title: '6. Qualifying Times Assessment',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="qt">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="qt">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
               <div style={{ display: 'grid', gap: '1.5rem' }}>
                   {[
@@ -1431,7 +1440,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'appendix',
         title: 'Appendix: Weekly Workload Details',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="appendix">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="appendix">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
               <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
                   <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
@@ -1544,12 +1553,20 @@ const [decayDistance, setDecayDistance] = useState('100');
             html, body { 
                 margin: 0 !important; 
                 padding: 0 !important; 
-                background: var(--print-bg) !important; 
-                color: var(--print-text) !important; 
                 font-family: 'Outfit', 'Inter', sans-serif !important;
                 -webkit-print-color-adjust: exact !important; 
                 print-color-adjust: exact !important; 
                 text-align: left !important;
+            }
+            body.theme-dark {
+                background: #050b10 !important;
+                background-color: #050b10 !important;
+                color: #ffffff !important;
+            }
+            body.theme-light {
+                background: #ffffff !important;
+                background-color: #ffffff !important;
+                color: #050b10 !important;
             }
             main, .layout-container, .main-content, #__next { 
                 padding: 0 !important; 
@@ -1578,8 +1595,11 @@ const [decayDistance, setDecayDistance] = useState('100');
             }
             
             /* Apply color variable to headers/texts based on theme class */
-            .theme-light h1, .theme-light h2, .theme-light h3, .theme-light h4, .theme-light .section-title, .theme-light p, .theme-light span, .theme-light div, .theme-light li, .theme-light strong { 
+            .theme-light h1, .theme-light h2, .theme-light h3, .theme-light h4, .theme-light .section-title, .theme-light p, .theme-light span, .theme-light li, .theme-light strong { 
                 color: #050b10 !important; 
+            }
+            .theme-light .swot-quadrant-text, .theme-light .swot-quadrant-text strong {
+                color: #050b10 !important;
             }
             .theme-light .cover-club {
                 color: #0369a1 !important;
@@ -3369,7 +3389,7 @@ const [decayDistance, setDecayDistance] = useState('100');
           </div>
 
           {/* PAGE 2: Table of Contents & Athlete Profile */}
-          <div style={{ padding: '20mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }}>
+          <div style={{ padding: '20mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }}>
               <h2 className="section-title" style={{ marginBottom: '2.5rem', fontSize: '2rem', borderBottom: '2px solid var(--print-border-heavy)', paddingBottom: '0.5rem' }}>
                   Report Directory & Athlete Profile
               </h2>

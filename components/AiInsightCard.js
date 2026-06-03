@@ -285,6 +285,7 @@ export default function AiInsightCard({
                         <div key={idx} style={{ background: item.bg, border: `1px solid ${item.color}`, borderRadius: '12px', padding: '1.5rem' }}>
                             <h4 style={{ color: item.color, margin: '0 0 1rem 0', fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.1em' }}>{item.title}</h4>
                             <div 
+                                className="swot-quadrant-text"
                                 style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.7' }} 
                                 dangerouslySetInnerHTML={{ 
                                     __html: (item.data || 'No data generated.')
