@@ -178,6 +178,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     audience: 'Coach'
   });
 
+  const [printTheme, setPrintTheme] = useState('dark');
   const [aiInsight, setAiInsight] = useState(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -284,6 +285,20 @@ const [decayDistance, setDecayDistance] = useState('100');
     useEffect(() => {
         // VERCEL-SAFE PDF EXPORT AUTH BYPASS (Rule 5)
         if (router.query.printToken && router.query.printToken === process.env.NEXT_PUBLIC_PRINT_SECRET_TOKEN) {
+            const cachedConfig = localStorage.getItem('print-report-config');
+            if (cachedConfig) {
+                try {
+                    const parsed = JSON.parse(cachedConfig);
+                    if (parsed && parsed.sections) {
+                        setReportConfig(parsed);
+                    }
+                    if (parsed && parsed.printTheme) {
+                        setPrintTheme(parsed.printTheme);
+                    }
+                } catch (e) {
+                    console.error("Failed to parse cached print report config:", e);
+                }
+            }
             if (id && router.isReady) {
                 fetchSwimmerData();
             }
@@ -1065,8 +1080,9 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
   }, [attendancePct, statsObj, squad, progressPercent, velocity, seasonVolumePct]);
 
-  const handleGenerateReport = async (sections, audience) => {
+  const handleGenerateReport = async (sections, audience, selectedTheme = 'dark') => {
         setReportConfig({ sections, audience });
+        setPrintTheme(selectedTheme);
         
         let printInsight = aiInsight;
         if ((sections.aiTechnical || sections.aiDeepDive) && !printInsight) {
@@ -1078,6 +1094,9 @@ const [decayDistance, setDecayDistance] = useState('100');
             localStorage.setItem('print-insight-cache', JSON.stringify(printInsight));
         }
 
+        // Cache the config and theme
+        localStorage.setItem('print-report-config', JSON.stringify({ sections, audience, printTheme: selectedTheme }));
+
         setIsReportModalOpen(false);
         setIsExporting(true);
         
@@ -1085,7 +1104,7 @@ const [decayDistance, setDecayDistance] = useState('100');
             const clientAuth = {};
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (key && (key.startsWith('sb-') || key === 'print-insight-cache')) {
+                if (key && (key.startsWith('sb-') || key === 'print-insight-cache' || key === 'print-report-config')) {
                     clientAuth[key] = localStorage.getItem(key);
                 }
             }
@@ -1178,6 +1197,280 @@ const [decayDistance, setDecayDistance] = useState('100');
         });
     }, [uniqueMeetsList, squadTrends]);
 
+  const printPages = useMemo(() => {
+    if (!swimmer) return [];
+
+    const pages = [];
+
+    // Page 2: Executive Overview
+    if (reportConfig.sections.performanceNarrative) {
+      pages.push({
+        id: 'overview',
+        title: '1. Executive Overview & KPIs',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="overview">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
+              <div className="glass-card" style={{ marginBottom: '2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: '2rem', padding: '1rem' }}>
+                      <PremiumOrb value={attendancePct} label="Consistency" size={120} unit="%" />
+                      <PremiumOrb value={seasonVolumePct} label="Volume vs Target" size={120} unit="%" color={seasonVolumePct >= 80 ? 'cyan' : 'amber'} />
+                      <PremiumOrb value={progressPercent} label="Meet Compliance" size={120} unit="%" />
+                      <PremiumOrb value={velocity} label="WA Velocity" customValue={true} size={120} unit="pts" color={velocity >= 0 ? 'emerald' : 'rose'} />
+                  </div>
+                  
+                  <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)' }} className="print-narrative-border">
+                      <h3 className="section-title" style={{ marginBottom: '1rem' }}>Strategic Narrative</h3>
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                          {narrative && narrative.map((item, idx) => (
+                              <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px' }}>
+                                  <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
+                                      <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
+                                      {item.text}
+                                  </p>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Page 3: Performance AI
+    if (reportConfig.sections.aiPerformance) {
+      pages.push({
+        id: 'ai',
+        title: '2. Performance AI Report',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="ai">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Performance AI Report</h2>
+              <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
+          </div>
+        )
+      });
+    }
+
+    // Page 4: Training Workload
+    if (reportConfig.sections.attendance) {
+      pages.push({
+        id: 'workload',
+        title: '3. Training Workload & Compliance',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="workload">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>3. Training Workload</h2>
+              <div className="glass-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                      <div>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{totalActualHours.toFixed(1)}h / {annualTargetHours.toFixed(1)}h</div>
+                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Volume Achieved</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 900, color: (statsObj?.percentage || 0) >= (squad?.target_training_percent || 75) ? '#059669' : '#e11d48' }}>{statsObj?.percentage || 0}%</div>
+                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Target Compliance</div>
+                      </div>
+                  </div>
+                  <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
+                      <ComposedChart width={700} height={300} data={workloadChartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
+                          <XAxis dataKey="weekLabel" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
+                          <YAxis stroke="rgba(255,255,255,0.5)" fontSize={9} />
+                          <Bar dataKey="credit" stackId="a" fill="#fbbf24" name="Credits/Holidays" isAnimationActive={false} />
+                          <Bar dataKey="hours" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
+                          <Bar dataKey="galaHours" stackId="a" fill="#10b981" name="Gala Hours" isAnimationActive={false} />
+                          <Line type="stepAfter" dataKey="target" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Target Hours" isAnimationActive={false} />
+                      </ComposedChart>
+                  </div>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Page 5: Competition Record
+    if (reportConfig.sections.competition || reportConfig.sections.openMeets || reportConfig.sections.internalGalas) {
+      pages.push({
+        id: 'competition',
+        title: '4. Competition Record',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="competition">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>4. Competition Record</h2>
+              
+              <div className="flex justify-between items-center mb-6">
+                  <div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
+                      <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
+                  </div>
+              </div>
+
+              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
+                      <thead>
+                          <tr>
+                              <th>Date</th>
+                              <th>Competition</th>
+                              <th style={{ textAlign: 'center' }}>Level</th>
+                              <th style={{ textAlign: 'center' }}>Races</th>
+                              <th style={{ textAlign: 'right' }}>Peak WA</th>
+                              <th style={{ textAlign: 'center' }}>Highlights</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {uniqueMeetsList && uniqueMeetsList.map((m, i) => (
+                              <tr key={i}>
+                                  <td style={{ fontWeight: 600, padding: '12px 8px' }}>
+                                      {new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                  </td>
+                                  <td style={{ fontWeight: 800, padding: '12px 8px' }}>{m.name}</td>
+                                  <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                                      <span style={{ padding: '4px 8px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b' : '#0369a1', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 800 }}>
+                                          {m.level || 'L3'}
+                                      </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', padding: '12px 8px' }}>{m.eventCount}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 800, padding: '12px 8px' }}>{Math.round(m.peakWa)} pts</td>
+                                  <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                                      {m.pbCount > 0 ? (
+                                          <span style={{ color: '#059669', fontWeight: 900, fontSize: '0.75rem', background: '#d1fae5', padding: '4px 8px', borderRadius: '6px' }}>
+                                              ★ {m.pbCount} PB{m.pbCount > 1 ? 's' : ''}
+                                          </span>
+                                      ) : '-'}
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Page 6: Readiness Audit
+    if (reportConfig.sections.biometrics) {
+      pages.push({
+        id: 'readiness',
+        title: '5. Readiness & Health Audit',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="readiness">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>5. Readiness & Health Audit</h2>
+              <div className="glass-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                      <h3 style={{ margin: 0 }} className="print-text-dark-override">Biological & Training Readiness</h3>
+                      <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '2.5rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '1rem', color: '#64748b' }}>/100</span></div>
+                      </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+                      {healthData?.components?.map((comp, idx) => (
+                          <div key={idx} style={{ padding: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', textAlign: 'center' }} className="readiness-card">
+                              <div style={{ fontSize: '2rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.5rem' }}>{Math.round(comp.score)}</div>
+                              <div style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569' }} className="readiness-label">{comp.label}</div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Page 7: Qualifying Times
+    if (reportConfig.sections.qtPredictor) {
+      pages.push({
+        id: 'qt',
+        title: '6. Qualifying Times Assessment',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="qt">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                  {[
+                      { label: 'Sprints (50m - 100m)', filter: (e) => (e.includes('50') || e.includes('100')) && !e.includes('IM') },
+                      { label: 'Middle Distance (200m - 400m)', filter: (e) => (e.includes('200') || e.includes('400')) && !e.includes('IM') },
+                      { label: 'Distance (800m - 1500m)', filter: (e) => e.includes('800') || e.includes('1500') },
+                      { label: 'Individual Medley (IM)', filter: (e) => e.includes('IM') }
+                  ].map((segment, idx) => {
+                      const segmentEvents = Object.entries(statsObj?.strokeData || {}).filter(([eventName]) => segment.filter(eventName));
+                      if (segmentEvents.length === 0) return null;
+                      return (
+                          <div key={idx} className="glass-card" style={{ padding: '1.5rem !important', marginBottom: 0 }}>
+                              <h4 style={{ color: '#0369a1', margin: '0 0 1rem 0', textTransform: 'uppercase', fontSize: '0.85rem' }}>{segment.label}</h4>
+                              <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
+                                  <thead>
+                                      <tr>
+                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1' }}>Event</th>
+                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'center' }}>PB Count</th>
+                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'right' }}>Peak WA</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody>
+                                      {segmentEvents.map(([eventName, data], i) => (
+                                          <tr key={i}>
+                                              <td style={{ padding: '8px', fontWeight: 800 }}>{eventName}</td>
+                                              <td style={{ padding: '8px', textAlign: 'center' }}>{data.pbCount > 0 ? `★ ${data.pbCount}` : '-'}</td>
+                                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#d97706' }}>{Math.round(data.peak)} pts</td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                          </div>
+                      );
+                  })}
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Page 8: Appendix
+    if (reportConfig.sections.attendance) {
+      pages.push({
+        id: 'appendix',
+        title: 'Appendix: Weekly Workload Details',
+        element: (
+          <div style={{ pageBreakAfter: 'always' }} key="appendix">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
+              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
+                      <thead style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
+                          <tr>
+                              <th style={{ padding: '8px' }}>Week Commencing</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Pool</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Gala</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Credit</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Total</th>
+                              <th style={{ padding: '8px', textAlign: 'center', color: '#f43f5e' }}>Target</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Status</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {weeklyWorkloadData && weeklyWorkloadData.map((week, idx) => (
+                              <tr key={idx}>
+                                  <td style={{ padding: '8px' }}>{week.name}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.pool > 0 ? `${week.pool.toFixed(1)}h` : '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.gala > 0 ? `${week.gala.toFixed(1)}h` : '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.credit > 0 ? `${week.credit.toFixed(1)}h` : '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 800 }}>{week.total.toFixed(1)}h</td>
+                                  <td style={{ padding: '8px', textAlign: 'center', color: '#f43f5e', fontWeight: 600 }}>{week.target.toFixed(1)}h</td>
+                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 900, color: (week.isHoliday || week.appliedRule === 'Holiday Allowance') ? '#f59e0b' : (week.isMet ? '#10b981' : '#f43f5e') }}>
+                                      {(week.isHoliday || week.appliedRule === 'Holiday Allowance') ? '🌴 HOLIDAY' : (week.isMet ? '✓ MET' : '✗ MISSED')}
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    return pages;
+  }, [swimmer, reportConfig, attendancePct, seasonVolumePct, progressPercent, velocity, narrative, attendance, sessions, exemptions, results, totalActualHours, annualTargetHours, statsObj, squad, workloadChartData, uniqueMeetsList, healthData, weeklyWorkloadData, openMeetsCount, totalMeetsCount]);
+
   // Championship season age for QT benchmarks
   const _now = new Date();
   const targetYear = _now.getMonth() >= 4 ? _now.getFullYear() + 1 : _now.getFullYear();
@@ -1188,6 +1481,35 @@ const [decayDistance, setDecayDistance] = useState('100');
 
   return (
     <Layout session={session}>
+      {isExporting && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(5, 11, 16, 0.95)',
+          backdropFilter: 'blur(10px)',
+          zIndex: 9999,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '2rem'
+        }} className="no-print animate-fade-in">
+          <div style={{ position: 'relative', width: '80px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0, 212, 255, 0.1)', borderRadius: '50%', border: '1px solid rgba(0, 212, 255, 0.2)' }}>
+            <span style={{ fontSize: '2.5rem', display: 'inline-block', animation: 'spin-glow 2s linear infinite' }}>🖨️</span>
+          </div>
+          <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff', margin: 0 }}>Generating PDF Report</h3>
+          <p style={{ color: 'rgba(255, 255, 255, 0.6)', margin: 0, fontSize: '0.9rem', maxWidth: '380px', textAlign: 'center', lineHeight: 1.6 }}>
+            Please wait while CoachesEye compiles the athlete profile, processes charts, and formats pages into a premium A4 document...
+          </p>
+          <style jsx>{`
+            @keyframes spin-glow {
+              0% { transform: rotate(0deg) scale(1); filter: drop-shadow(0 0 5px rgba(0, 212, 255, 0.3)); }
+              50% { transform: rotate(180deg) scale(1.1); filter: drop-shadow(0 0 15px rgba(0, 212, 255, 0.6)); }
+              100% { transform: rotate(360deg) scale(1); filter: drop-shadow(0 0 5px rgba(0, 212, 255, 0.3)); }
+            }
+          `}</style>
+        </div>
+      )}
       <Head>
         <title>{swimmer.full_name} | Athlete Profile</title>
         <style>{`
@@ -1199,12 +1521,31 @@ const [decayDistance, setDecayDistance] = useState('100');
             .profile-tab-btn.active { background: var(--accent-cyan); color: #000 !important; font-weight: 900; box-shadow: 0 8px 20px rgba(0, 212, 255, 0.25); }
           }
           @media print {
+            .theme-light {
+                --print-bg: #ffffff;
+                --print-text: #050b10;
+                --print-card-bg: #ffffff;
+                --print-card-border: 1px solid #cbd5e1;
+                --print-border-light: 1px solid #cbd5e1;
+                --print-border-heavy: 2px solid #0f172a;
+                --print-grid: rgba(0, 0, 0, 0.1);
+            }
+            .theme-dark {
+                --print-bg: #050b10;
+                --print-text: #ffffff;
+                --print-card-bg: rgba(10,10,20,0.8);
+                --print-card-border: 1px solid rgba(255,255,255,0.1);
+                --print-border-light: 1px solid rgba(255,255,255,0.05);
+                --print-border-heavy: 2px solid rgba(255,255,255,0.1);
+                --print-grid: rgba(255, 255, 255, 0.1);
+            }
+
             @page { size: portrait; margin: 10mm !important; }
             html, body { 
                 margin: 0 !important; 
                 padding: 0 !important; 
-                background: #050b10 !important; 
-                color: white !important; 
+                background: var(--print-bg) !important; 
+                color: var(--print-text) !important; 
                 font-family: 'Outfit', 'Inter', sans-serif !important;
                 -webkit-print-color-adjust: exact !important; 
                 print-color-adjust: exact !important; 
@@ -1213,29 +1554,78 @@ const [decayDistance, setDecayDistance] = useState('100');
             .no-print, button, nav, .profile-header, .period-selector { display: none !important; }
             .print-only { display: block !important; }
             
-            /* Enforce White Text on Dark Background */
-            h1, h2, h3, h4, .section-title, p, span, div, li, strong { 
+            /* Apply color variable to headers/texts based on theme class */
+            .theme-light h1, .theme-light h2, .theme-light h3, .theme-light h4, .theme-light .section-title, .theme-light p, .theme-light span, .theme-light div, .theme-light li, .theme-light strong { 
+                color: #050b10 !important; 
+            }
+            .theme-light .cover-club {
+                color: #0369a1 !important;
+            }
+            .theme-light .cover-index-title {
+                border-bottom: 2px solid #cbd5e1 !important;
+            }
+            .theme-light .print-narrative-border {
+                border-top: 1px solid #cbd5e1 !important;
+            }
+            .theme-light .print-text-bright {
+                color: #050b10 !important;
+            }
+            .theme-light .print-text-dim {
+                color: rgba(15, 23, 42, 0.8) !important;
+            }
+            .theme-light .print-text-dark-override {
+                color: #0f172a !important;
+            }
+            .theme-light .readiness-card {
+                background: #ffffff !important;
+                border: 1px solid #cbd5e1 !important;
+            }
+            .theme-light .readiness-label {
+                color: #475569 !important;
+            }
+
+            .theme-dark h1, .theme-dark h2, .theme-dark h3, .theme-dark h4, .theme-dark .section-title, .theme-dark p, .theme-dark span, .theme-dark div, .theme-dark li, .theme-dark strong { 
                 color: white !important; 
+            }
+            .theme-dark .cover-club {
+                color: #00d4ff !important;
+            }
+            .theme-dark .cover-index-title {
+                border-bottom: 2px solid rgba(255,255,255,0.1) !important;
             }
 
             /* Match the Meet Report Glass Cards */
             .glass-card { 
-                border: 1px solid rgba(255,255,255,0.1) !important; 
-                background: rgba(10,10,20,0.8) !important; 
-                color: white !important; 
+                border: var(--print-card-border) !important; 
+                background: var(--print-card-bg) !important; 
+                color: var(--print-text) !important; 
                 page-break-inside: avoid !important; 
                 padding: 1.5rem !important; /* Fixed large margins */
                 margin-bottom: 1.5rem !important; 
             }
 
             /* Match the Meet Report Tables */
-            .stats-table-glass th { color: rgba(255,255,255,0.8) !important; border-bottom: 2px solid rgba(255,255,255,0.1) !important; }
-            .stats-table-glass td { color: white !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+            .stats-table-glass th { color: var(--print-text) !important; border-bottom: var(--print-border-heavy) !important; opacity: 0.8; }
+            .stats-table-glass td { color: var(--print-text) !important; border-bottom: var(--print-border-light) !important; }
 
-            /* Ensure Recharts remain visible on the dark background */
-            .recharts-text { fill: rgba(255,255,255,0.7) !important; }
-            .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: rgba(255,255,255,0.1) !important; }
+            /* Ensure Recharts remain visible on the background */
+            .recharts-text { fill: var(--print-text) !important; opacity: 0.7; }
+            .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: var(--print-grid) !important; }
             .recharts-tooltip-wrapper { display: none !important; } 
+
+            /* Override PremiumOrb elements under light theme print */
+            .theme-light .premium-orb-container circle[stroke="rgba(255,255,255,0.06)"] {
+                stroke: rgba(0, 0, 0, 0.08) !important;
+            }
+            .theme-light .premium-orb-container div[style*="color: white"],
+            .theme-light .premium-orb-container div[style*="color:white"] {
+                color: #0f172a !important;
+                text-shadow: none !important;
+            }
+            .theme-light .premium-orb-container .orb-label {
+                color: #475569 !important;
+                opacity: 0.8 !important;
+            }
           }
           @media screen {
             .print-only { display: none !important; }
@@ -2929,245 +3319,33 @@ const [decayDistance, setDecayDistance] = useState('100');
       )}
       </div>
 
-      {/* ========================================== */}
-      {/* PRINT ONLY: FORMAL ATHLETE REPORT (HIDDEN ON SCREEN) */}
-      {/* ========================================== */}
-      <div className="print-only">
+      <div className={`print-only theme-${printTheme}`}>
           
           {/* PAGE 1: Cover Page & Index */}
           <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pageBreakAfter: 'always' }}>
-              <h4 style={{ color: '#00d4ff', letterSpacing: '0.2em', margin: 0 }}>TONBRIDGE SWIMMING CLUB</h4>
-              <h1 style={{ fontSize: '4rem', fontWeight: 950, margin: '1rem 0', textTransform: 'uppercase' }}>{swimmer.full_name}</h1>
-              <h3 style={{ opacity: 0.6, letterSpacing: '0.1em' }}>ANNUAL ATHLETE PERFORMANCE REPORT</h3>
-              <p style={{ marginTop: '1rem', fontStyle: 'italic' }}>Generated: {new Date().toLocaleDateString('en-GB')}</p>
+              <h4 className="cover-club" style={{ letterSpacing: '0.2em', margin: 0 }}>TONBRIDGE SWIMMING CLUB</h4>
+              <h1 className="cover-name" style={{ fontSize: '4rem', fontWeight: 950, margin: '1rem 0', textTransform: 'uppercase' }}>{swimmer.full_name}</h1>
+              <h3 className="cover-title" style={{ opacity: 0.6, letterSpacing: '0.1em' }}>ANNUAL ATHLETE PERFORMANCE REPORT</h3>
+              <p className="cover-date" style={{ marginTop: '1rem', fontStyle: 'italic' }}>Generated: {new Date().toLocaleDateString('en-GB')}</p>
               
               <div style={{ marginTop: '4rem', textAlign: 'left', width: '100%', maxWidth: '600px' }}>
-                  <h2 style={{ borderBottom: '2px solid #e2e8f0', paddingBottom: '1rem', marginBottom: '1.5rem' }}>Report Index</h2>
+                  <h2 className="cover-index-title" style={{ paddingBottom: '1rem', marginBottom: '1.5rem' }}>Report Index</h2>
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '1.1rem', lineHeight: '2.2', fontWeight: 600 }}>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>1. Executive Overview & KPIs</span> <span>... 2</span></li>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>2. Performance AI Report</span> <span>... 3</span></li>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>3. Training Workload & Compliance</span> <span>... 4</span></li>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>4. Competition Record</span> <span>... 5</span></li>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>5. Readiness & Health Audit</span> <span>... 6</span></li>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>6. Qualifying Times (Sprint/Mid/Distance/IM)</span> <span>... 7</span></li>
-                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>7. Appendix: Weekly Workload Details</span> <span>... 8</span></li>
+                      {printPages.map((p, idx) => (
+                          <li key={p.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>{p.title}</span> 
+                              <span>... {idx + 2}</span>
+                          </li>
+                      ))}
                   </ul>
               </div>
           </div>
 
-          {/* PAGE 2: Executive Overview */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
-              <div className="glass-card" style={{ marginBottom: '2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: '2rem', padding: '1rem' }}>
-                      <PremiumOrb value={attendancePct} label="Consistency" size={120} unit="%" />
-                      <PremiumOrb value={seasonVolumePct} label="Volume vs Target" size={120} unit="%" color={seasonVolumePct >= 80 ? 'cyan' : 'amber'} />
-                      <PremiumOrb value={progressPercent} label="Meet Compliance" size={120} unit="%" />
-                      <PremiumOrb value={velocity} label="WA Velocity" customValue={true} size={120} unit="pts" color={velocity >= 0 ? 'emerald' : 'rose'} />
-                  </div>
-                  
-                  <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e2e8f0' }}>
-                      <h3 className="section-title" style={{ color: '#0f172a', marginBottom: '1rem' }}>Strategic Narrative</h3>
-                      <div style={{ display: 'grid', gap: '1rem' }}>
-                          {narrative.map((item, idx) => (
-                              <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px' }}>
-                                  <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.8)' }}>
-                                      <strong style={{ color: 'white', display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }}>{item.category.toUpperCase()}</strong> 
-                                      {item.text}
-                                  </p>
-                              </div>
-                          ))}
-                      </div>
-                  </div>
-              </div>
-          </div>
-
-          {/* PAGE 3: Performance AI */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Performance AI Report</h2>
-              <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
-          </div>
-
-          {/* PAGE 4: Workload Chart */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>3. Training Workload</h2>
-              <div className="glass-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                      <div>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{totalActualHours.toFixed(1)}h / {annualTargetHours.toFixed(1)}h</div>
-                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Volume Achieved</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 900, color: (statsObj?.percentage || 0) >= (squad?.target_training_percent || 75) ? '#059669' : '#e11d48' }}>{statsObj?.percentage || 0}%</div>
-                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Target Compliance</div>
-                      </div>
-                  </div>
-                  <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
-                      <ComposedChart width={700} height={300} data={workloadChartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
-                          <XAxis dataKey="weekLabel" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
-                          <YAxis stroke="rgba(255,255,255,0.5)" fontSize={9} />
-                          <Bar dataKey="credit" stackId="a" fill="#fbbf24" name="Credits/Holidays" isAnimationActive={false} />
-                          <Bar dataKey="hours" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
-                          <Bar dataKey="galaHours" stackId="a" fill="#10b981" name="Gala Hours" isAnimationActive={false} />
-                          <Line type="stepAfter" dataKey="target" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Target Hours" isAnimationActive={false} />
-                      </ComposedChart>
-                  </div>
-              </div>
-          </div>
-
-          {/* PAGE 4: Competitive Engagement */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>4. Competition Record</h2>
-              
-              <div className="flex justify-between items-center mb-6">
-                  <div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
-                      <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
-                  </div>
-              </div>
-
-              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
-                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
-                      <thead style={{ borderBottom: '2px solid #000' }}>
-                          <tr>
-                              <th style={{ color: '#000' }}>Date</th>
-                              <th style={{ color: '#000' }}>Competition</th>
-                              <th style={{ color: '#000', textAlign: 'center' }}>Level</th>
-                              <th style={{ color: '#000', textAlign: 'center' }}>Races</th>
-                              <th style={{ color: '#000', textAlign: 'right' }}>Peak WA</th>
-                              <th style={{ color: '#000', textAlign: 'center' }}>Highlights</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          {uniqueMeetsList.map((m, i) => (
-                              <tr key={i}>
-                                  <td style={{ fontWeight: 600, borderBottom: '1px solid #eee', padding: '12px 8px' }}>
-                                      {new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                  </td>
-                                  <td style={{ fontWeight: 800, borderBottom: '1px solid #eee', padding: '12px 8px' }}>{m.name}</td>
-                                  <td style={{ textAlign: 'center', borderBottom: '1px solid #eee', padding: '12px 8px' }}>
-                                      <span style={{ padding: '4px 8px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b' : '#0369a1', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 800 }}>
-                                          {m.level || 'L3'}
-                                      </span>
-                                  </td>
-                                  <td style={{ textAlign: 'center', borderBottom: '1px solid #eee', padding: '12px 8px' }}>{m.eventCount}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 800, borderBottom: '1px solid #eee', padding: '12px 8px' }}>{Math.round(m.peakWa)} pts</td>
-                                  <td style={{ textAlign: 'center', borderBottom: '1px solid #eee', padding: '12px 8px' }}>
-                                      {m.pbCount > 0 ? (
-                                          <span style={{ color: '#059669', fontWeight: 900, fontSize: '0.75rem', background: '#d1fae5', padding: '4px 8px', borderRadius: '6px' }}>
-                                              ★ {m.pbCount} PB{m.pbCount > 1 ? 's' : ''}
-                                          </span>
-                                      ) : '-'}
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-
-          {/* PAGE 5: Readiness Audit */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>5. Readiness & Health Audit</h2>
-              <div className="glass-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                      <h3 style={{ margin: 0, color: '#0f172a' }}>Biological & Training Readiness</h3>
-                      <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#0f172a' }}>{healthData?.total || 0}<span style={{ fontSize: '1rem', color: '#64748b' }}>/100</span></div>
-                      </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
-                      {healthData?.components?.map((comp, idx) => (
-                          <div key={idx} style={{ padding: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', textAlign: 'center' }}>
-                              <div style={{ fontSize: '2rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.5rem' }}>{Math.round(comp.score)}</div>
-                              <div style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569' }}>{comp.label}</div>
-                          </div>
-                      ))}
-                  </div>
-              </div>
-          </div>
-
-          {/* PAGE 6: Qualifying Times */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
-              <div style={{ display: 'grid', gap: '1.5rem' }}>
-                  {[
-                      { label: 'Sprints (50m - 100m)', filter: (e) => (e.includes('50') || e.includes('100')) && !e.includes('IM') },
-                      { label: 'Middle Distance (200m - 400m)', filter: (e) => (e.includes('200') || e.includes('400')) && !e.includes('IM') },
-                      { label: 'Distance (800m - 1500m)', filter: (e) => e.includes('800') || e.includes('1500') },
-                      { label: 'Individual Medley (IM)', filter: (e) => e.includes('IM') }
-                  ].map((segment, idx) => {
-                      const segmentEvents = Object.entries(statsObj?.strokeData || {}).filter(([eventName]) => segment.filter(eventName));
-                      if (segmentEvents.length === 0) return null;
-                      return (
-                          <div key={idx} className="glass-card" style={{ padding: '1.5rem !important', marginBottom: 0 }}>
-                              <h4 style={{ color: '#0369a1', margin: '0 0 1rem 0', textTransform: 'uppercase', fontSize: '0.85rem' }}>{segment.label}</h4>
-                              <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
-                                  <thead>
-                                      <tr>
-                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1' }}>Event</th>
-                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'center' }}>PB Count</th>
-                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'right' }}>Peak WA</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody>
-                                      {segmentEvents.map(([eventName, data], i) => (
-                                          <tr key={i}>
-                                              <td style={{ padding: '8px', fontWeight: 800 }}>{eventName}</td>
-                                              <td style={{ padding: '8px', textAlign: 'center' }}>{data.pbCount > 0 ? `★ ${data.pbCount}` : '-'}</td>
-                                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#d97706' }}>{Math.round(data.peak)} pts</td>
-                                          </tr>
-                                      ))}
-                                  </tbody>
-                              </table>
-                          </div>
-                      );
-                  })}
-              </div>
-          </div>
-
-          {/* PAGE 7: Appendix - Workload Details */}
-          <div style={{ pageBreakAfter: 'always' }}>
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
-              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
-                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
-                      <thead style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
-                          <tr>
-                              <th style={{ padding: '8px' }}>Week Commencing</th>
-                              <th style={{ padding: '8px', textAlign: 'center' }}>Pool</th>
-                              <th style={{ padding: '8px', textAlign: 'center' }}>Gala</th>
-                              <th style={{ padding: '8px', textAlign: 'center' }}>Credit</th>
-                              <th style={{ padding: '8px', textAlign: 'center' }}>Total</th>
-                              <th style={{ padding: '8px', textAlign: 'center', color: '#f43f5e' }}>Target</th>
-                              <th style={{ padding: '8px', textAlign: 'center' }}>Status</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          {weeklyWorkloadData && weeklyWorkloadData.map((week, idx) => (
-                              <tr key={idx}>
-                                  <td style={{ padding: '8px' }}>{week.name}</td>
-                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.pool > 0 ? `${week.pool.toFixed(1)}h` : '—'}</td>
-                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.gala > 0 ? `${week.gala.toFixed(1)}h` : '—'}</td>
-                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.credit > 0 ? `${week.credit.toFixed(1)}h` : '—'}</td>
-                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 800 }}>{week.total.toFixed(1)}h</td>
-                                  <td style={{ padding: '8px', textAlign: 'center', color: '#f43f5e', fontWeight: 600 }}>{week.target.toFixed(1)}h</td>
-                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 900, color: (week.isHoliday || week.appliedRule === 'Holiday Allowance') ? '#f59e0b' : (week.isMet ? '#10b981' : '#f43f5e') }}>
-                                      {(week.isHoliday || week.appliedRule === 'Holiday Allowance') ? '🌴 HOLIDAY' : (week.isMet ? '✓ MET' : '✗ MISSED')}
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-
+          {/* DYNAMIC PAGES */}
+          {printPages.map(p => p.element)}
       </div>
 
-            <WaPointsGuideModal isOpen={isWaGuideOpen} onClose={() => setIsWaGuideOpen(false)} />
+      <WaPointsGuideModal isOpen={isWaGuideOpen} onClose={() => setIsWaGuideOpen(false)} />
     </Layout>
   );
 }

@@ -19,6 +19,7 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
     biometrics: false
   });
   const [audience, setAudience] = useState('Coach');
+  const [printTheme, setPrintTheme] = useState('dark');
 
   if (!isOpen) return null;
 
@@ -130,12 +131,25 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
         </div>
 
         <div style={bodyStyle}>
-          <div>
-            <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '16px' }}>Target Audience</label>
-            <div style={{ display: 'flex', gap: '12px' }}>
-              {['Coach', 'Parent', 'Swimmer'].map(a => (
-                <button key={a} onClick={() => setAudience(a)} style={btnAudienceStyle(audience === a)}>{a}</button>
-              ))}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '16px' }}>Target Audience</label>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                {['Coach', 'Parent', 'Swimmer'].map(a => (
+                  <button key={a} onClick={() => setAudience(a)} style={btnAudienceStyle(audience === a)}>{a}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', display: 'block', marginBottom: '16px' }}>Print Theme</label>
+              <div style={{ display: 'flex', gap: '12px' }}>
+                {['Dark Mode', 'Light Mode'].map((t, idx) => {
+                  const val = idx === 0 ? 'dark' : 'light';
+                  return (
+                    <button key={val} onClick={() => setPrintTheme(val)} style={btnAudienceStyle(printTheme === val)}>{t}</button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -177,7 +191,7 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
         <div style={footerStyle}>
           <button onClick={onClose} style={{ flex: 1, padding: '16px', borderRadius: '12px', border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.5)', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
           <button 
-            onClick={() => onGenerate(sections, audience)}
+            onClick={() => onGenerate(sections, audience, printTheme)}
             className="btn-premium-intel"
             style={{ flex: 2, padding: '16px', borderRadius: '12px', border: 'none', fontWeight: 900, cursor: 'pointer' }}
           >

@@ -1,6 +1,6 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.97",
+  "version": "1.0.98",
   "description": "",
   "scripts": {
     "dev": "next dev",
