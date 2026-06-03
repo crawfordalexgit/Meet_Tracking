@@ -72,7 +72,7 @@ export default function TalentIntelligenceCard({ squadId, squadName, stats, stro
         <div className="flex items-center justify-center gap-3 mb-4">
            <div className="section-title" style={{ margin: 0 }}>Talent Identification Lab</div>
         </div>
-        <h3 style={{ marginBottom: '1rem', fontSize: '1.4rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em' }}>Generate Talent Insight</h3>
+        <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>Generate Talent Insight</h3>
         <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', maxWidth: '450px', margin: '0 auto 2rem', fontSize: '0.85rem', lineHeight: 1.5 }}>
           Our CoachesEye Insights engine will evaluate squad-wide consistency, workload stability, and progression rates to identify emerging potential.
         </p>
@@ -89,14 +89,14 @@ export default function TalentIntelligenceCard({ squadId, squadName, stats, stro
       <div className="flex justify-between items-start mb-8">
         <div>
            <div className="section-title" style={{ color: 'var(--accent-amber)', fontSize: '0.65rem' }}>Talent Identification Analyst</div>
-           <h3 style={{ fontSize: '1.8rem', fontWeight: 900, margin: '8px 0 0', letterSpacing: '-0.03em' }}>Squad Talent Insight</h3>
+           <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>Squad Talent Insight</h3>
         </div>
         <button className="period-btn" onClick={generateInsight} style={{ fontSize: '0.6rem', opacity: 0.5 }}>🧬 Refresh Analysis</button>
       </div>
 
       <div className="mb-8">
         <div style={{ fontSize: '0.7rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', marginBottom: '1rem', letterSpacing: '0.1em' }}>Development Summary</div>
-        <p style={{ fontSize: '1.1rem', fontWeight: 600, lineHeight: 1.6, color: '#fff', margin: 0 }}>{insight.summary}</p>
+        <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, margin: 0 }}>{insight.summary}</p>
       </div>
 
       {insight.talented_individuals && insight.talented_individuals.length > 0 && (
@@ -150,7 +150,7 @@ export default function TalentIntelligenceCard({ squadId, squadName, stats, stro
 
       <div style={{ padding: '1.5rem', background: 'rgba(245, 158, 11, 0.05)', borderRadius: '16px', border: '1px solid rgba(245, 158, 11, 0.1)' }}>
         <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--accent-amber)', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '0.1em' }}>Development Projection</div>
-        <p style={{ fontSize: '0.9rem', fontWeight: 500, color: 'rgba(255,255,255,0.9)', margin: 0, fontStyle: 'italic' }}>
+        <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, margin: 0, fontStyle: 'italic' }}>
           "{insight.projection}"
         </p>
       </div>

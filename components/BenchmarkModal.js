@@ -9,7 +9,6 @@ export default function BenchmarkModal({ isOpen, onClose }) {
   const [loading, setLoading] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: 'event', direction: 'asc' });
   
-  if (!isOpen) return null;
 
   const tableData = useMemo(() => {
     if (level === 'NATIONAL') return dbData;
@@ -50,6 +49,8 @@ export default function BenchmarkModal({ isOpen, onClose }) {
       setLoading(false);
     }
   };
+  if (!isOpen) return null;
+
   const ages = [11, 12, 13, 14, 15, 16, 17];
 
   const sortedTable = useMemo(() => {

@@ -22411,3 +22411,143 @@ RULES
 ``
 ---
 
+---
+
+# ARCHITECTURAL RULES & AI GOVERNANCE
+> These rules are mandatory. Every AI code generation task must respect them, regardless of other instructions.
+
+---
+
+## Rule 1 — Automatic Version Bumping
+
+**Mandate:** Every successful codebase modification (bug fix, feature, refactor, UI change) MUST end with incrementing the patch version in `package.json` as the final step before reporting task completion.
+
+- Format: `"version": "X.Y.Z"` → increment Z by 1
+- No exceptions. Even single-line fixes get a bump.
+- The sidebar version badge reads from `package.json` dynamically, so this keeps the deployed UI accurate.
+
+---
+
+## Rule 2 — Dual-Age Qualification Architecture
+
+Two distinct age values govern different parts of the Predictor system. They must NEVER be swapped.
+
+### `targetAge` — Championship Projection Age
+- **Definition**: Swimmer's age in the target championship season year (e.g., 2027).
+- **Calculation**: `targetYear - swimmer.year_of_birth`, where `targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear()`
+- **Used for**: Fetching Qualifying Time benchmarks (`getBenchmarks(targetAge, ...)`), calculating PB gaps against future QT standards.
+- **Never use for**: Rankings lookups or quota caps.
+
+### `currentAge` — Current Calendar Age
+- **Definition**: Swimmer's age in the current calendar year.
+- **Calculation**: `new Date().getFullYear() - swimmer.year_of_birth`
+- **Used for**: `getMaxAcceptedSwimmers(eventName, currentAge)` — event acceptance quota caps.
+- **Never use for**: QT benchmark lookups (would pull wrong age-group standards).
+
+### Implementation Pattern
+```javascript
+const now        = new Date();
+const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
+const age        = swimmer?.year_of_birth ? targetYear - swimmer.year_of_birth : null;  // QT age
+const currentAge = swimmer?.year_of_birth ? now.getFullYear() - swimmer.year_of_birth : null;  // Rankings age
+
+const countyBm   = getBenchmarks(age, gender, eventName, 'COUNTY');           // uses age
+const maxAccepted = getMaxAcceptedSwimmers(eventName, currentAge || age);      // uses currentAge
+```
+
+---
+
+## Rule 3 — Rankings Data Fetching Standard
+
+**Problem:** Filtering `rankings` by `snapshot_date` in frontend state silently hides valid rankings. The scraper runs on different days for different districts (Kent may scrape Monday, South East on Wednesday). Filtering to a single `snapshot_date` erases all districts except the one scraped most recently.
+
+### Correct Pattern
+```javascript
+supabase
+  .from('rankings')
+  .select('*')
+  .eq('swimmer_id', selectedId)
+  .order('snapshot_date', { ascending: false })
+  .then(({ data }) => setRankings(data || []));
+// .find() on this sorted array naturally returns the most recent rank per stroke/district
+```
+
+### Forbidden Pattern
+```javascript
+const latest = data[0].snapshot_date;
+setRankings(data.filter(r => r.snapshot_date === latest));  // ❌ kills async district snapshots
+```
+
+### Exception
+`uniqueSnapshots`/`currentRankings` snapshot filtering IS permitted for **summary KPI widgets** (squad achievement counts: national_count, regional_count, county_count). The rule only forbids it for the rankings array passed to `TrafficLightBadge` components.
+
+---
+
+## Rule 4 — Traffic Light Badge & Ranking Match Logic
+
+### Helper: `getMaxAcceptedSwimmers(eventStr, age)`
+```javascript
+function getMaxAcceptedSwimmers(eventStr, age) {
+  const younger = age < 17;
+  if (eventStr.startsWith('50'))  return younger ? 34 : 46;
+  if (eventStr.startsWith('100')) return younger ? 21 : 24;
+  if (eventStr.startsWith('200')) return younger ? 16 : 18;
+  return 14;
+}
+```
+
+### Canonical Ranking Match Logic
+```javascript
+const safeLevel      = (level || '').toUpperCase();
+const targetDistrict = safeLevel === 'COUNTY' ? 'Kent' : 'South East';
+const targetPool     = (course === 'SC' || course === 'S') ? 'S' : 'L';
+
+const currentRank = (rankings || []).find(r =>
+  normalizeEvent(r.stroke || '') === normalizeEvent(eventName) &&
+  r.pool === targetPool &&
+  r.district === targetDistrict
+  // Do NOT add r.age filter — snapshot age can differ from computed age causing silent failures
+);
+```
+
+### Mappings
+| UI `course` | DB `r.pool` | UI `level` | DB `r.district` |
+|---|---|---|---|
+| `'SC'` or `'S'` | `'S'` | `'COUNTY'` | `'Kent'` |
+| `'LC'` or `'L'` | `'L'` | `'REGIONAL'` | `'South East'` |
+
+---
+
+## Rule 5 — Vercel-Safe PDF Export Architecture
+
+### Dependencies (standard `puppeteer` is banned on Vercel)
+```json
+"@sparticuz/chromium-min": "^149.0.0",
+"puppeteer-core": "^24.43.1"
+```
+
+### Endpoint: `pages/api/generate-pdf.js`
+- Accepts POST `{ targetPath: string }`
+- Appends `?printToken=${TOKEN}` to bypass Supabase auth redirect
+- Launches `puppeteer-core` + `@sparticuz/chromium-min`, navigates with `waitUntil: 'networkidle0'`
+- Returns PDF buffer with `Content-Type: application/pdf`
+
+### Auth Bypass
+```javascript
+// In page auth guard useEffect:
+const { printToken } = router.query;
+if (printToken && printToken === process.env.NEXT_PUBLIC_PRINT_SECRET_TOKEN) {
+  if (id) fetchData();
+  return;
+}
+```
+
+### Required Environment Variables
+| Variable | Purpose |
+|---|---|
+| `PRINT_SECRET_TOKEN` | Server-side token appended to Puppeteer URL |
+| `NEXT_PUBLIC_PRINT_SECRET_TOKEN` | Client-side token checked in page auth guard — must match above |
+| `CHROMIUM_EXECUTABLE_PATH` | Local: path to Chrome binary. Vercel: URL to `@sparticuz/chromium` tar |
+
+---
+

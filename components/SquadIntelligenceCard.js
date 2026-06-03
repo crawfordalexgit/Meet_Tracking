@@ -60,8 +60,8 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
     return (
       <div className="glass-card animate-fade-in no-print" style={{ textAlign: 'center', padding: '3rem' }}>
         <div className="section-title" style={{ justifyContent: 'center' }}>CoachesEye Insights Lab</div>
-        <h3 style={{ marginBottom: '1rem', fontSize: '1.8rem', fontWeight: 900 }}>{type === 'club' ? 'Club' : 'Squad'} Performance Audit</h3>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', maxWidth: '500px', margin: '0 auto 2rem', fontSize: '0.9rem' }}>
+        <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{type === 'club' ? 'Club' : 'Squad'} Performance Audit</h3>
+        <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, maxWidth: '500px', margin: '0 auto 2rem' }}>
           Synthesizing aggregate data into a strategic technical roadmap for the entire {type === 'club' ? 'club' : 'squad'}.
         </p>
         <button className="intel-toggle" onClick={generateInsight} style={{ margin: '0 auto' }}>
@@ -98,15 +98,15 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
       </div>
 
       <div className="mb-14">
-        <h2 style={{ fontSize: '3.5rem', fontWeight: 950, marginBottom: '2rem', color: '#fff', letterSpacing: '-0.04em', lineHeight: 1.1 }}>{insight.headline}</h2>
+        <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{insight.headline}</h3>
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 mb-12">
           <div className="lg:col-span-2">
              <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1.5rem', opacity: 0.5 }}>GROUP PERFORMANCE PROFILE</div>
-             <p style={{ fontSize: '1.15rem', lineHeight: '1.7', color: 'var(--text-primary)', marginBottom: '2.5rem', fontWeight: 500 }}>{insight.summary.assessment}</p>
+             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '2rem' }}>{insight.summary.assessment}</p>
              
              <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1.5rem', opacity: 0.5 }}>TECHNICAL REVIEW</div>
-             <div style={{ lineHeight: '1.8', color: 'rgba(255,255,255,0.7)', fontSize: '1rem' }}>
+             <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>
                 {insight.analysis.split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1.2rem' }}>{p}</p>)}
              </div>
           </div>
@@ -138,7 +138,7 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
           <div>
             <div className="section-title" style={{ fontSize: '0.65rem' }}>SEASON OUTLOOK</div>
             <div style={{ padding: '2rem', background: 'linear-gradient(135deg, rgba(0, 212, 255, 0.08), transparent)', borderRadius: '24px', border: '1px solid rgba(0, 212, 255, 0.15)' }}>
-              <p style={{ fontSize: '1.1rem', fontStyle: 'italic', color: '#fff', margin: 0, lineHeight: 1.6, fontWeight: 500 }}>
+              <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, fontStyle: 'italic', margin: 0 }}>
                 "{insight.foresight}"
               </p>
             </div>
@@ -148,7 +148,7 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
             <div className="section-title" style={{ fontSize: '0.65rem' }}>SQUAD TRAINING FOCUS</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '1rem' }}>
               {insight.recommendations.map((rec, i) => (
-                <li key={i} style={{ fontSize: '0.95rem', display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                <li key={i} style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
                   <div style={{ minWidth: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '8px', boxShadow: '0 0 10px var(--accent-cyan)' }}></div>
                   <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>{rec}</span>
                 </li>

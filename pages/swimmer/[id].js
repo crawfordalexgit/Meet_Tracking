@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import PremiumOrb from '../../components/PremiumOrb';
@@ -6,7 +6,8 @@ import Layout from '../../components/Layout';
 import CoachesEyeGlossary from '../../components/CoachesEyeGlossary';
 import BenchmarkModal from '../../components/BenchmarkModal';
 import { supabase } from '../../lib/supabase';
-import { calculateWorkload, isGalaDate, getSessionDuration, isExemptDate, isShutdownDate, calculateReliability, generateSwimmerNarrative, calculateSquadHealth, getKentBenchmark, getCategoryBenchmark, getWeekKey, toLocalISO } from '../../lib/analytics-utils';
+import { calculateWorkload, isGalaDate, getSessionDuration, isExemptDate, isShutdownDate, calculateReliability, generateSwimmerNarrative, calculateSquadHealth, getKentBenchmark, getCategoryBenchmark, getWeekKey, toLocalISO, normalizeEvent, timeToSeconds, DEFAULT_EXEMPTIONS } from '../../lib/analytics-utils';
+import { getBenchmarks } from '../../lib/qualifying-times';
 import { getNormalizedWA } from '../../lib/wa-points';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, BarChart, Bar, Cell, ComposedChart, Area, LabelList, ReferenceLine, ReferenceArea } from 'recharts';
 import Link from 'next/link';
@@ -17,7 +18,110 @@ import ReadinessBreakdownCard from '../../components/ReadinessBreakdownCard';
 import TrainingBlockTracker from '../../components/TrainingBlockTracker';
 import SquadQualificationPredictor from '../../components/SquadQualificationPredictor';
 import VorontsovLTADModule from '../../components/VorontsovLTADModule';
+import WaPointsGuideModal from '../../components/WaPointsGuideModal';
 
+
+// ─── QT Predictor Helpers ────────────────────────────────────────────────────
+
+const STROKE_GROUPS = [
+  { label: 'Freestyle',         events: ['50 Free', '100 Free'] },
+  { label: 'Backstroke',        events: ['50 Back', '100 Back'] },
+  { label: 'Breaststroke',      events: ['50 Breast', '100 Breast'] },
+  { label: 'Butterfly',         events: ['50 Fly', '100 Fly'] },
+  { label: 'Individual Medley', events: ['200 IM'] },
+];
+
+function secondsToTime(secs) {
+  if (!secs || secs <= 0) return '—';
+  const mins = Math.floor(secs / 60);
+  const s = (secs % 60).toFixed(2).padStart(5, '0');
+  return mins > 0 ? `${mins}:${s}` : (secs % 60).toFixed(2);
+}
+
+function getSwimmerPB(results, eventName) {
+  const target = normalizeEvent(eventName);
+  const times = (results || [])
+    .filter(r => normalizeEvent(r.event || '') === target && r.time)
+    .map(r => timeToSeconds(r.time))
+    .filter(t => t > 0);
+  return times.length > 0 ? Math.min(...times) : null;
+}
+
+function GapBadge({ gapSeconds }) {
+  if (gapSeconds === null) return <span style={{ opacity: 0.25, fontSize: '0.75rem' }}>—</span>;
+  if (gapSeconds <= 0) {
+    return (
+      <span style={{ display: 'inline-block', padding: '2px 8px', background: 'rgba(16,185,129,0.15)', color: '#10b981', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 900 }}>
+        ✓ QT
+      </span>
+    );
+  }
+  const isVeryClose = gapSeconds <= 0.5;
+  const isClose     = gapSeconds <= 2.0;
+  const color = isVeryClose ? '#f59e0b' : isClose ? '#fb923c' : '#f87171';
+  return (
+    <span style={{ fontSize: '0.8rem', fontWeight: 700, color }}>
+      +{gapSeconds.toFixed(2)}s
+    </span>
+  );
+}
+
+function QtTable({ results, age, gender, course, level }) {
+    return (
+        <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                        {['Event', 'Your PB', 'County Auto', 'County Cons', 'SE Regional Auto', 'SE Regional Cons'].map(h => (
+                            <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Event' ? 'left' : 'center', fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.45, whiteSpace: 'nowrap' }}>
+                                {h}
+                            </th>
+                        ))}
+                    </tr>
+                </thead>
+                <tbody>
+                    {STROKE_GROUPS.map(group => (
+                        <React.Fragment key={group.label}>
+                            <tr key={`hdr-${group.label}`}>
+                                <td colSpan={6} style={{ padding: '12px 12px 4px', fontSize: '0.6rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.12em', opacity: 0.7 }}>
+                                    {group.label}
+                                </td>
+                            </tr>
+                            {group.events.map(eventName => {
+                                const pbSecs = getSwimmerPB(results, eventName);
+                                const countyBm = getBenchmarks(age, gender, eventName, 'COUNTY');
+                                const regionalBm = getBenchmarks(age, gender, eventName, 'REGIONAL');
+
+                                return (
+                                    <tr key={eventName} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                        <td style={{ padding: '12px', fontWeight: 700 }}>{eventName}</td>
+                                        <td style={{ padding: '12px', textAlign: 'center', fontWeight: 900, color: 'var(--accent-cyan)' }}>
+                                            {pbSecs ? secondsToTime(pbSecs) : '—'}
+                                        </td>
+                                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                                            <GapBadge gapSeconds={pbSecs && countyBm?.autoSC ? pbSecs - countyBm.autoSC : null} />
+                                        </td>
+                                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                                            <GapBadge gapSeconds={pbSecs && countyBm?.consSC ? pbSecs - countyBm.consSC : null} />
+                                        </td>
+                                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                                            <GapBadge gapSeconds={pbSecs && regionalBm?.autoSC ? pbSecs - regionalBm.autoSC : null} />
+                                        </td>
+                                        <td style={{ padding: '12px', textAlign: 'center' }}>
+                                            <GapBadge gapSeconds={pbSecs && regionalBm?.consSC ? pbSecs - regionalBm.consSC : null} />
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </React.Fragment>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function SwimmerDetail({ session }) {
   const router = useRouter();
@@ -76,8 +180,11 @@ const [decayDistance, setDecayDistance] = useState('100');
 
   const [aiInsight, setAiInsight] = useState(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [syncingPbs, setSyncingPbs] = useState(false);
   const [normalizeWA, setNormalizeWA] = useState(false);
+  const [isWaGuideOpen, setIsWaGuideOpen] = useState(false);
+  const [squadTrends, setSquadTrends] = useState({});
 
   const allAvailableSplits = useMemo(() => {
     const list = [];
@@ -169,23 +276,101 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
   };
 
-  useEffect(() => {
-    if (session === undefined) return;
-    if (!session) {
-      router.push('/login');
-      return;
-    }
-    if (id && router.isReady) { 
-      setSelectedRaceIdx(0);
-      fetchSwimmerData(); 
-    }
-  }, [session, router, id, router.isReady]);
+    useEffect(() => {
+        // VERCEL-SAFE PDF EXPORT AUTH BYPASS (Rule 5)
+        if (router.query.printToken && router.query.printToken === process.env.NEXT_PUBLIC_PRINT_SECRET_TOKEN) {
+            if (id && router.isReady) {
+                fetchSwimmerData();
+            }
+            return;
+        }
+
+        if (session === undefined) return;
+        if (!session) {
+            router.push('/login');
+            return;
+        }
+        if (id && router.isReady) {
+            fetchSwimmerData();
+            fetchSquadTrends();
+        }
+    }, [session, router, id, router.isReady, router.query.printToken]);
+
+    // ENGINE: Paginated Linear Regression for Squads over 365 Days
+    const fetchSquadTrends = async () => {
+        try {
+            const y1ago = new Date(new Date() - 365 * 86400000).toISOString();
+            
+            const [{ data: squads }, { data: swimmers }] = await Promise.all([
+                supabase.from('squads').select('id, name'),
+                supabase.from('swimmers').select('id, squad_id')
+            ]);
+
+            if (!squads || !swimmers) return;
+
+            const swimmerToSquad = {};
+            swimmers.forEach(s => { swimmerToSquad[s.id] = s.squad_id; });
+
+            // Safely paginate through results to bypass the 1,000 row limit
+            let allResults = [];
+            let page = 0;
+            let more = true;
+            while (more && page < 10) {
+                const { data, error } = await supabase.from('results').select('swimmer_id, wa_pts, date').gte('date', y1ago).range(page * 1000, (page + 1) * 1000 - 1);
+                if (error || !data || data.length === 0) break;
+                allResults = [...allResults, ...data];
+                if (data.length < 1000) more = false;
+                page++;
+            }
+
+            const squadDataPoints = {};
+            allResults.forEach(r => {
+                const squadId = swimmerToSquad[r.swimmer_id];
+                if (!squadId || !r.wa_pts || !r.date) return;
+                if (!squadDataPoints[squadId]) squadDataPoints[squadId] = [];
+                squadDataPoints[squadId].push([new Date(r.date).getTime() / 86400000, Number(r.wa_pts) || 0]);
+            });
+
+            const calculateTrend = (points) => {
+                if (!points || points.length === 0) return { m: 0, b: 0, flat: true, avg: 0 };
+                const n = points.length;
+                let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+                points.forEach(([x, y]) => { sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x; });
+                const avgY = sumY / n;
+                
+                const denominator = (n * sumX2 - sumX * sumX);
+                if (n < 2 || denominator === 0) return { m: 0, b: avgY, flat: true, avg: avgY };
+                
+                const m = (n * sumXY - sumX * sumY) / denominator;
+                const b = (sumY - m * sumX) / n;
+                return { m, b, flat: false, avg: avgY };
+            };
+
+            const trends = {};
+            squads.forEach(sq => {
+                const name = sq.name.toUpperCase();
+                const trend = calculateTrend(squadDataPoints[sq.id] || []);
+                if (name.includes('AGE')) trends.AGE = trend;
+                if (name.includes('GOLD')) trends.GOLD = trend;
+                if (name.includes('NAR')) trends.NAR = trend;
+            });
+
+            setSquadTrends(trends);
+        } catch (error) {
+            console.error('Error fetching squad trends:', error);
+            setSquadTrends({}); // Fallback to prevent crashes
+        }
+    };
 
   const fetchSwimmerData = async () => {
     setLoading(true);
     try {
       const { data: swData } = await supabase.from('swimmers').select('*, squads(*)').eq('id', id).single();
       if (!swData) return;
+
+      // CRITICAL FIX: Download custom club exemptions so the math engine can see Primary Schools Gala and Shutdowns
+      const { data: exData } = await supabase.from('club_exemptions').select('*');
+      setExemptions(exData || []);
 
       const fetchPaged = async (table, select = '*', filter = null) => {
         let all = []; let page = 0; let more = true;
@@ -282,39 +467,34 @@ const [decayDistance, setDecayDistance] = useState('100');
     const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     
     // COMPREHENSIVE MEET ANALYTICS: Smart Deduplication (Match engine logic)
-    const sortedRawMeets = normalizedResults
+    const periodMeets = normalizedResults
       .filter(r => new Date(r.date) >= START)
       .sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    const uniqueMeetsList = [];
-    sortedRawMeets.forEach(r => {
-      const mName = r.meets?.name || r.meet_name || `Meet @ ${r.date}`;
-      const mType = r.meets?.type || r.meet_type || 'Open';
-      const rDate = new Date(r.date);
-      const existing = uniqueMeetsList.find(m => 
-        m.name === mName && 
-        Math.abs((new Date(m.date) - rDate) / (1000 * 60 * 60 * 24)) <= 3
-      );
-      
-      if (!existing) {
-        uniqueMeetsList.push({
-          id: r.meet_id,
-          name: mName,
-          date: r.date,
-          type: mType,
-          level: r.meets?.level || '3',
-          results: [r],
-          peakWA: Number(r.wa_pts || 0)
-        });
-      } else {
-        existing.results.push(r);
-        if (Number(r.wa_pts || 0) > existing.peakWA) {
-          existing.peakWA = Number(r.wa_pts || 0);
-        }
-      }
-    });
+    const meets = normalizedResults.map(r => r.meets).filter(Boolean);
 
-    const openMeetsCount = uniqueMeetsList.filter(m => m.type?.toLowerCase() === 'open').length;
+    // CRITICAL FIX: Separate Open Meets (L1-L3) from Internal Galas (L4) to fix the Meet Count Bug
+    const uniqueMeetsList = Array.from(new Set(periodMeets.map(r => r.meet_id)))
+        .map(id => {
+            const meetObj = meets?.find(m => m.id === id);
+            const meetResults = periodMeets.filter(r => r.meet_id === id);
+            return {
+                id,
+                date: meetObj?.date || meetResults[0]?.date || meetResults?.date,
+                name: meetObj?.name || 'Unknown Meet',
+                level: meetObj?.level || 'L3',
+                type: meetObj?.type || 'open',
+                eventCount: meetResults.length,
+                pbCount: meetResults.filter(r => r.is_pb).length,
+                avgWa: meetResults.reduce((sum, r) => sum + (r.wa_pts || 0), 0) / meetResults.length,
+                peakWa: Math.max(...meetResults.map(r => r.wa_pts || 0)),
+                // Compatibility with screen UI
+                results: meetResults,
+                peakWA: Math.max(...meetResults.map(r => r.wa_pts || 0))
+            };
+        })
+        .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const openMeetsCount = uniqueMeetsList.filter(m => m.type !== 'team' && m.level !== 'L4').length;
     const totalMeetsCount = uniqueMeetsList.length;
 
     // Sort for log (descending)
@@ -434,7 +614,10 @@ const [decayDistance, setDecayDistance] = useState('100');
       const d = new Date(now.getTime() - (i * 7 * 24 * 60 * 60 * 1000));
       const dateStr = toLocalISO(d);
       const weekKey = getWeekKey(d);
-      const wLabel = new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+      // weekKey = "W-YYYY-MM-DD" where the date IS the Monday — parse it directly so the
+      // label always shows the Monday start date, not a shifted or arbitrary day-of-week.
+      const mondayDate = new Date(weekKey.slice(2) + 'T00:00:00Z');
+      const wLabel = mondayDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'UTC' });
 
       
       const weekInfo = rel.details[weekKey] || {};
@@ -599,11 +782,14 @@ const [decayDistance, setDecayDistance] = useState('100');
       const weekHours = w.trainingHours + (includeGalas ? w.galaHours : 0);
       const weekCompliance = isPreJoin ? 0 : (isWeekExemptOrHoliday ? 100 : Math.min(100, Math.round((weekHours / (targetHrs || 1)) * 100)));
 
+      w.creditedHours = weekInfo.creditedHours || creditedHoursInWeek || 0;
+
       chartData.push({
         week: wLabel,
         weekKey,
         training: w.trainingHours, // Keep for chart
         gala: w.galaHours, // Keep for chart
+        credit: w.creditedHours || 0,
         trainingHours: w.trainingHours,
         trainingSessions: w.trainingSessions,
         galaHours: w.galaHours,
@@ -631,30 +817,35 @@ const [decayDistance, setDecayDistance] = useState('100');
     const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
     const velocity = Math.round(avg(normalizedResults.filter(r => new Date(r.date) >= new Date(now - half * 86400000)).map(r => r.wa_pts || 0)) - avg(normalizedResults.filter(r => new Date(r.date) >= new Date(now - period * 86400000) && new Date(r.date) < new Date(now - half * 86400000)).map(r => r.wa_pts || 0)));
 
-    // Stroke-specific analysis
-    const strokeMap = {};
+    // Stroke-specific analysis (Event-level for Qualifying Times)
+    const strokeData = {};
     yearResults.forEach(r => {
-      let stroke = 'Other';
-      const evt = r.event?.toLowerCase() || '';
-      if (evt.includes('fly')) stroke = 'Butterfly';
-      else if (evt.includes('back')) stroke = 'Backstroke';
-      else if (evt.includes('breast')) stroke = 'Breaststroke';
-      else if (evt.includes('free')) stroke = 'Freestyle';
-      else if (evt.includes('medley') || evt.includes('im')) stroke = 'Individual Medley';
-      
-      if (!strokeMap[stroke]) strokeMap[stroke] = { pts: [], count: 0 };
+      const eventName = r.event || 'Unknown Event';
+      if (!strokeData[eventName]) {
+        strokeData[eventName] = {
+          count: 0,
+          peak: 0,
+          pbCount: 0,
+          avg: 0,
+          pts: []
+        };
+      }
+      strokeData[eventName].count++;
       if (r.wa_pts) {
-        strokeMap[stroke].pts.push(r.wa_pts);
-        strokeMap[stroke].count++;
+        strokeData[eventName].pts.push(r.wa_pts);
+        if (r.wa_pts > strokeData[eventName].peak) {
+          strokeData[eventName].peak = r.wa_pts;
+        }
+      }
+      if (r.is_pb) {
+        strokeData[eventName].pbCount++;
       }
     });
-    const strokeData = {};
-    Object.entries(strokeMap).forEach(([k, v]) => {
-      strokeData[k] = { 
-        avg: v.pts.reduce((a,b)=>a+b,0) / v.count, 
-        peak: Math.max(...v.pts),
-        count: v.count 
-      };
+    
+    // Compute average for each event
+    Object.keys(strokeData).forEach(eventName => {
+      const d = strokeData[eventName];
+      d.avg = d.pts.length ? d.pts.reduce((a, b) => a + b, 0) / d.pts.length : 0;
     });
 
     // Swimming age = age as at 31 Dec of current year
@@ -684,6 +875,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     const statsObj = {
       velocity,
       trainingPct: rel.percentage,
+      percentage: rel.percentage,
       volumePct: rel.volumePct,
       totalActualHours: rel.totalHours,
       annualTargetHours: rel.annualTarget,
@@ -700,7 +892,8 @@ const [decayDistance, setDecayDistance] = useState('100');
       strokeData,
       age,
       holidaysUsed: rel.holidaysUsed,
-      holidayAllowance: rel.holidayAllowance
+      holidayAllowance: rel.holidayAllowance,
+      details: rel.details || {}
     };
 
     const finalFiltered = normalizedResults.filter(r => {
@@ -763,6 +956,75 @@ const [decayDistance, setDecayDistance] = useState('100');
     };
   }, [normalizedResults, swimmer, squad, attendance, sessions, exemptions, sessionMemberships, period, periodWeeks, selectedMonth, selectedStroke, router.query.period, sortConfig, includeShutdowns, includeSessionCredits, includeHolidays, includeGalas, complianceMode]);
 
+
+  const weeklyWorkloadData = useMemo(() => {
+      if (!rel || !rel.details) return [];
+      
+      const periodDays = parseInt(router.query.period) || 365;
+      const periodStart = new Date(new Date().getTime() - periodDays * 24 * 60 * 60 * 1000);
+      
+      const getVal = (val) => {
+          if (val === undefined || val === null) return 0;
+          if (typeof val === 'number') return val;
+          const parsed = parseFloat(String(val).replace(/[^\d.-]/g, ''));
+          return isNaN(parsed) ? 0 : parsed;
+      };
+
+      // Sort descending so the newest weeks appear at the top of the table
+      return Object.keys(rel.details).sort((a, b) => b.localeCompare(a)).map(weekKey => {
+          const week = rel.details[weekKey];
+          const dateStr = weekKey.replace('W-', '');
+          const d = new Date(dateStr);
+          
+          // STRICT FILTER: Only include weeks that fall within the selected time horizon
+          if (isNaN(d) || d < periodStart) return null;
+
+          const name = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+          
+          const pHours = getVal(week.poolHours) || getVal(week.trainingHours) || getVal(week.hours) || 0;
+          const cHours = getVal(week.exemptHours) || getVal(week.creditedHours) || getVal(week.creditHours) || 0;
+          const gHours = getVal(week.galaHours) || 0;
+          const tHours = getVal(week.targetHours) || getVal(week.target) || getVal(squad?.target_hours_per_week) || 0;
+          const total = pHours + cHours + gHours;
+          
+          // Fallback to strict math if the engine didn't pass down the boolean
+          const isMet = week.isMet !== undefined ? week.isMet : (total >= tHours);
+
+          return { name, pool: pHours, credit: cHours, gala: gHours, total, target: tHours, isMet, creditReasons: week.creditReasons, isHoliday: week.isHoliday, appliedRule: week.appliedRule };
+      }).filter(Boolean);
+  }, [rel, squad, router.query.period]);
+
+  const activeExemptions = useMemo(() => {
+      const periodDays = parseInt(router.query.period) || 365;
+      const periodStart = new Date(new Date().getTime() - periodDays * 24 * 60 * 60 * 1000);
+
+      // Deduplicate overlapping DB and Default exemptions using a Map
+      const uniqueMap = new Map();
+      
+      // 1. Load defaults first
+      if (DEFAULT_EXEMPTIONS) {
+          DEFAULT_EXEMPTIONS.forEach(ex => uniqueMap.set(`${ex.name}-${ex.start_date}`, ex));
+      }
+      
+      // 2. Load DB exemptions (this will overwrite defaults with matching name/date, ensuring admin choices win)
+      if (exemptions) {
+          exemptions.forEach(ex => uniqueMap.set(`${ex.name}-${ex.start_date}`, ex));
+      }
+      
+      const allExemptions = Array.from(uniqueMap.values());
+
+      // Filter to only show exemptions that overlap with the selected time period
+      return allExemptions.filter(ex => {
+          const exEnd = new Date(ex.end_date);
+          return exEnd >= periodStart;
+      }).sort((a, b) => new Date(b.start_date) - new Date(a.start_date));
+  }, [exemptions, router.query.period]);
+
+
+
+
+
+
   const requestSort = (key) => {
     let direction = 'desc';
     if (sortConfig.key === key && sortConfig.direction === 'desc') direction = 'asc';
@@ -799,15 +1061,60 @@ const [decayDistance, setDecayDistance] = useState('100');
   }, [attendancePct, statsObj, squad, progressPercent, velocity, seasonVolumePct]);
 
   const handleGenerateReport = async (sections, audience) => {
-    setReportConfig({ sections, audience });
-    if ((sections.aiTechnical || sections.aiDeepDive) && !aiInsight) {
-      await generateAthleteInsight('general');
-    }
-    setIsReportModalOpen(false);
-    setTimeout(() => {
-      window.print();
-    }, 500);
-  };
+        setReportConfig({ sections, audience });
+        
+        let printInsight = aiInsight;
+        if ((sections.aiTechnical || sections.aiDeepDive) && !printInsight) {
+            printInsight = await generateAthleteInsight('general');
+        }
+        
+        // Cache the insight so Puppeteer can read it instantly
+        if (printInsight) {
+            localStorage.setItem('print-insight-cache', JSON.stringify(printInsight));
+        }
+
+        setIsReportModalOpen(false);
+        setIsExporting(true);
+        
+        try {
+            const clientAuth = {};
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && (key.startsWith('sb-') || key === 'print-insight-cache')) {
+                    clientAuth[key] = localStorage.getItem(key);
+                }
+            }
+
+            const res = await fetch('/api/generate-pdf', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    targetPath: router.asPath,
+                    clientAuth 
+                }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'PDF generation failed');
+            }
+
+            const blob = await res.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = `${swimmer?.known_as || swimmer?.full_name || 'athlete'}-report.pdf`.replace(/\s+/g, '-');
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(objectUrl);
+        } catch (err) {
+            console.error('[PDF export]', err);
+            alert(`Export failed: ${err.message}`);
+        } finally {
+            setIsExporting(false);
+        }
+    };
 
 
   const renderCustomBarLabel = (props) => {
@@ -841,424 +1148,97 @@ const [decayDistance, setDecayDistance] = useState('100');
     );
   };
 
+  const chartDataWithTrends = useMemo(() => {
+        if (!uniqueMeetsList || uniqueMeetsList.length === 0) return [];
+        
+        const sortedData = [...uniqueMeetsList].sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        return sortedData.map(meet => {
+            const days = new Date(meet.date).getTime() / 86400000;
+            
+            const getTarget = (trendObj, fallback) => {
+                if (!trendObj) return fallback;
+                if (trendObj.flat) return trendObj.avg > 0 ? Math.round(trendObj.avg) : fallback;
+                const projected = trendObj.m * days + trendObj.b;
+                return isFinite(projected) && projected > 0 ? Math.round(projected) : fallback;
+            };
+
+            return {
+                ...meet,
+                // Optional chaining completely prevents the 'null' crash
+                ageTarget: getTarget(squadTrends?.AGE, 260),
+                goldTarget: getTarget(squadTrends?.GOLD, 360),
+                narTarget: getTarget(squadTrends?.NAR, 480)
+            };
+        });
+    }, [uniqueMeetsList, squadTrends]);
+
+  // Championship season age for QT benchmarks
+  const _now = new Date();
+  const targetYear = _now.getMonth() >= 4 ? _now.getFullYear() + 1 : _now.getFullYear();
+  const targetAge = swimmer?.year_of_birth ? targetYear - swimmer.year_of_birth : null;
+
   if (loading) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', opacity: 0.5 }}>Loading Athlete Profile...</div></Layout>;
   if (!swimmer) return <Layout session={session}><div>Athlete not found.</div></Layout>;
 
   return (
     <Layout session={session}>
-      {/* ═══════════════════════════════════════════════
-          PRINT REPORT — hidden on screen, shown on print
-          ═══════════════════════════════════════════════ */}
-
-      {/* ── COVER PAGE ── */}
-      <div className="print-only roster-cover-page">
-        {/* Top accent bar */}
-        <div style={{ background: '#00d4ff', height: '6px', width: '100%', flexShrink: 0 }} />
-        {/* Body */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', padding: '0 48px', textAlign: 'center' }}>
-          {/* Logo */}
-          <div style={{ marginBottom: '32px' }}>
-            <svg width="72" height="72" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ filter: 'drop-shadow(0 0 16px rgba(0,212,255,0.5))' }}>
-              <defs><linearGradient id="rptGrad" x1="0%" y1="50%" x2="100%" y2="50%"><stop offset="0%" stopColor="#00E5FF"/><stop offset="100%" stopColor="#E8FF00"/></linearGradient></defs>
-              <path d="M10 50C10 50 25 25 50 25C75 25 90 50 90 50C90 50 75 75 50 75C25 75 10 50 10 50Z" stroke="url(#rptGrad)" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round"/>
-              <circle cx="50" cy="50" r="16" stroke="url(#rptGrad)" strokeWidth="5"/>
-              <path d="M41 55L48 42L53 48L62 38" stroke="url(#rptGrad)" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round"/>
-              <line x1="50" y1="15" x2="50" y2="23" stroke="url(#rptGrad)" strokeWidth="5" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <div style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#00d4ff', marginBottom: '8px' }}>COACHESEYE · TONBRIDGE SWIMMING CLUB</div>
-          <div style={{ width: '60px', height: '2px', background: 'rgba(0,212,255,0.4)', margin: '0 auto 28px' }} />
-          <h1 style={{ fontSize: '44px', fontWeight: 900, color: '#ffffff', margin: '0 0 6px', letterSpacing: '-0.03em', lineHeight: 1.1 }}>{swimmer.full_name}</h1>
-          <h2 className="subtitle" style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', margin: '0 0 8px' }}>Athlete Performance Report</h2>
-          <div style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.5)', marginBottom: '40px', fontWeight: 700 }}>
-            Report Focus: {Object.keys(reportConfig?.sections || {}).filter(k => reportConfig.sections[k]).map(k => ({ aiPerformance: 'Performance', aiBurnout: 'Burnout Check', aiParent: 'Parent Audit', progress: 'Progress', competition: 'Competition', performanceNarrative: 'Narrative', strokeRoadmap: 'Stroke Roadmap', attendance: 'Attendance', openMeets: 'Open Meets', qtPredictor: 'QT Predictor', biometrics: 'Biometrics' }[k] || k)).join(' · ')}
-          </div>
-          {/* Key metrics */}
-          <div style={{ display: 'flex', gap: '20px', marginBottom: '40px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            {[
-              { label: 'Squad', value: swimmer?.squads?.name || 'Unassigned' },
-              { label: 'Season', value: '2025/26' },
-              { label: 'Compliance', value: `${Math.round(progressPercent || 0)}%` },
-              { label: 'Training Hours', value: `${Math.round(totalActualHours || 0)}h` },
-            ].map(({ label, value }) => (
-              <div key={label} style={{ textAlign: 'center', padding: '14px 20px', border: '1px solid rgba(0,212,255,0.2)', borderRadius: '10px', minWidth: '100px', background: 'rgba(0,212,255,0.05)' }}>
-                <div style={{ fontSize: '8px', color: '#00d4ff', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '8px' }}>{label}</div>
-                <div style={{ fontSize: '18px', color: '#ffffff', fontWeight: 900 }}>{value}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-            Issued {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })} · Private &amp; Confidential
-          </div>
-        </div>
-        {/* Bottom bar */}
-        <div style={{ background: 'rgba(0,212,255,0.08)', borderTop: '1px solid rgba(0,212,255,0.15)', height: '44px', width: '100%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ fontSize: '8px', color: '#00d4ff', fontWeight: 900, letterSpacing: '0.25em', textTransform: 'uppercase' }}>COACHESEYE PERFORMANCE INTELLIGENCE · AUTHORIZED COPY</div>
-        </div>
-      </div>
-
-      {/* ── TABLE OF CONTENTS ── */}
-      <div className="print-only rpt-section" style={{ pageBreakBefore: 'always' }}>
-        <div style={{ borderLeft: '4px solid #1e40af', paddingLeft: '14px', marginBottom: '2rem' }}>
-          <div style={{ fontSize: '7pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#1e40af', marginBottom: '4px' }}>COACHESEYE REPORT</div>
-          <h2 style={{ fontSize: '20pt', fontWeight: 900, color: '#0a1628', margin: 0 }}>Contents</h2>
-        </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <tbody>
-            {[
-              { num: '01', title: 'Performance Overview', sub: 'KPIs, trajectory & AI coaching intelligence' },
-              { num: '02', title: 'Stroke Performance Roadmap', sub: 'WA points by stroke vs county & regional benchmarks' },
-              { num: '03', title: 'Training Workload & Consistency', sub: 'Weekly compliance, hours & 12-week history' },
-              { num: '04', title: 'Competition Record', sub: 'Meet-by-meet results and peak scoring' },
-              { num: 'A', title: 'Appendix — Tactical Race Splits', sub: 'Full split-by-split race breakdown' },
-              { num: 'G', title: 'Glossary', sub: 'CoachesEye metrics, methodology & benchmarks explained' },
-            ].map(({ num, title, sub }) => (
-              <tr key={num} style={{ borderBottom: '1px solid #f0f4f8' }}>
-                <td style={{ padding: '10px 14px 10px 0', width: '36px', fontWeight: 900, fontSize: '13pt', color: '#1e40af', verticalAlign: 'top' }}>{num}</td>
-                <td style={{ padding: '10px 0', verticalAlign: 'top' }}>
-                  <div style={{ fontWeight: 900, fontSize: '10pt', color: '#0a1628', marginBottom: '2px' }}>{title}</div>
-                  <div style={{ fontSize: '8pt', color: '#64748b' }}>{sub}</div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div style={{ marginTop: '2.5rem', padding: '14px 18px', background: '#f0f9ff', borderRadius: '8px', border: '1px solid #bae6fd' }}>
-          <div style={{ fontSize: '7.5pt', color: '#0369a1', fontWeight: 800, letterSpacing: '0.05em' }}>CONFIDENTIALITY NOTICE</div>
-          <div style={{ fontSize: '7.5pt', color: '#374151', marginTop: '4px', lineHeight: 1.5 }}>This report is prepared exclusively for {swimmer.full_name} and authorised coaching staff at Tonbridge Swimming Club. Data is drawn from the CoachesEye platform and reflects the {period === 365 ? '52-week' : period === 180 ? '6-month' : period === 90 ? '90-day' : '30-day'} analysis window ending {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}.</div>
-        </div>
-      </div>
-
-      {/* ── SECTION 1: PERFORMANCE OVERVIEW ── */}
-      <div className="print-only rpt-section">
-        <div className="rpt-section-header">
-          <div className="rpt-eyebrow">Section 1</div>
-          <h2>Performance Overview</h2>
-        </div>
-        {/* KPI row */}
-        <div className="rpt-grid4" style={{ marginBottom: '1.5rem' }}>
-          {[
-            { label: 'Training Compliance', value: `${Math.round(progressPercent || 0)}%`, sub: `vs ${squad?.target_training_percent || 75}% target` },
-            { label: 'Total Training Hours', value: `${Math.round(totalActualHours || 0)}h`, sub: 'This season' },
-            { label: 'Meets Attended', value: rel?.meetsAttended ?? '—', sub: `of ${rel?.targetMeets || 5} targeted` },
-            { label: 'Performance Trend', value: performance_slope > 0.5 ? '📈 Rising' : performance_slope < -0.5 ? '📉 Falling' : '→ Stable', sub: 'WA point trajectory' },
-          ].map(({ label, value, sub }) => (
-            <div key={label} className="rpt-kpi rpt-avoid">
-              <div className="rpt-kpi-label">{label}</div>
-              <div className="rpt-kpi-value">{value}</div>
-              <div className="rpt-kpi-sub">{sub}</div>
-            </div>
-          ))}
-        </div>
-        {/* Performance narrative */}
-        {narrative?.length > 0 && (
-          <>
-            <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#1e40af', marginBottom: '8px' }}>Personal Performance Story</div>
-            {narrative.map((item, i) => (
-              <div key={i} className={`rpt-narrative-item ${item.type === 'improvement' ? 'rpt-positive' : item.type === 'decline' ? 'rpt-negative' : ''}`}>
-                <div style={{ fontSize: '8.5pt', fontWeight: 900, color: '#0a1628', marginBottom: '2px' }}>{item.event}</div>
-                <div style={{ fontSize: '8pt', color: '#374151' }}>{item.summary}</div>
-              </div>
-            ))}
-          </>
-        )}
-        {/* AI insight if available */}
-        {aiInsight?.summary && (
-          <>
-            <hr className="rpt-rule" />
-            <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#1e40af', marginBottom: '10px' }}>AI Coaching Intelligence</div>
-            <div className="rpt-ai-text" style={{ marginBottom: '12px' }}>
-              {typeof aiInsight.summary === 'string'
-                ? aiInsight.summary
-                : Object.entries(aiInsight.summary || {}).map(([k, v]) => (
-                    <div key={k} style={{ marginBottom: '8px' }}>
-                      <div style={{ fontSize: '7.5pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#1e40af', marginBottom: '3px' }}>{k}</div>
-                      {Array.isArray(v)
-                        ? v.map((item, i) => (
-                            <div key={i} style={{ display: 'flex', gap: '6px', marginBottom: '2px' }}>
-                              <span style={{ color: '#1e40af', flexShrink: 0 }}>›</span>
-                              <span>{typeof item === 'object' ? JSON.stringify(item) : item}</span>
-                            </div>
-                          ))
-                        : <div>{typeof v === 'object' ? Object.entries(v).map(([sk, sv]) => <span key={sk}><strong>{sk}:</strong> {String(sv)} </span>) : String(v)}</div>
-                      }
-                    </div>
-                  ))
-              }
-            </div>
-            {(aiInsight.recommendations || []).length > 0 && (
-              <>
-                <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#1e40af', marginBottom: '6px' }}>Key Recommendations</div>
-                {(aiInsight.recommendations || []).slice(0, 5).map((r, i) => (
-                  <div key={i} style={{ display: 'flex', gap: '8px', marginBottom: '4px', fontSize: '8.5pt' }}>
-                    <span style={{ color: '#1e40af', fontWeight: 900, flexShrink: 0 }}>›</span>
-                    <span style={{ color: '#1e293b' }}>{r}</span>
-                  </div>
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* ── SECTION 2: STROKE PERFORMANCE ROADMAP ── */}
-      {statsObj?.strokeData && Object.values(statsObj.strokeData).some(d => d.count > 0) && (
-        <div className="print-only rpt-section">
-          <div className="rpt-section-header">
-            <div className="rpt-eyebrow">Section 2</div>
-            <h2>Stroke Performance Roadmap</h2>
-          </div>
-          <table className="rpt-table rpt-avoid" style={{ marginBottom: '1rem' }}>
-            <thead>
-              <tr>
-                {['Stroke / Event', 'Races', 'Peak WA Pts', 'Season Avg', 'County AQT', 'Regional Auto', 'Status'].map(h => <th key={h}>{h}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(statsObj.strokeData)
-                .filter(([, d]) => d.count > 0)
-                .map(([name, d]) => {
-                  const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY');
-                  const regional = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'REGIONAL');
-                  const peak = Math.round(d.peak);
-                  const avg = Math.round(d.avg);
-                  const status = peak >= regional ? '✓ Regional' : peak >= county ? '✓ County' : peak >= county * 0.9 ? '→ Near AQT' : '· Building';
-                  const statusClass = peak >= regional ? 'rpt-good' : peak >= county ? 'rpt-accent' : 'rpt-warn';
-                  return (
-                    <tr key={name}>
-                      <td className="rpt-bold">{name}</td>
-                      <td className="rpt-muted">{d.count}</td>
-                      <td className="rpt-accent rpt-bold">{peak}</td>
-                      <td>{avg}</td>
-                      <td className="rpt-muted">{county || '—'}</td>
-                      <td className="rpt-muted">{regional || '—'}</td>
-                      <td className={statusClass}>{status}</td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-          {/* Visual bars */}
-          {Object.entries(statsObj.strokeData).filter(([, d]) => d.count > 0).map(([name, d]) => {
-            const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY') || 500;
-            const scale = (v) => Math.min(Math.round((v / 600) * 100), 100);
-            const peak = Math.round(d.peak);
-            return (
-              <div key={name} className="rpt-avoid" style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
-                <div style={{ width: '130px', fontSize: '7.5pt', fontWeight: 800, color: '#1e40af' }}>{name}</div>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <div className="rpt-bar-bg">
-                    <div className="rpt-bar-fill" style={{ width: `${scale(peak)}%` }} />
-                    {county && <div style={{ position: 'absolute', left: `${scale(county)}%`, top: '-3px', bottom: '-3px', width: '2px', background: '#64748b' }} />}
-                  </div>
-                </div>
-                <div style={{ width: '50px', fontSize: '7.5pt', fontWeight: 900, color: '#1e40af', textAlign: 'right' }}>{peak} pts</div>
-              </div>
-            );
-          })}
-          <div style={{ display: 'flex', gap: '20px', marginTop: '8px', fontSize: '7pt', color: '#64748b' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ display: 'inline-block', width: '12px', height: '8px', background: '#1e40af', borderRadius: '2px' }}></span>Peak WA Points</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span style={{ display: 'inline-block', width: '2px', height: '12px', background: '#64748b' }}></span>County AQT threshold</span>
-          </div>
-        </div>
-      )}
-
-      {/* ── SECTION 3: TRAINING WORKLOAD ── */}
-      <div className="print-only rpt-section">
-        <div className="rpt-section-header">
-          <div className="rpt-eyebrow">Section 3</div>
-          <h2>Training Workload &amp; Consistency</h2>
-        </div>
-        {/* Summary row */}
-        <div className="rpt-grid3" style={{ marginBottom: '1.2rem' }}>
-          {[
-            { label: 'Total Weeks Tracked', value: workloadChartData?.length ?? 0 },
-            { label: 'Compliant Weeks', value: workloadChartData?.filter(w => w.isMet || w.isExempt || w.holidayUsed).length ?? 0 },
-            { label: 'Total Training Hours', value: `${Math.round(totalActualHours || 0)}h` },
-          ].map(({ label, value }) => (
-            <div key={label} className="rpt-kpi rpt-avoid">
-              <div className="rpt-kpi-label">{label}</div>
-              <div className="rpt-kpi-value">{value}</div>
-            </div>
-          ))}
-        </div>
-        {/* Recent weeks table */}
-        <div style={{ fontSize: '8pt', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#1e40af', marginBottom: '6px' }}>Recent 12 Weeks</div>
-        <table className="rpt-table rpt-avoid">
-          <thead>
-            <tr>{['Week', 'Hours', 'Target', 'Sessions', 'Req.', 'Status'].map(h => <th key={h}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {[...(workloadChartData || [])].slice(-12).map((w, i) => {
-              const status = w.isExempt ? 'Shutdown' : w.holidayUsed ? 'Holiday' : w.isMet ? '✓ Met' : '✗ Missed';
-              const statusClass = w.isExempt || w.holidayUsed ? 'rpt-muted' : w.isMet ? 'rpt-good' : 'rpt-warn';
-              return (
-                <tr key={i}>
-                  <td className="rpt-muted">{w.week}</td>
-                  <td className="rpt-bold">{w.trainingHours ?? w.totalHours ?? 0}h</td>
-                  <td className="rpt-muted">{w.target ?? '—'}h</td>
-                  <td>{w.sessions ?? '—'}</td>
-                  <td className="rpt-muted">{w.requiredSessions ?? '—'}</td>
-                  <td className={statusClass}>{status}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Sections 4 & 5 moved to end — after CoachesEyeGlossary */}
-
       <Head>
         <title>{swimmer.full_name} | Athlete Profile</title>
         <style>{`
           @media screen {
-            .print-only { display: none !important; }
             .no-screen { display: none !important; }
-            .profile-tabs-container {
-              display: flex;
-              gap: 12px;
-              margin-bottom: 2rem;
-              padding: 6px;
-              border-radius: 16px;
-              background: rgba(255, 255, 255, 0.02);
-              border: 1px solid rgba(255, 255, 255, 0.05);
-              width: fit-content;
-            }
-            .profile-tab-btn {
-              padding: 10px 24px;
-              border-radius: 12px;
-              font-size: 0.7rem;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 0.1em;
-              cursor: pointer;
-              transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-              border: none;
-              background: transparent;
-              color: rgba(255, 255, 255, 0.5);
-              display: flex;
-              align-items: center;
-              gap: 8px;
-            }
-            .profile-tab-btn:hover {
-              color: #fff;
-              background: rgba(255, 255, 255, 0.03);
-            }
-            .profile-tab-btn.active {
-              background: linear-gradient(135deg, var(--accent-cyan) 0%, rgba(var(--accent-cyan-rgb), 0.85) 100%);
-              color: #000 !important;
-              font-weight: 950;
-              box-shadow: 0 0 20px rgba(var(--accent-cyan-rgb), 0.45), 0 0 40px rgba(var(--accent-cyan-rgb), 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
-            }
-
-            /* Subtabs Premium Themed System */
-            .profile-subtabs-container {
-              display: flex;
-              gap: 8px;
-              margin-bottom: 2rem;
-              padding: 4px;
-              border-radius: 14px;
-              background: rgba(255, 255, 255, 0.02);
-              border: 1px solid rgba(255, 255, 255, 0.05);
-              width: fit-content;
-              box-shadow: inset 0 0 15px rgba(0, 0, 0, 0.3);
-            }
-            .profile-subtab-btn {
-              padding: 8px 18px;
-              border-radius: 10px;
-              font-size: 0.65rem;
-              font-weight: 900;
-              text-transform: uppercase;
-              letter-spacing: 0.08em;
-              cursor: pointer;
-              transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-              border: none;
-              background: transparent;
-              color: rgba(255, 255, 255, 0.4);
-              display: flex;
-              align-items: center;
-              gap: 6px;
-            }
-            .profile-subtab-btn:hover {
-              color: #fff;
-              background: rgba(255, 255, 255, 0.03);
-            }
-            .profile-subtab-btn.active-cyan {
-              background: linear-gradient(135deg, var(--accent-cyan) 0%, rgba(var(--accent-cyan-rgb), 0.85) 100%);
-              color: #000 !important;
-              font-weight: 950;
-              box-shadow: 0 0 18px rgba(var(--accent-cyan-rgb), 0.5), 0 0 35px rgba(var(--accent-cyan-rgb), 0.25);
-            }
-            .profile-subtab-btn.active-amber {
-              background: linear-gradient(135deg, var(--accent-amber) 0%, rgba(var(--accent-amber-rgb), 0.85) 100%);
-              color: #000 !important;
-              font-weight: 950;
-              box-shadow: 0 0 18px rgba(var(--accent-amber-rgb), 0.5), 0 0 35px rgba(var(--accent-amber-rgb), 0.25);
-            }
-            .profile-subtab-btn.active-rose {
-              background: linear-gradient(135deg, var(--accent-rose) 0%, rgba(var(--accent-rose-rgb), 0.85) 100%);
-              color: #fff !important;
-              font-weight: 950;
-              box-shadow: 0 0 18px rgba(var(--accent-rose-rgb), 0.5), 0 0 35px rgba(var(--accent-rose-rgb), 0.25);
-            }
+            .profile-tabs-container { display: flex; gap: 12px; margin-bottom: 2rem; padding: 6px; border-radius: 16px; background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.05); width: fit-content; }
+            .profile-tab-btn { padding: 10px 24px; border-radius: 12px; font-size: 0.7rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: none; background: transparent; color: rgba(255, 255, 255, 0.5); display: flex; align-items: center; gap: 8px; }
+            .profile-tab-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.03); }
+            .profile-tab-btn.active { background: var(--accent-cyan); color: #000 !important; font-weight: 900; box-shadow: 0 8px 20px rgba(0, 212, 255, 0.25); }
           }
           @media print {
-            @page { size: A4 portrait; margin: 15mm; }
-            html, body, main, .layout-root, .container { width: 100% !important; background: white !important; color: #111 !important; padding: 0 !important; margin: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; font-family: 'Inter', sans-serif !important; }
-            .no-print, nav, button, .profile-tabs-container, .search-container, .orb-liquid, footer, .btn-premium-action { display: none !important; }
-            .print-only, .no-screen { display: block !important; }
-            .print-page-section { page-break-before: always; break-before: page; padding-top: 1rem; margin-bottom: 2rem; }
-            .roster-cover-page { background: #050b10 !important; color: white !important; height: 100vh !important; display: flex !important; flex-direction: column; justify-content: center; align-items: center; page-break-after: always; margin: 0 !important; padding: 0 !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-            .roster-cover-page h1, .roster-cover-page div, .roster-cover-page span { color: #fff !important; }
-            .roster-cover-page h2.subtitle { color: #00d4ff !important; }
-            .glass-card { background: transparent !important; color: #000 !important; border: none !important; border-left: 4px solid #1e40af !important; border-radius: 0 !important; box-shadow: none !important; padding: 0 0 0 1.5rem !important; margin-bottom: 3rem !important; page-break-inside: avoid !important; }
-            h1, h2, h3, h4, .section-title, .text-white, td, th, p { color: #000 !important; }
-            .insight-tag { color: #1e40af !important; font-weight: 900 !important; border-bottom: 2px solid #eee; padding-bottom: 4px; display: inline-block; margin-bottom: 1rem; }
-            .recharts-responsive-container { display: block !important; width: 100% !important; height: 350px !important; min-height: 350px !important; }
-            .recharts-wrapper, .recharts-surface { width: 100% !important; height: 100% !important; display: block !important; }
-            .recharts-text { fill: #000 !important; font-weight: 800 !important; font-size: 10px !important; }
-            .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: #ccc !important; }
-            .recharts-line-curve, .recharts-area-area { stroke: #000 !important; stroke-width: 3px !important; }
-            .recharts-bar-rectangle path { fill: #000 !important; }
+            @page { size: portrait; margin: 10mm !important; }
+            html, body { 
+                margin: 0 !important; 
+                padding: 0 !important; 
+                background: #050b10 !important; 
+                color: white !important; 
+                font-family: 'Outfit', 'Inter', sans-serif !important;
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+                text-align: left !important;
+            }
+            .no-print, button, nav, .profile-header, .period-selector { display: none !important; }
+            .print-only { display: block !important; }
+            
+            /* Enforce White Text on Dark Background */
+            h1, h2, h3, h4, .section-title, p, span, div, li, strong { 
+                color: white !important; 
+            }
 
-            /* ── rpt-* compat ── */
-            .rpt-flex   { display: flex !important; }
-            .rpt-grid4  { display: grid !important; grid-template-columns: repeat(4,1fr); gap: 10px; }
-            .rpt-grid3  { display: grid !important; grid-template-columns: repeat(3,1fr); gap: 10px; }
-            .rpt-grid2  { display: grid !important; grid-template-columns: repeat(2,1fr); gap: 12px; }
-            .rpt-section { page-break-before: always; break-before: page; padding-top: 0.5rem; }
-            .rpt-section-header { border-left: 4px solid #1e40af; padding-left: 12px; margin-bottom: 1.2rem; page-break-after: avoid; }
-            .rpt-section-header .rpt-eyebrow { font-size: 7pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.15em; color: #1e40af !important; margin-bottom: 2px; }
-            .rpt-section-header h2 { font-size: 15pt; font-weight: 900; color: #0a1628 !important; margin: 0; }
-            .rpt-kpi { border: 1px solid #dbeafe; border-radius: 8px; padding: 10px 12px; background: #eff6ff !important; -webkit-print-color-adjust: exact !important; break-inside: avoid; }
-            .rpt-kpi .rpt-kpi-label { font-size: 6.5pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.12em; color: #3b82f6 !important; margin-bottom: 4px; }
-            .rpt-kpi .rpt-kpi-value { font-size: 17pt; font-weight: 900; color: #0a1628 !important; line-height: 1; }
-            .rpt-kpi .rpt-kpi-sub   { font-size: 7pt; color: #64748b !important; margin-top: 3px; }
-            .rpt-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
-            .rpt-table thead tr { background: #0a1628 !important; -webkit-print-color-adjust: exact !important; }
-            .rpt-table th { padding: 7px 10px; text-align: left; font-size: 7pt; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; color: #ffffff !important; }
-            .rpt-table td { padding: 6px 10px; border-bottom: 1px solid #f0f4f8; color: #1e293b !important; vertical-align: top; }
-            .rpt-table tr:nth-child(even) td { background: #f8faff !important; -webkit-print-color-adjust: exact !important; }
-            .rpt-table .rpt-accent { color: #1e40af !important; font-weight: 800; }
-            .rpt-table .rpt-good   { color: #15803d !important; font-weight: 800; }
-            .rpt-table .rpt-warn   { color: #b45309 !important; font-weight: 800; }
-            .rpt-narrative-item { padding: 8px 10px; margin-bottom: 6px; border-left: 3px solid #1e40af; background: #eff6ff !important; border-radius: 0 5px 5px 0; break-inside: avoid; -webkit-print-color-adjust: exact !important; }
-            .rpt-narrative-item.rpt-positive { border-left-color: #15803d !important; background: #f0fdf4 !important; }
-            .rpt-narrative-item.rpt-negative { border-left-color: #b45309 !important; background: #fffbeb !important; }
-            .rpt-bar-bg   { background: #e0e7ff !important; height: 10px; border-radius: 5px; position: relative; overflow: visible; -webkit-print-color-adjust: exact !important; }
-            .rpt-bar-fill { background: #1e40af !important; height: 10px; border-radius: 5px; -webkit-print-color-adjust: exact !important; }
-            .rpt-ai-text { font-size: 9pt; line-height: 1.65; color: #1e293b !important; }
-            .rpt-ai-text strong { color: #0a1628 !important; }
-            .rpt-rule { border: none; border-top: 1px solid #e0e7ff; margin: 0.8rem 0; }
-            .rpt-avoid { break-inside: avoid; page-break-inside: avoid; }
-            .rpt-muted  { color: #64748b !important; }
-            .rpt-bold   { font-weight: 800; }
+            /* Match the Meet Report Glass Cards */
+            .glass-card { 
+                border: 1px solid rgba(255,255,255,0.1) !important; 
+                background: rgba(10,10,20,0.8) !important; 
+                color: white !important; 
+                page-break-inside: avoid !important; 
+                padding: 1.5rem !important; /* Fixed large margins */
+                margin-bottom: 1.5rem !important; 
+            }
 
-            body::after { content: "© COACHESEYE PERFORMANCE ANALYTICS | TONBRIDGE SC | AUTHORIZED COPY"; position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 0.65rem; font-weight: 800; letter-spacing: 0.15em; color: #888; border-top: 1px solid #eee; padding-top: 8px; }
+            /* Match the Meet Report Tables */
+            .stats-table-glass th { color: rgba(255,255,255,0.8) !important; border-bottom: 2px solid rgba(255,255,255,0.1) !important; }
+            .stats-table-glass td { color: white !important; border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+
+            /* Ensure Recharts remain visible on the dark background */
+            .recharts-text { fill: rgba(255,255,255,0.7) !important; }
+            .recharts-cartesian-grid-horizontal line, .recharts-cartesian-grid-vertical line { stroke: rgba(255,255,255,0.1) !important; }
+            .recharts-tooltip-wrapper { display: none !important; } 
+          }
+          @media screen {
+            .print-only { display: none !important; }
           }
         `}</style>
       </Head>
+
+      <div className="no-print">
       
       <div className="profile-header no-print" style={{ marginBottom: '4rem', paddingBottom: '2.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
         <div style={{ flex: 1 }}>
@@ -1278,6 +1258,10 @@ const [decayDistance, setDecayDistance] = useState('100');
             <span className="meta-item" style={{ opacity: 0.6 }}>Swim England ID: {swimmer.member_id}</span>
             <span className="meta-item" style={{ opacity: 0.3 }}>•</span>
             <span className="meta-item" style={{ opacity: 0.6 }}>2025/26 Season Performance Review</span>
+            <span className="meta-item" style={{ opacity: 0.3 }}>•</span>
+            <div className="meta-item" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span>📅</span> JOINED SQUAD: {swimmer.squad_join_date ? new Date(swimmer.squad_join_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase() : 'UNKNOWN'}
+            </div>
           </div>
         </div>
         <div className="flex gap-6 items-center">
@@ -1502,8 +1486,22 @@ const [decayDistance, setDecayDistance] = useState('100');
 
           <div className="mt-8 grid grid-cols-2 gap-4">
              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
-                <div style={{ fontSize: '0.6rem', opacity: 0.4, marginBottom: 4, fontWeight: 900 }}>TOTAL HOURS</div>
-                <div className="text-xl font-black">{Math.round(totalActualHours)} <span className="text-[10px] opacity-30">/ {annualTargetHours}</span></div>
+                <div style={{ fontSize: '0.6rem', opacity: 0.4, marginBottom: 8, fontWeight: 900 }}>TOTAL HOURS</div>
+                {/* Breakdown rows */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Pool Training</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, opacity: 0.7 }}>{(rel.totalTrainingHours || 0).toFixed(1)}h</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Gala Credits</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#a78bfa', opacity: 0.85 }}>{(rel.totalGalaHours || 0).toFixed(1)}h</span>
+                  </div>
+                  <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '3px', paddingTop: '5px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.6rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Grand Total</span>
+                    <span style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{Math.round(rel.totalHours || 0)}h <span style={{ fontSize: '0.6rem', opacity: 0.3, fontWeight: 400 }}>/ {annualTargetHours}h</span></span>
+                  </div>
+                </div>
              </div>
              <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
                 <div style={{ fontSize: '0.6rem', opacity: 0.4, marginBottom: 4, fontWeight: 900 }}>MISSED SESSIONS</div>
@@ -1580,6 +1578,21 @@ const [decayDistance, setDecayDistance] = useState('100');
              </div>
           </div>
         </div>
+      </div>
+
+      {/* ── QT PREDICTOR ── */}
+      <div className={`glass-card mb-8 no-print ${activeTab !== 'overview' ? 'no-screen' : ''}`} style={{ padding: '2.5rem' }}>
+        <div style={{ marginBottom: '1.5rem' }}>
+          <div className="section-title">Qualification Pathway Predictor</div>
+          <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '4px 0 0' }}>
+            QT Gap Analysis — SC Standards
+          </h3>
+        </div>
+        <QtTable
+          results={results}
+          age={targetAge}
+          gender={swimmer?.gender}
+        />
       </div>
 
       {/* PERFORMANCE ANALYTICAL MODULES */}
@@ -1979,31 +1992,140 @@ const [decayDistance, setDecayDistance] = useState('100');
              </div>
            </div>
 
-           <div style={{ height: 350, position: 'relative', zIndex: 10 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                 <ComposedChart data={progressionData}>
-                   <defs>
-                     <linearGradient id="progGrad" x1="0" y1="0" x2="0" y2="1">
-                       <stop offset="5%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
-                       <stop offset="95%" stopColor="var(--accent-cyan)" stopOpacity={0}/>
-                     </linearGradient>
-                   </defs>
-                   <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.03)" strokeDasharray="3 3" />
-                   <XAxis dataKey="date" tick={{ fill: 'var(--text-dim)', fontSize: 10, fontWeight: 700 }} axisLine={false} tickLine={false} />
-                   <YAxis tick={{ fill: 'var(--text-dim)', fontSize: 10, fontWeight: 700 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                   <Tooltip 
-                     contentStyle={{ background: 'rgba(10, 10, 15, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', backdropFilter: 'blur(20px)', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }} 
-                   />
-                   
-                   <ReferenceLine y={getCategoryBenchmark(statsObj.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'COUNTY')} stroke="rgba(255,255,255,0.2)" strokeDasharray="5 5" label={{ value: 'COUNTY', fill: 'rgba(255,255,255,0.3)', fontSize: 8, position: 'insideBottomLeft', fontWeight: 900 }} />
-                   <ReferenceLine y={getCategoryBenchmark(statsObj.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')} stroke="var(--accent-cyan)" strokeOpacity={0.4} strokeDasharray="3 3" label={{ value: 'REGIONAL', fill: 'var(--accent-cyan)', fontSize: 8, position: 'insideTopLeft', opacity: 0.5, fontWeight: 900 }} />
-                   
-                   <Area type="monotone" dataKey="wa_pts" fill="url(#progGrad)" stroke="none" />
-                   <Line type="monotone" dataKey="wa_pts" name="WA Points" stroke="var(--accent-cyan)" strokeWidth={4} dot={{ fill: '#fff', stroke: 'var(--accent-cyan)', strokeWidth: 2, r: 4 }} activeDot={{ r: 8, strokeWidth: 0, fill: 'var(--accent-cyan)' }} />
-                   <Line type="monotone" dataKey="trend" name="Trend" stroke="var(--accent-amber)" strokeWidth={2} dot={false} strokeDasharray="8 4" opacity={0.6} />
-                 </ComposedChart>
-              </ResponsiveContainer>
-           </div>
+
+
+                    <div className="flex justify-end mb-2 pr-4">
+                        <button className="intel-toggle" onClick={() => setIsWaGuideOpen(true)} style={{ background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.3)', padding: '6px 12px', fontSize: '0.65rem' }}>
+                            <span>🎯</span> How to read this chart
+                        </button>
+                    </div>
+
+                    {/* GRAPH HEADER / LABEL */}
+                    <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', paddingLeft: '1rem' }}>
+                        <div>
+                            <h3 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'white', margin: 0, letterSpacing: '-0.02em' }}>WA POINTS PROGRESSION</h3>
+                            <div style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)', fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Historical Form & Pathway Tracking</div>
+                        </div>
+                    </div>
+
+                    <div style={{ height: '380px', width: '100%' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            {/* Adjusted margins to make room for the new axis labels */}
+                            <ComposedChart data={chartDataWithTrends} margin={{ top: 20, right: 90, left: 20, bottom: 25 }}>
+                                <defs>
+                                    {/* POOL WATER GRADIENT */}
+                                    <linearGradient id="poolWater" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.6}/>
+                                        <stop offset="50%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                                        <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
+
+                                {/* X-AXIS WITH LABEL */}
+                                <XAxis
+                                    dataKey="name"
+                                    stroke="rgba(255,255,255,0.4)"
+                                    fontSize={10}
+                                    tickFormatter={(str) => (typeof str === 'string' ? (str.length > 15 ? str.substring(0, 15) + '...' : str) : '')}
+                                    tickMargin={10}
+                                    height={45}
+                                    label={{ value: 'COMPETITION TIMELINE', position: 'insideBottom', offset: -5, fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: 900, letterSpacing: 2 }}
+                                />
+
+                                {/* Y-AXIS WITH LABEL */}
+                                <YAxis
+                                    stroke="rgba(255,255,255,0.4)"
+                                    fontSize={10}
+                                    domain={[
+                                        dataMin => (isFinite(dataMin) && dataMin > 30 ? Math.max(0, dataMin - 30) : 0),
+                                        dataMax => {
+                                            const highestTarget = chartDataWithTrends[chartDataWithTrends.length - 1]?.narTarget || 480;
+                                            return Math.max(isFinite(dataMax) ? dataMax + 20 : 0, Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 300, highestTarget + 20);
+                                        }
+                                    ]}
+                                    label={{ value: 'WORLD AQUATICS (WA) POINTS', angle: -90, position: 'insideLeft', offset: -10, fill: 'rgba(255,255,255,0.3)', fontSize: 9, fontWeight: 900, letterSpacing: 2, style: { textAnchor: 'middle' } }}
+                                />
+
+                                <Tooltip contentStyle={{ background: 'rgba(10,15,25,0.95)', border: '1px solid rgba(0,212,255,0.2)', borderRadius: '12px' }} />
+
+                                {/* 1. THE BENCHMARKS */}
+                                <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'COUNTY')) || 250} stroke="rgba(255,255,255,0.25)" strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'COUNTY', fill: 'rgba(255,255,255,0.4)', fontSize: 10, fontWeight: 800 }} isAnimationActive={false} />
+                                <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 350} stroke="rgba(255,255,255,0.4)" strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'REGIONAL', fill: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: 800 }} isAnimationActive={false} />
+
+                                {/* 2. THE SQUAD AVERAGES */}
+                                <Line
+                                    type="monotone"
+                                    dataKey="ageTarget"
+                                    stroke="#2dd4bf"
+                                    strokeDasharray="6 6"
+                                    strokeWidth={2}
+                                    dot={false}
+                                    name="Age Squad Target"
+                                    isAnimationActive={false}
+                                    label={(props) => {
+                                        if (props.index === chartDataWithTrends.length - 1) {
+                                            return <text x={props.x + 8} y={props.y} fill="#2dd4bf" fontSize={10} fontWeight={900} dominantBaseline="central">AGE SQUAD</text>;
+                                        }
+                                        return null;
+                                    }}
+                                />
+                                <Line
+                                    type="monotone"
+                                    dataKey="goldTarget"
+                                    stroke="#f59e0b"
+                                    strokeDasharray="6 6"
+                                    strokeWidth={2}
+                                    dot={false}
+                                    name="Gold Squad Target"
+                                    isAnimationActive={false}
+                                    label={(props) => {
+                                        if (props.index === chartDataWithTrends.length - 1) {
+                                            return <text x={props.x + 8} y={props.y} fill="#f59e0b" fontSize={10} fontWeight={900} dominantBaseline="central">GOLD SQUAD</text>;
+                                        }
+                                        return null;
+                                    }}
+                                />
+                                <Line
+                                    type="monotone"
+                                    dataKey="narTarget"
+                                    stroke="#ef4444"
+                                    strokeDasharray="6 6"
+                                    strokeWidth={2}
+                                    dot={false}
+                                    name="NAR Squad Target"
+                                    isAnimationActive={false}
+                                    label={(props) => {
+                                        if (props.index === chartDataWithTrends.length - 1) {
+                                            return <text x={props.x + 8} y={props.y} fill="#ef4444" fontSize={10} fontWeight={900} dominantBaseline="central">NAR SQUAD</text>;
+                                        }
+                                        return null;
+                                    }}
+                                />
+
+                                {/* 3. THE ATHLETE: Pool water gradient area with smooth monotone curve */}
+                                <Area
+                                    type="monotone"
+                                    dataKey="peakWa"
+                                    stroke="#00d4ff"
+                                    strokeWidth={3}
+                                    fillOpacity={1}
+                                    fill="url(#poolWater)"
+                                    name="Athlete Peak Capability"
+                                    isAnimationActive={false}
+                                    dot={{ r: 4, fill: '#0a0a0a', stroke: '#00d4ff', strokeWidth: 2 }}
+                                    activeDot={{ r: 6, strokeWidth: 0, fill: '#00d4ff' }}
+                                    label={(props) => {
+                                        if (props.index === chartDataWithTrends.length - 1) {
+                                            return <text x={props.x + 8} y={props.y - 10} fill="#00d4ff" fontSize={11} fontWeight={900} dominantBaseline="central">ATHLETE PEAK</text>;
+                                        }
+                                        return null;
+                                    }}
+                                />
+                            </ComposedChart>
+                        </ResponsiveContainer>
+                    </div>
+
         </div>
       </div>
       
@@ -2326,8 +2448,42 @@ const [decayDistance, setDecayDistance] = useState('100');
                    <Area yAxisId="right" type="stepAfter" dataKey="compliance" fill="url(#compGrad)" stroke="#10b981" strokeWidth={1} strokeOpacity={0.3} />
                    <Bar 
                       yAxisId="left" 
-                      dataKey="totalHours" 
-                      name="Total Hours" 
+                      dataKey="training" 
+                      stackId="a" 
+                      fill="url(#trainingGrad)" 
+                      name="Pool Hours" 
+                      radius={[3, 3, 0, 0]} 
+                      barSize={9}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(data) => {
+                        if (data) {
+                          setSelectedWeek(data);
+                          setIsWorkloadModalOpen(true);
+                        }
+                      }}
+                    />
+                   <Bar 
+                      yAxisId="left" 
+                      dataKey="gala" 
+                      stackId="a" 
+                      fill="var(--accent-rose)" 
+                      name="Gala Hours" 
+                      radius={[3, 3, 0, 0]} 
+                      barSize={9}
+                      style={{ cursor: 'pointer' }}
+                      onClick={(data) => {
+                        if (data) {
+                          setSelectedWeek(data);
+                          setIsWorkloadModalOpen(true);
+                        }
+                      }}
+                    />
+                   <Bar 
+                      yAxisId="left" 
+                      dataKey="credit" 
+                      stackId="a" 
+                      fill="var(--accent-emerald)" 
+                      name="Credited Hours" 
                       radius={[3, 3, 0, 0]} 
                       barSize={9}
                       style={{ cursor: 'pointer' }}
@@ -2339,16 +2495,122 @@ const [decayDistance, setDecayDistance] = useState('100');
                       }}
                     >
                       <LabelList content={renderCustomBarLabel} />
-                      {workloadChartData.map((entry, index) => {
-                         const isCompliant = entry.isExempt || entry.holidayUsed || entry.isMet;
-                         const fillUrl = isCompliant ? 'url(#trainingGrad)' : 'url(#creditGrad)';
-                         return <Cell key={`cell-${index}`} fill={fillUrl} />;
-                      })}
                    </Bar>
                    <Line yAxisId="left" type="stepAfter" dataKey="target" name="Target Hours" stroke="rgba(255,255,255,0.2)" strokeDasharray="5 5" dot={false} strokeWidth={2} />
-                 </ComposedChart>
-               </ResponsiveContainer>
+                  </ComposedChart>
+                </ResponsiveContainer>
              </div>
+              <div style={{ marginTop: '2rem', overflowX: 'auto', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.05)', maxHeight: '400px', overflowY: 'auto' }} className="custom-scrollbar">
+                  <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      Weekly Workload Details
+                  </h4>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
+                      <thead style={{ position: 'sticky', top: '-1.5rem', background: 'var(--bg-dark)', zIndex: 10, boxShadow: '0 4px 6px -4px rgba(0,0,0,0.5)' }}>
+                          <tr>
+                              <th style={{ padding: '12px', width: '20%' }}>Week Commencing</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Pool</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Gala</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Credit</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Total</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Target</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Status</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {weeklyWorkloadData.map((week, i) => (
+                              <tr key={i}>
+                                  <td style={{ padding: '12px', fontWeight: 800, color: 'var(--accent-cyan)' }}>{week.name}</td>
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>{week.pool > 0 ? week.pool.toFixed(1) + 'h' : '—'}</td>
+                                  <td style={{ padding: '12px', textAlign: 'center', color: week.gala > 0 ? 'var(--accent-emerald)' : 'inherit' }}>{week.gala > 0 ? week.gala.toFixed(1) + 'h' : '—'}</td>
+                                  <td title={week.creditReasons && week.creditReasons.length > 0 ? week.creditReasons.join(' | ') : 'No credits applied'} 
+                                      style={{ 
+                                          cursor: week.creditReasons && week.creditReasons.length > 0 ? 'help' : 'default', 
+                                          padding: '12px', 
+                                          textAlign: 'center',
+                                          color: week.credit === 0 && week.creditReasons && week.creditReasons.length > 0 ? 'var(--accent-amber)' : 'inherit'
+                                      }}>
+                                      {week.credit > 0 ? `${week.credit.toFixed(1)}h` : (week.creditReasons && week.creditReasons.length > 0 ? '— ⚠️' : '—')}
+                                  </td>
+                                  <td style={{ padding: '12px', textAlign: 'center', fontWeight: 900 }}>{week.total.toFixed(1)}h</td>
+                                  <td style={{ padding: '12px', textAlign: 'center', opacity: 0.5 }}>{week.target.toFixed(1)}h</td>
+                                  <td style={{ 
+                                      padding: '12px', 
+                                      textAlign: 'center', 
+                                      fontWeight: 900,
+                                      color: (week.isHoliday || week.appliedRule === 'Holiday Allowance') 
+                                          ? 'var(--accent-amber)' 
+                                          : (week.isMet ? 'var(--accent-emerald)' : 'var(--accent-rose)')
+                                  }}>
+                                      {(week.isHoliday || week.appliedRule === 'Holiday Allowance') 
+                                          ? '🌴 HOLIDAY' 
+                                          : (week.isMet ? '✓ MET' : '✗ MISSED')}
+                                  </td>
+                              </tr>
+                          ))}
+                          {weeklyWorkloadData.length === 0 && (
+                              <tr>
+                                  <td colSpan="7" style={{ padding: '24px', textAlign: 'center', opacity: 0.5 }}>No data found for this time period.</td>
+                              </tr>
+                          )}
+                      </tbody>
+                      <tfoot>
+                          <tr style={{ background: 'rgba(255, 255, 255, 0.05)', fontWeight: 900, borderTop: '2px solid rgba(255, 255, 255, 0.1)' }}>
+                              <td style={{ padding: '12px' }}>ANNUAL TOTALS</td>
+                              <td style={{ padding: '12px', textAlign: 'center' }}>{Object.values(statsObj.details || {}).reduce((sum, w) => sum + (w.totalHours || 0), 0).toFixed(1)}h</td>
+                              <td style={{ padding: '12px', textAlign: 'center' }}>{Object.values(statsObj.details || {}).reduce((sum, w) => sum + (w.galaHours || 0), 0).toFixed(1)}h</td>
+                              <td style={{ padding: '12px', textAlign: 'center', color: 'var(--accent-emerald)' }}>{Object.values(statsObj.details || {}).reduce((sum, w) => sum + (w.creditedHours || 0), 0).toFixed(1)}h</td>
+                              <td style={{ padding: '12px', textAlign: 'center', color: 'var(--accent-cyan)' }}>
+                                  {Object.values(statsObj.details || {}).reduce((sum, w) => sum + (w.totalHours || 0) + (w.galaHours || 0) + (w.creditedHours || 0), 0).toFixed(1)}h
+                              </td>
+                              <td style={{ padding: '12px', textAlign: 'center' }}>{Object.values(statsObj.details || {}).reduce((sum, w) => sum + (w.target || 0), 0).toFixed(1)}h</td>
+                              <td style={{ 
+                                  padding: '12px', 
+                                  textAlign: 'center', 
+                                  fontWeight: 900,
+                                  color: (statsObj?.percentage || 0) >= (squad?.target_training_percent || 75) ? 'var(--accent-emerald)' : 'var(--accent-rose)'
+                              }}>
+                                  {statsObj?.percentage || 0}% MET
+                              </td>
+                          </tr>
+                      </tfoot>
+                  </table>
+              </div>
+              <div style={{ marginTop: '2rem', overflowX: 'auto', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.05)', maxHeight: '300px', overflowY: 'auto' }} className="custom-scrollbar">
+                  <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-amber)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                      System Exemptions & Holidays Applied
+                  </h4>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
+                      <thead style={{ position: 'sticky', top: '-1.5rem', background: 'var(--bg-dark)', zIndex: 10, boxShadow: '0 4px 6px -4px rgba(0,0,0,0.5)' }}>
+                          <tr>
+                              <th style={{ padding: '12px', width: '40%' }}>Exemption / Event</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Start Date</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>End Date</th>
+                              <th style={{ padding: '12px', textAlign: 'center' }}>Type</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {activeExemptions.map((ex, i) => (
+                              <tr key={i}>
+                                  <td style={{ padding: '12px', fontWeight: 800 }}>{ex.name}</td>
+                                  <td style={{ padding: '12px', textAlign: 'center', opacity: 0.8 }}>{new Date(ex.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                                  <td style={{ padding: '12px', textAlign: 'center', opacity: 0.8 }}>{new Date(ex.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                                  <td style={{ padding: '12px', textAlign: 'center' }}>
+                                      <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', background: ex.type === 'credit' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(251, 191, 36, 0.15)', color: ex.type === 'credit' ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>
+                                          {ex.type}
+                                      </span>
+                                  </td>
+                              </tr>
+                          ))}
+                          {activeExemptions.length === 0 && (
+                              <tr>
+                                  <td colSpan="4" style={{ padding: '24px', textAlign: 'center', opacity: 0.5 }}>No exemptions found for this time period.</td>
+                              </tr>
+                          )}
+                      </tbody>
+                  </table>
+              </div>
+
+
           </div>
           <div className="lg:col-span-2 glass-card mt-6" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
             <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: WORKLOAD</h4>
@@ -2601,77 +2863,6 @@ const [decayDistance, setDecayDistance] = useState('100');
         </div>
       )}
 
-      {/* ── GLOSSARY (print only) ── */}
-      <div className="print-only">
-        <CoachesEyeGlossary />
-      </div>
-
-      {/* ── SECTION 4: COMPETITION RECORD (Appendix) ── */}
-      {uniqueMeetsList?.length > 0 && (
-        <div className="print-only rpt-section">
-          <div className="rpt-section-header">
-            <div className="rpt-eyebrow">Section 4</div>
-            <h2>Competition Record</h2>
-          </div>
-          <div className="rpt-grid3" style={{ marginBottom: '1.2rem' }}>
-            {[
-              { label: 'Meets Attended', value: uniqueMeetsList.length },
-              { label: 'Total Races', value: uniqueMeetsList.reduce((a, m) => a + (m.raceCount || m.results?.length || 0), 0) },
-              { label: 'Best WA Score', value: `${Math.max(...uniqueMeetsList.map(m => m.peakWA || 0))} pts` },
-            ].map(({ label, value }) => (
-              <div key={label} className="rpt-kpi rpt-avoid">
-                <div className="rpt-kpi-label">{label}</div>
-                <div className="rpt-kpi-value">{value}</div>
-              </div>
-            ))}
-          </div>
-          <table className="rpt-table">
-            <thead>
-              <tr>{['Date', 'Competition', 'Type', 'Level', 'Races', 'Peak WA Points'].map(h => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {uniqueMeetsList.map((m, i) => (
-                <tr key={i}>
-                  <td className="rpt-muted">{new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}</td>
-                  <td className="rpt-bold">{m.name}</td>
-                  <td>{m.type || '—'}</td>
-                  <td className="rpt-muted">{m.level || '—'}</td>
-                  <td>{m.raceCount ?? m.results?.length ?? '—'}</td>
-                  <td className="rpt-accent rpt-bold">{m.peakWA ? `${m.peakWA} pts` : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* ── SECTION 5: RACE SPLITS APPENDIX ── */}
-      {filteredMeets?.length > 0 && (
-        <div className="print-only rpt-section">
-          <div className="rpt-section-header">
-            <div className="rpt-eyebrow">Appendix A</div>
-            <h2>Tactical Race Splits</h2>
-          </div>
-          <table className="rpt-table">
-            <thead>
-              <tr>{['Event', 'Meet', 'Date', 'Time', 'WA Pts', 'Split Ratio'].map(h => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {filteredMeets.slice(0, 40).map((r, i) => (
-                <tr key={i}>
-                  <td className="rpt-bold">{r.event || '—'}</td>
-                  <td>{r.meet_name || '—'}</td>
-                  <td className="rpt-muted">{r.date ? new Date(r.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : '—'}</td>
-                  <td className="rpt-bold">{r.swim_time || '—'}</td>
-                  <td className="rpt-accent rpt-bold">{r.wa_pts || '—'}</td>
-                  <td className="rpt-muted">{r.split_ratio ? `${r.split_ratio.toFixed(2)}×` : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
       <BenchmarkModal isOpen={isBenchmarkOpen} onClose={() => setIsBenchmarkOpen(false)} />
       
       <ReportConfigModal 
@@ -2725,6 +2916,247 @@ const [decayDistance, setDecayDistance] = useState('100');
           </div>
         </div>
       )}
+      </div>
+
+      {/* ========================================== */}
+      {/* PRINT ONLY: FORMAL ATHLETE REPORT (HIDDEN ON SCREEN) */}
+      {/* ========================================== */}
+      <div className="print-only">
+          
+          {/* PAGE 1: Cover Page & Index */}
+          <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pageBreakAfter: 'always' }}>
+              <h4 style={{ color: '#00d4ff', letterSpacing: '0.2em', margin: 0 }}>TONBRIDGE SWIMMING CLUB</h4>
+              <h1 style={{ fontSize: '4rem', fontWeight: 950, margin: '1rem 0', textTransform: 'uppercase' }}>{swimmer.full_name}</h1>
+              <h3 style={{ opacity: 0.6, letterSpacing: '0.1em' }}>ANNUAL ATHLETE PERFORMANCE REPORT</h3>
+              <p style={{ marginTop: '1rem', fontStyle: 'italic' }}>Generated: {new Date().toLocaleDateString('en-GB')}</p>
+              
+              <div style={{ marginTop: '4rem', textAlign: 'left', width: '100%', maxWidth: '600px' }}>
+                  <h2 style={{ borderBottom: '2px solid #e2e8f0', paddingBottom: '1rem', marginBottom: '1.5rem' }}>Report Index</h2>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '1.1rem', lineHeight: '2.2', fontWeight: 600 }}>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>1. Executive Overview & KPIs</span> <span>... 2</span></li>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>2. Performance AI Report</span> <span>... 3</span></li>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>3. Training Workload & Compliance</span> <span>... 4</span></li>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>4. Competition Record</span> <span>... 5</span></li>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>5. Readiness & Health Audit</span> <span>... 6</span></li>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>6. Qualifying Times (Sprint/Mid/Distance/IM)</span> <span>... 7</span></li>
+                      <li style={{ display: 'flex', justifyContent: 'space-between' }}><span>7. Appendix: Weekly Workload Details</span> <span>... 8</span></li>
+                  </ul>
+              </div>
+          </div>
+
+          {/* PAGE 2: Executive Overview */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
+              <div className="glass-card" style={{ marginBottom: '2rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: '2rem', padding: '1rem' }}>
+                      <PremiumOrb value={attendancePct} label="Consistency" size={120} unit="%" />
+                      <PremiumOrb value={seasonVolumePct} label="Volume vs Target" size={120} unit="%" color={seasonVolumePct >= 80 ? 'cyan' : 'amber'} />
+                      <PremiumOrb value={progressPercent} label="Meet Compliance" size={120} unit="%" />
+                      <PremiumOrb value={velocity} label="WA Velocity" customValue={true} size={120} unit="pts" color={velocity >= 0 ? 'emerald' : 'rose'} />
+                  </div>
+                  
+                  <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid #e2e8f0' }}>
+                      <h3 className="section-title" style={{ color: '#0f172a', marginBottom: '1rem' }}>Strategic Narrative</h3>
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                          {narrative.map((item, idx) => (
+                              <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px' }}>
+                                  <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6', color: 'rgba(255,255,255,0.8)' }}>
+                                      <strong style={{ color: 'white', display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }}>{item.category.toUpperCase()}</strong> 
+                                      {item.text}
+                                  </p>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          {/* PAGE 3: Performance AI */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Performance AI Report</h2>
+              <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
+          </div>
+
+          {/* PAGE 4: Workload Chart */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>3. Training Workload</h2>
+              <div className="glass-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                      <div>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{totalActualHours.toFixed(1)}h / {annualTargetHours.toFixed(1)}h</div>
+                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Volume Achieved</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '1.2rem', fontWeight: 900, color: (statsObj?.percentage || 0) >= (squad?.target_training_percent || 75) ? '#059669' : '#e11d48' }}>{statsObj?.percentage || 0}%</div>
+                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Target Compliance</div>
+                      </div>
+                  </div>
+                  <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
+                      <ComposedChart width={700} height={300} data={workloadChartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
+                          <XAxis dataKey="weekLabel" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
+                          <YAxis stroke="rgba(255,255,255,0.5)" fontSize={9} />
+                          <Bar dataKey="credit" stackId="a" fill="#fbbf24" name="Credits/Holidays" isAnimationActive={false} />
+                          <Bar dataKey="hours" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
+                          <Bar dataKey="galaHours" stackId="a" fill="#10b981" name="Gala Hours" isAnimationActive={false} />
+                          <Line type="stepAfter" dataKey="target" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Target Hours" isAnimationActive={false} />
+                      </ComposedChart>
+                  </div>
+              </div>
+          </div>
+
+          {/* PAGE 4: Competitive Engagement */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>4. Competition Record</h2>
+              
+              <div className="flex justify-between items-center mb-6">
+                  <div>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
+                      <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
+                  </div>
+              </div>
+
+              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
+                      <thead style={{ borderBottom: '2px solid #000' }}>
+                          <tr>
+                              <th style={{ color: '#000' }}>Date</th>
+                              <th style={{ color: '#000' }}>Competition</th>
+                              <th style={{ color: '#000', textAlign: 'center' }}>Level</th>
+                              <th style={{ color: '#000', textAlign: 'center' }}>Races</th>
+                              <th style={{ color: '#000', textAlign: 'right' }}>Peak WA</th>
+                              <th style={{ color: '#000', textAlign: 'center' }}>Highlights</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {uniqueMeetsList.map((m, i) => (
+                              <tr key={i}>
+                                  <td style={{ fontWeight: 600, borderBottom: '1px solid #eee', padding: '12px 8px' }}>
+                                      {new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                  </td>
+                                  <td style={{ fontWeight: 800, borderBottom: '1px solid #eee', padding: '12px 8px' }}>{m.name}</td>
+                                  <td style={{ textAlign: 'center', borderBottom: '1px solid #eee', padding: '12px 8px' }}>
+                                      <span style={{ padding: '4px 8px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b' : '#0369a1', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 800 }}>
+                                          {m.level || 'L3'}
+                                      </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', borderBottom: '1px solid #eee', padding: '12px 8px' }}>{m.eventCount}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 800, borderBottom: '1px solid #eee', padding: '12px 8px' }}>{Math.round(m.peakWa)} pts</td>
+                                  <td style={{ textAlign: 'center', borderBottom: '1px solid #eee', padding: '12px 8px' }}>
+                                      {m.pbCount > 0 ? (
+                                          <span style={{ color: '#059669', fontWeight: 900, fontSize: '0.75rem', background: '#d1fae5', padding: '4px 8px', borderRadius: '6px' }}>
+                                              ★ {m.pbCount} PB{m.pbCount > 1 ? 's' : ''}
+                                          </span>
+                                      ) : '-'}
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+
+          {/* PAGE 5: Readiness Audit */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>5. Readiness & Health Audit</h2>
+              <div className="glass-card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                      <h3 style={{ margin: 0, color: '#0f172a' }}>Biological & Training Readiness</h3>
+                      <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#0f172a' }}>{healthData?.total || 0}<span style={{ fontSize: '1rem', color: '#64748b' }}>/100</span></div>
+                      </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+                      {healthData?.components?.map((comp, idx) => (
+                          <div key={idx} style={{ padding: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', textAlign: 'center' }}>
+                              <div style={{ fontSize: '2rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.5rem' }}>{Math.round(comp.score)}</div>
+                              <div style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569' }}>{comp.label}</div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          </div>
+
+          {/* PAGE 6: Qualifying Times */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                  {[
+                      { label: 'Sprints (50m - 100m)', filter: (e) => (e.includes('50') || e.includes('100')) && !e.includes('IM') },
+                      { label: 'Middle Distance (200m - 400m)', filter: (e) => (e.includes('200') || e.includes('400')) && !e.includes('IM') },
+                      { label: 'Distance (800m - 1500m)', filter: (e) => e.includes('800') || e.includes('1500') },
+                      { label: 'Individual Medley (IM)', filter: (e) => e.includes('IM') }
+                  ].map((segment, idx) => {
+                      const segmentEvents = Object.entries(statsObj?.strokeData || {}).filter(([eventName]) => segment.filter(eventName));
+                      if (segmentEvents.length === 0) return null;
+                      return (
+                          <div key={idx} className="glass-card" style={{ padding: '1.5rem !important', marginBottom: 0 }}>
+                              <h4 style={{ color: '#0369a1', margin: '0 0 1rem 0', textTransform: 'uppercase', fontSize: '0.85rem' }}>{segment.label}</h4>
+                              <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
+                                  <thead>
+                                      <tr>
+                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1' }}>Event</th>
+                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'center' }}>PB Count</th>
+                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'right' }}>Peak WA</th>
+                                      </tr>
+                                  </thead>
+                                  <tbody>
+                                      {segmentEvents.map(([eventName, data], i) => (
+                                          <tr key={i}>
+                                              <td style={{ padding: '8px', fontWeight: 800 }}>{eventName}</td>
+                                              <td style={{ padding: '8px', textAlign: 'center' }}>{data.pbCount > 0 ? `★ ${data.pbCount}` : '-'}</td>
+                                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#d97706' }}>{Math.round(data.peak)} pts</td>
+                                          </tr>
+                                      ))}
+                                  </tbody>
+                              </table>
+                          </div>
+                      );
+                  })}
+              </div>
+          </div>
+
+          {/* PAGE 7: Appendix - Workload Details */}
+          <div style={{ pageBreakAfter: 'always' }}>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
+              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
+                      <thead style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
+                          <tr>
+                              <th style={{ padding: '8px' }}>Week Commencing</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Pool</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Gala</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Credit</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Total</th>
+                              <th style={{ padding: '8px', textAlign: 'center', color: '#f43f5e' }}>Target</th>
+                              <th style={{ padding: '8px', textAlign: 'center' }}>Status</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {weeklyWorkloadData && weeklyWorkloadData.map((week, idx) => (
+                              <tr key={idx}>
+                                  <td style={{ padding: '8px' }}>{week.name}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.pool > 0 ? `${week.pool.toFixed(1)}h` : '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.gala > 0 ? `${week.gala.toFixed(1)}h` : '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>{week.credit > 0 ? `${week.credit.toFixed(1)}h` : '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 800 }}>{week.total.toFixed(1)}h</td>
+                                  <td style={{ padding: '8px', textAlign: 'center', color: '#f43f5e', fontWeight: 600 }}>{week.target.toFixed(1)}h</td>
+                                  <td style={{ padding: '8px', textAlign: 'center', fontWeight: 900, color: (week.isHoliday || week.appliedRule === 'Holiday Allowance') ? '#f59e0b' : (week.isMet ? '#10b981' : '#f43f5e') }}>
+                                      {(week.isHoliday || week.appliedRule === 'Holiday Allowance') ? '🌴 HOLIDAY' : (week.isMet ? '✓ MET' : '✗ MISSED')}
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+
+      </div>
+
+            <WaPointsGuideModal isOpen={isWaGuideOpen} onClose={() => setIsWaGuideOpen(false)} />
     </Layout>
   );
 }

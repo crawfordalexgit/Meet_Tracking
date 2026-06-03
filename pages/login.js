@@ -16,12 +16,13 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: window.location.origin + '/dashboard'
+          // This dynamically detects the host (localhost vs your live Vercel URL)
+          redirectTo: `${window.location.origin}/`
         }
       });
       if (error) throw error;
-    } catch (err) {
-      setMessage({ type: 'error', text: err.message });
+    } catch (error) {
+      setMessage(error.message);
       setLoading(false);
     }
   };

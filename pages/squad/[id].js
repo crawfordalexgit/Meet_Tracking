@@ -115,6 +115,7 @@ export default function SquadDetail({
   const [activeTab, setActiveTab] = useState('overview');
   const [sortConfig, setSortConfig] = useState({ key: 'trainingPct', direction: 'desc' });
   const [error, setError] = useState(initialError);
+  const [rankings, setRankings] = useState([]);
 
   useEffect(() => {
     if (session === undefined) return;
@@ -194,6 +195,7 @@ export default function SquadDetail({
       
       const currentRankings = (rankingsRes || []).filter(r => r.snapshot_date === latestRankSnapshot);
       const priorRankings = priorRankSnapshot ? (rankingsRes || []).filter(r => r.snapshot_date === priorRankSnapshot) : [];
+      setRankings(rankingsRes || []);
 
       const achievementSummary = {
         national_count: new Set(currentRankings.filter(r => r.district === 'England' && r.rank <= 40).map(r => r.swimmer_id)).size,
@@ -438,12 +440,46 @@ export default function SquadDetail({
     return sortConfig.direction === 'asc' ? ' ↑' : ' ↓';
   };
 
-  const handleRosterExport = () => {
-    setIsRosterOnly(true);
-    setTimeout(() => {
-      window.print();
-      setIsRosterOnly(false);
-    }, 500);
+  const handleRosterExport = async () => {
+    setIsExporting(true);
+    try {
+      const browserStorage = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        browserStorage[key] = localStorage.getItem(key);
+      }
+
+      const res = await fetch('/api/export-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          squadId: squad.id,
+          squadName: squad.name,
+          type: 'squad',
+          storage: browserStorage
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to generate PDF (Server Error)');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${squad.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_capacity_report.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (error) {
+      console.error('Export error:', error);
+      alert(error.message || 'Failed to generate PDF report.');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (loading && !squad) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', opacity: 0.9 }}>Loading Squad Analytics...</div></Layout>;
@@ -958,7 +994,7 @@ export default function SquadDetail({
           </>
         )}
         {activeTab === 'predictor' && (
-          <SquadQualificationPredictor swimmers={swimmers} results={results} squads={[squad]} />
+          <SquadQualificationPredictor swimmers={swimmers} results={results} squads={[squad]} rankings={rankings} />
         )}
           </div>
         )}

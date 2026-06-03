@@ -199,36 +199,7 @@ export default async function handler(req, res) {
       .in('age_group', ages)
       .in('gender', genders.map(g => (g === 'M' || g === 'Male') ? 'Male' : 'Female'));
 
-    // 4. Final Medal Deduplication: Group by Swimmer + Event to catch Heat vs Final duplicates
-    // Use robust normalization for the keys
-    const medalGroups = {};
-    detectedMedals.forEach(m => {
-      const normName = normalizeName(m.swimmer_name);
-      const normEvent = normalizeEvent(m.event);
-      const key = `${normName}-${normEvent}`;
-      
-      if (!medalGroups[key]) medalGroups[key] = [];
-      medalGroups[key].push(m);
-    });
-
-    const finalMedalists = Object.values(medalGroups).map(group => {
-      // Prioritize "Gold" then "Silver" then "Bronze"
-      const priority = { 'gold': 1, 'silver': 2, 'bronze': 3 };
-      return group.sort((a, b) => {
-        const pA = priority[a.medal_type.toLowerCase()] || 99;
-        const pB = priority[b.medal_type.toLowerCase()] || 99;
-        return pA - pB;
-      })[0];
-    });
-
-    const medalCounts = {
-      gold: finalMedalists.filter(m => m.medal_type.toLowerCase().includes('gold')).length,
-      silver: finalMedalists.filter(m => m.medal_type.toLowerCase().includes('silver')).length,
-      bronze: finalMedalists.filter(m => m.medal_type.toLowerCase().includes('bronze')).length,
-      total: finalMedalists.length
-    };
-
-    console.log(`>>> FINAL GALA ENGINE: Reduced ${detectedMedals.length} potential matches to ${finalMedalists.length} unique medals.`);
+    console.log(`>>> FINAL GALA ENGINE: Captured ${detectedMedals.length} raw medal signals (Text + Structured). Medal totals delegated to AI prompt.`);
 
     // 5. Near-Miss Bubble Analysis (Find 9th/10th places and calculate gap to 8th)
     const nearMisses = [];
@@ -370,6 +341,53 @@ export default async function handler(req, res) {
       }
     }
 
+    // Dual-Layer Validated Medal Parser
+    // Regex groups: 1=Place, 2=Lastname, 3=Firstname (Hy-Tek "Lastname, Firstname Age" format)
+    const tonbridgeMedals = { gold: 0, silver: 0, bronze: 0 };
+    const detectedMedalists = [];
+
+    if (pdfText) {
+      const lines = pdfText.split('\n');
+      lines.forEach(line => {
+        const match = line.match(/^\s*\*?([123])\b\s+([A-Za-z\s'-]+),\s+([^0-9]+?)(?=\s+\d)/);
+
+        if (match) {
+          const place      = parseInt(match[1], 10);
+          const lastName   = match[2].trim().toLowerCase();
+          const firstName  = match[3].trim().toLowerCase().split(' ')[0]; // first word only
+
+          // Layer 1: name appears in this meet's DB results
+          const isTonbridge = bodyResults && bodyResults.some(r => {
+            const dbName    = r.swimmers?.full_name?.toLowerCase() || '';
+            const dbKnownAs = r.swimmers?.known_as?.toLowerCase() || '';
+            const hasLast  = dbName.includes(lastName);
+            const hasFirst = dbName.includes(firstName) || dbKnownAs.includes(firstName);
+            return hasLast && hasFirst;
+          });
+
+          // Layer 2: line explicitly mentions Tonbridge
+          const hasTonbridgeString = line.toLowerCase().includes('tonbridge');
+
+          if (isTonbridge || hasTonbridgeString) {
+            const cleanName = match[3].trim() + ' ' + match[2].trim(); // Firstname Lastname
+
+            if (place === 1) {
+              tonbridgeMedals.gold += 1;
+              detectedMedalists.push({ name: cleanName, place, medal_type: 'Gold' });
+            } else if (place === 2) {
+              tonbridgeMedals.silver += 1;
+              detectedMedalists.push({ name: cleanName, place, medal_type: 'Silver' });
+            } else if (place === 3) {
+              tonbridgeMedals.bronze += 1;
+              detectedMedalists.push({ name: cleanName, place, medal_type: 'Bronze' });
+            }
+          }
+        }
+      });
+    }
+    tonbridgeMedals.total = tonbridgeMedals.gold + tonbridgeMedals.silver + tonbridgeMedals.bronze;
+    console.log(`>>> MEDAL PARSER: ${tonbridgeMedals.gold}G / ${tonbridgeMedals.silver}S / ${tonbridgeMedals.bronze}B from ${detectedMedalists.length} clean Hy-Tek lines.`);
+
     // Prepare Meet DNA
     const dna = {
       type: 'meet_audit',
@@ -385,10 +403,10 @@ export default async function handler(req, res) {
         finalists: results.filter(r => r.round?.toLowerCase().includes('final')).length,
         near_misses: nearMisses.length
       },
-      medal_counts: medalCounts, // Explicitly provide pre-calculated counts
+      medal_counts: tonbridgeMedals,
+      detected_medalists: detectedMedalists,
       bubble_analysis: nearMisses,
-      pdf_evidence: filteredPdfText || null, 
-      detected_medals: finalMedalists,
+      pdf_evidence: filteredPdfText || null,
       staff_context: consolidatedStaffText || null,
       user_correction: correction || null,
       benchmarks: benchmarks || [], // Inject benchmarks into the AI context
@@ -436,9 +454,8 @@ export default async function handler(req, res) {
 
     const analysis = await analyzeMeet(dna);
 
-    // Merge JS-detected medals & comparisons as the source of truth for the UI
+    // Merge historical comparisons into AI analysis response
     if (analysis) {
-      analysis.medalists = finalMedalists;
       analysis.historical_comparisons = comparisons;
     }
 

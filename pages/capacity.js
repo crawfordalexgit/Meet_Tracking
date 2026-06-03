@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
@@ -17,6 +17,7 @@ export default function CapacityDashboard({ session }) {
   const [simAdjustments, setSimAdjustments] = useState({});
   const [globalSquadFilter, setGlobalSquadFilter] = useState('All');
   const [updating, setUpdating] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -44,8 +45,8 @@ export default function CapacityDashboard({ session }) {
     const [sessRes, allMemberships, allAttendance, swimRes] = await Promise.all([
       supabase.from('sessions').select('*').order('day_of_week').order('start_time'),
       fetchPaged('session_memberships', 'session_id, swimmer_id'),
-      fetchPaged('training_attendance', 'session_id, date', q => q.eq('status', 'present').gte('date', startDate)),
-      supabase.from('swimmers').select('id, full_name, year_of_birth, squads(name, target_hours_per_week)')
+      fetchPaged('training_attendance', 'session_id, swimmer_id, date', q => q.eq('status', 'present').gte('date', startDate)),
+      supabase.from('swimmers').select('id, full_name, year_of_birth, squads(name, target_hours_per_week, target_sessions_per_week)')
     ]);
 
     if (sessRes.data) setSessions(sessRes.data);
@@ -70,9 +71,84 @@ export default function CapacityDashboard({ session }) {
   const sortedSessions = [...sessions].sort((a, b) => getDayOrder(a.day_of_week) - getDayOrder(b.day_of_week));
   const squadsList = [...new Set(swimmers.map(s => s.squads?.name).filter(Boolean))].sort();
 
+  // Ghost Allocations: memberships with zero 'present' attendance records in the current period
+  const ghostAllocations = useMemo(() => {
+    return memberships.map(m => {
+      const swimmer = swimmers.find(s => s.id === m.swimmer_id);
+      if (!swimmer) return null;
+
+      const squadName = swimmer.squads?.name || '';
+      if (globalSquadFilter !== 'All' && squadName !== globalSquadFilter) return null;
+
+      const session = sessions.find(s => s.id === m.session_id || s.scm_guid === m.session_id);
+      if (!session) return null;
+
+      const presentCount = attendance.filter(a =>
+        a.swimmer_id === m.swimmer_id && a.session_id === m.session_id
+      ).length;
+
+      if (presentCount > 0) return null;
+
+      return {
+        swimmerId: swimmer.id,
+        swimmerName: swimmer.full_name,
+        squadName,
+        sessionName: session.name,
+        sessionDay: session.day_of_week,
+        sessionTime: session.start_time,
+      };
+    }).filter(Boolean).sort((a, b) =>
+      (a.squadName || '').localeCompare(b.squadName || '') ||
+      (a.sessionName || '').localeCompare(b.sessionName || '')
+    );
+  }, [memberships, swimmers, sessions, attendance, globalSquadFilter]);
+
+  const handlePrintReport = () => { window.print(); };
+
+  const handleCapacityExport = () => {
+    setIsExporting(true);
+    // Simulation state is ephemeral React state — must use browser print, not Puppeteer
+    setTimeout(() => {
+      window.print();
+      setIsExporting(false);
+    }, 300);
+  };
+
+  // Waitlist Yield: how many new swimmers can be admitted per squad if ghost allocations are removed
+  const waitlistYields = useMemo(() => {
+    if (ghostAllocations.length === 0) return [];
+
+    // Count freed session slots per squad
+    const freedBySquad = ghostAllocations.reduce((acc, g) => {
+      acc[g.squadName] = (acc[g.squadName] || 0) + 1;
+      return acc;
+    }, {});
+
+    return Object.entries(freedBySquad).map(([squadName, freedSessions]) => {
+      // Find target_sessions_per_week via any swimmer in this squad
+      const ref = swimmers.find(s => s.squads?.name === squadName);
+      const targetSessions = ref?.squads?.target_sessions_per_week;
+      if (!targetSessions || targetSessions <= 0) return null;
+
+      const yieldCount = Math.floor(freedSessions / targetSessions);
+      if (yieldCount <= 0) return null;
+
+      return { squadName, yield: yieldCount };
+    }).filter(Boolean);
+  }, [ghostAllocations, swimmers]);
+
   return (
     <Layout session={session}>
       <Head><title>Pool Space & Capacity | CoachesEye</title></Head>
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          .print-only { display: block !important; }
+          body { background: white !important; color: black !important; }
+          .glass-card { background: white !important; border: none !important; box-shadow: none !important; color: black !important; padding: 0 !important; }
+          .stats-table-glass th, .stats-table-glass td { color: black !important; border-bottom: 1px solid #ccc !important; }
+        }
+      `}</style>
       <div className="container animate-fade-in">
         <div className="flex justify-between items-end mb-8">
           <div>
@@ -145,6 +221,14 @@ export default function CapacityDashboard({ session }) {
                   : { background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', color: 'rgba(255,255,255,0.8)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.3)', padding: '10px 24px', fontSize: '13px', fontWeight: '600', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '10px', backdropFilter: 'blur(12px)', cursor: 'pointer' }}
               >
                 🛠️ Scenario Modeler
+              </button>
+              <button
+                onClick={() => setActiveTab('ghosts')}
+                style={activeTab === 'ghosts'
+                  ? { background: 'linear-gradient(180deg, rgba(80,150,255,0.3) 0%, rgba(20,50,255,0.1) 100%)', border: '1px solid rgba(100,200,255,0.6)', borderRadius: '50px', color: '#ffffff', textShadow: '0 0 5px rgba(255,255,255,0.5)', boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 8px rgba(0,150,255,0.8), 0 0 15px rgba(0,150,255,0.6)', padding: '10px 24px', fontSize: '13px', fontWeight: '700', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '10px', backdropFilter: 'blur(12px)', cursor: 'pointer' }
+                  : { background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', color: 'rgba(255,255,255,0.8)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.3)', padding: '10px 24px', fontSize: '13px', fontWeight: '600', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '10px', backdropFilter: 'blur(12px)', cursor: 'pointer' }}
+              >
+                👻 Ghost Allocations
               </button>
             </div>
 
@@ -301,12 +385,12 @@ export default function CapacityDashboard({ session }) {
               </div>
             ) : activeTab === 'modeler' ? (
               <div className="grid gap-6 animate-fade-in">
-                <div className="glass-card" style={{ padding: '2.5rem', borderTop: '4px solid var(--accent-teal)' }}>
-                  <div className="section-title text-teal-400 mb-2">Swimmer Routing Simulator</div>
-                  <h2 className="text-3xl font-black uppercase mb-6">Micro-Capacity Modeler</h2>
-                  <p className="text-white/50 mb-8 max-w-3xl text-sm leading-relaxed">
+                <div className="glass-card mb-16" style={{ padding: '2.5rem', borderTop: '4px solid var(--accent-teal)' }}>
+                  <div className="section-title">Micro-Capacity Modeler</div>
+                  <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.5rem', maxWidth: '48rem' }}>
                     Add swimmers to a squad to see exactly which existing sessions they would be routed into to hit their minimum hours. The engine packs simulated swimmers into open lane spaces (max 8 per lane) without requiring new pool time, showing the precise impact on your session density.
                   </p>
+                  <div style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', margin: '2rem 0' }} />
 
                   {(() => {
                     let simulatedPlacements = [];
@@ -479,10 +563,19 @@ export default function CapacityDashboard({ session }) {
                               <div key={squadName} className="bg-black/20 rounded-xl p-4 border border-white/5 flex items-center justify-between transition-all hover:border-white/10">
                                 <div>
                                   <h3 className="font-black uppercase text-sm">{squadName}</h3>
-                                  <div className="flex gap-3 mt-1">
-                                    <span className="text-white/40 font-bold text-[10px] tracking-widest uppercase">{targetHours} Hrs/Wk</span>
-                                    <span className="text-amber-400 font-bold text-[10px] tracking-widest uppercase">Yield: {yieldPct}%</span>
-                                    <span className="text-emerald-400 font-bold text-[10px] tracking-widest uppercase">Safe to Add: +{safeAdditions}</span>
+                                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                    <div style={{ background: 'rgba(6,182,212,0.08)', border: '1px solid rgba(6,182,212,0.15)', borderRadius: '8px', padding: '5px 10px', textAlign: 'center', minWidth: '58px', flex: '0 0 auto' }}>
+                                      <div className="kpi-value" style={{ fontSize: '0.9rem', color: 'var(--accent-cyan)', fontWeight: 900, lineHeight: 1.2 }}>{targetHours}h</div>
+                                      <div className="kpi-label" style={{ fontSize: '0.5rem', opacity: 0.7, marginTop: '2px' }}>Per Week</div>
+                                    </div>
+                                    <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.15)', borderRadius: '8px', padding: '5px 10px', textAlign: 'center', minWidth: '58px', flex: '0 0 auto' }}>
+                                      <div className="kpi-value" style={{ fontSize: '0.9rem', color: 'var(--accent-amber)', fontWeight: 900, lineHeight: 1.2 }}>{yieldPct}%</div>
+                                      <div className="kpi-label" style={{ fontSize: '0.5rem', opacity: 0.7, marginTop: '2px' }}>Yield</div>
+                                    </div>
+                                    <div style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: '8px', padding: '5px 10px', textAlign: 'center', minWidth: '58px', flex: '0 0 auto' }}>
+                                      <div className="kpi-value" style={{ fontSize: '0.9rem', color: 'var(--accent-emerald)', fontWeight: 900, lineHeight: 1.2 }}>+{safeAdditions}</div>
+                                      <div className="kpi-label" style={{ fontSize: '0.5rem', opacity: 0.7, marginTop: '2px' }}>Safe Add</div>
+                                    </div>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-2 bg-slate-900 rounded-lg px-3 py-2 border border-white/10">
@@ -508,11 +601,11 @@ export default function CapacityDashboard({ session }) {
                           })}
 
                           {/* CoachesEye Guide */}
-                          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 mt-2 text-xs text-indigo-300/80 leading-relaxed">
-                            <div className="text-indigo-400 font-bold uppercase tracking-widest mb-2 text-[10px]">📘 CoachesEye — Yield Management Guide</div>
-                            <p className="mb-2"><span className="text-white/70 font-bold">Yield coefficient</span> = historical show-up rate per squad (capped 50–100%). A 70% yield means only ~70 of every 100 enrolled swimmers physically attend on any given session.</p>
-                            <p className="mb-2"><span className="text-white/70 font-bold">Oversubscription</span> allows enrolling more athletes than physical lane slots, because not all attend simultaneously. Each simulated swimmer consumes fractional space equal to their yield coefficient.</p>
-                            <p><span className="text-white/70 font-bold">175% hard cap</span>: roster cannot exceed 1.75× physical capacity. <span className="text-emerald-400 font-bold">Green</span> = under 100%. <span className="text-amber-400 font-bold">Amber</span> = over 100%. <span className="text-rose-400 font-bold">Red</span> = over 175% (blocked).</p>
+                          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4 mt-2">
+                            <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '0.75rem' }}>📘 CoachesEye — Yield Management Guide</div>
+                            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '0.5rem' }}><span style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>Yield coefficient</span> = historical show-up rate per squad (capped 50–100%). A 70% yield means only ~70 of every 100 enrolled swimmers physically attend on any given session.</p>
+                            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '0.5rem' }}><span style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>Oversubscription</span> allows enrolling more athletes than physical lane slots, because not all attend simultaneously. Each simulated swimmer consumes fractional space equal to their yield coefficient.</p>
+                            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}><span style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>175% hard cap</span>: roster cannot exceed 1.75× physical capacity. <span className="text-emerald-400 font-bold">Green</span> = under 100%. <span className="text-amber-400 font-bold">Amber</span> = over 100%. <span className="text-rose-400 font-bold">Red</span> = over 175% (blocked).</p>
                           </div>
                         </div>
 
@@ -526,14 +619,20 @@ export default function CapacityDashboard({ session }) {
                               .lg\\:col-span-7, .xl\\:col-span-8 { width: 100% !important; max-width: 100% !important; }
                             }
                           `}</style>
-                          <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center justify-between mb-4" style={{ marginTop: '3rem' }}>
                             <h3 className="text-sm font-bold tracking-widest text-teal-400 uppercase">2. Simulated Routing Impact</h3>
                             {simulatedPlacements.length > 0 && (
                               <button
-                                onClick={() => window.print()}
-                                className="no-print bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 hover:bg-cyan-500/20 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-wider transition-all"
+                                onClick={handleCapacityExport}
+                                disabled={isExporting}
+                                className="btn-premium-intel no-print"
+                                style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', marginLeft: 'auto', marginBottom: '1rem', opacity: isExporting ? 0.7 : 1 }}
                               >
-                                🖨️ Print Committee Report
+                                {isExporting ? (
+                                  <><span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⏳</span> GENERATING PDF...</>
+                                ) : (
+                                  <><span>📄</span> EXPORT COMMITTEE PDF</>
+                                )}
                               </button>
                             )}
                           </div>
@@ -547,8 +646,8 @@ export default function CapacityDashboard({ session }) {
                               {systemWarnings.length > 0 && (
                                 <div className="bg-rose-500/10 border border-rose-500/20 rounded-xl p-4">
                                   <div className="text-rose-400 font-bold text-xs uppercase tracking-widest mb-2">⚠️ Bottleneck Detected</div>
-                                  <ul className="text-sm text-rose-300/80 list-disc pl-4">
-                                    {systemWarnings.map((warn, i) => <li key={i}>{warn}</li>)}
+                                  <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingLeft: '0', listStyle: 'none' }}>
+                                    {systemWarnings.map((warn, i) => <li key={i} style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>{warn}</li>)}
                                   </ul>
                                 </div>
                               )}
@@ -560,25 +659,25 @@ export default function CapacityDashboard({ session }) {
                                 return (
                                   <div className="bg-slate-900/80 border border-white/10 rounded-xl p-8 print:bg-white print:border-gray-200 print:text-black">
                                     <div className="border-b border-white/10 print:border-gray-300 pb-6 mb-6">
-                                      <h4 className="text-white print:text-black font-black uppercase text-2xl mb-2">Committee Proposal: Capacity Expansion</h4>
+                                      <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1rem', marginTop: '3rem' }}>Committee Proposal: Capacity Expansion</h3>
 
                                       {/* YIELD MANAGEMENT EXPLANATION */}
                                       <div className="bg-teal-500/10 print:bg-gray-50 border border-teal-500/20 print:border-gray-300 rounded-lg p-6 mt-6 mb-8">
-                                        <h5 className="text-teal-400 print:text-gray-800 font-black text-sm uppercase tracking-widest mb-4 flex items-center gap-2">
-                                          <span className="text-lg">👁️</span> Methodology: Yield Management &amp; Oversubscription
+                                        <h5 style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '1rem' }}>
+                                          👁️ Methodology: Yield Management &amp; Oversubscription
                                         </h5>
-                                        <p className="text-sm text-white/70 print:text-gray-600 mb-4 leading-relaxed">
-                                          This proposal utilises <strong>Yield Management</strong>. Based on historical attendance data, a percentage of rostered athletes are absent from any given session (due to illness, school commitments, or fatigue).
+                                        <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1rem' }}>
+                                          This proposal utilises <strong style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>Yield Management</strong>. Based on historical attendance data, a percentage of rostered athletes are absent from any given session (due to illness, school commitments, or fatigue).
                                         </p>
-                                        <p className="text-sm text-white/70 print:text-gray-600 mb-5 leading-relaxed">
+                                        <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.25rem' }}>
                                           By decoupling Roster Limits from Physical Lane Limits, we can safely oversubscribe squads. The projections below demonstrate that even with waitlisted athletes added, the <em>actual physical density</em> of the water remains within strict safety parameters.
                                         </p>
                                         <div className="bg-black/20 print:bg-white p-4 rounded-lg border border-white/5 print:border-gray-200">
                                           <h6 className="text-teal-400 print:text-gray-800 font-bold text-[11px] uppercase tracking-widest mb-3">Data Context &amp; Safety Parameters</h6>
-                                          <ul className="text-xs text-white/60 print:text-gray-600 space-y-2 list-disc pl-4 leading-relaxed">
-                                            <li><strong>Time Period:</strong> Yield coefficients are dynamically calculated using a trailing {periodDays}-day historical attendance analysis. This ensures we accurately capture seasonal illness spikes, school exam periods, and fatigue cycles rather than just peak periods.</li>
-                                            <li><strong>Hard Safety Cap:</strong> A strict 175% roster oversubscription ceiling is enforced. The engine mathematically blocks any waitlist additions that would push theoretical maximums beyond this physical pool limit.</li>
-                                            <li><strong>Dynamic Packing:</strong> Simulated athletes are routed mathematically into the timetable to fill fractional "empty water", allowing us to clear the waitlist without requiring additional pool hire or lane space.</li>
+                                          <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingLeft: '0', listStyle: 'none' }}>
+                                            <li style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}><strong style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>Time Period:</strong> Yield coefficients are dynamically calculated using a trailing {periodDays}-day historical attendance analysis. This ensures we accurately capture seasonal illness spikes, school exam periods, and fatigue cycles rather than just peak periods.</li>
+                                            <li style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}><strong style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>Hard Safety Cap:</strong> A strict 175% roster oversubscription ceiling is enforced. The engine mathematically blocks any waitlist additions that would push theoretical maximums beyond this physical pool limit.</li>
+                                            <li style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}><strong style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>Dynamic Packing:</strong> Simulated athletes are routed mathematically into the timetable to fill fractional "empty water", allowing us to clear the waitlist without requiring additional pool hire or lane space.</li>
                                           </ul>
                                         </div>
                                       </div>
@@ -586,9 +685,7 @@ export default function CapacityDashboard({ session }) {
 
                                     {/* SQUAD IMPACT SUMMARY */}
                                     <div className="mb-10">
-                                      <h5 className="text-white print:text-black font-black uppercase text-xl mb-6 border-b border-white/10 print:border-gray-300 pb-3">
-                                        Squad Size Projections
-                                      </h5>
+                                      <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1rem', marginTop: '3rem' }}>Squad Size Projections</h3>
                                       <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
                                         {Object.entries(simAdjustments).filter(([sq, val]) => val > 0 && (globalSquadFilter === 'All' || sq === globalSquadFilter)).map(([squadName, added], idx) => {
                                           const currentSize = swimmers.filter(s => s.squads?.name === squadName).length;
@@ -610,9 +707,7 @@ export default function CapacityDashboard({ session }) {
                                     </div>
 
                                     <div className="grid gap-4 mt-4">
-                                      <h5 className="text-white print:text-black font-black uppercase text-xl mb-2 border-b border-white/10 print:border-gray-300 pb-3">
-                                        Impacted Session Details
-                                      </h5>
+                                      <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1rem', marginTop: '3rem' }}>Impacted Session Details</h3>
                                       {/* TABLE HEADERS */}
                                       <div className="flex justify-between items-center px-4 pb-2 border-b border-white/10 print:border-gray-300 text-xs font-bold text-white/50 print:text-gray-500 uppercase tracking-widest">
                                         <div>Session Timeline</div>
@@ -648,9 +743,9 @@ export default function CapacityDashboard({ session }) {
                                         return (
                                           <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', marginBottom: '8px' }}>
                                             <div style={{ width: '33%' }}>
-                                              <div style={{ color: 'var(--accent-teal)', fontWeight: 700, fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>{s.day_of_week} • {s.start_time}</div>
-                                              <div style={{ color: '#fff', fontWeight: 900, fontSize: '15px', lineHeight: 1.2 }}>{s.name}</div>
-                                              <div style={{ color: 'var(--accent-emerald)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, marginTop: '8px' }}>Waitlist Cleared: +{added} Swimmer{added !== 1 ? 's' : ''}</div>
+                                              <div style={{ color: 'var(--accent-teal)', fontWeight: 600, fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '4px' }}>{s.day_of_week} • {s.start_time}</div>
+                                              <div style={{ opacity: 1, fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.4, color: 'var(--text-primary)' }}>{s.name}</div>
+                                              <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginTop: '6px' }}>Waitlist Cleared: <span style={{ opacity: 1, fontWeight: 600, color: 'var(--accent-emerald)' }}>+{added} Swimmer{added !== 1 ? 's' : ''}</span></div>
                                             </div>
                                             <div style={{ width: '66%', display: 'flex', gap: '24px', alignItems: 'center', justifyContent: 'flex-end' }}>
 
@@ -658,12 +753,12 @@ export default function CapacityDashboard({ session }) {
                                               <div style={{ width: '190px' }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '4px' }}>
                                                   <div>
-                                                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Roster</div>
-                                                    <div style={{ fontSize: '14px', fontWeight: 700, color: 'rgba(255,255,255,0.7)' }}>{currentRosterDensity}% <span style={{ fontSize: '10px', fontWeight: 400 }}>({s.currentRoster}/{s.physicalCap})</span></div>
+                                                    <div style={{ fontSize: '0.6rem', opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, color: 'var(--text-primary)' }}>Roster</div>
+                                                    <div style={{ fontSize: '0.85rem', fontWeight: 700, lineHeight: 1.4 }}>{currentRosterDensity}% <span style={{ fontSize: '0.75rem', fontWeight: 400, opacity: 0.8 }}>({s.currentRoster}/{s.physicalCap})</span></div>
                                                   </div>
                                                   <div style={{ textAlign: 'right' }}>
-                                                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent-teal)', opacity: 0.8 }}>Actual</div>
-                                                    <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--accent-teal)' }}>{currentPhysicalDensity}% <span style={{ fontSize: '10px', fontWeight: 400 }}>({expectedCurrentBodies}/{s.physicalCap})</span></div>
+                                                    <div style={{ fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent-teal)', fontWeight: 600 }}>Actual</div>
+                                                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-teal)', lineHeight: 1.4 }}>{currentPhysicalDensity}% <span style={{ fontSize: '0.75rem', fontWeight: 400, opacity: 0.8 }}>({expectedCurrentBodies}/{s.physicalCap})</span></div>
                                                   </div>
                                                 </div>
                                                 {/* Graphic Bar */}
@@ -681,12 +776,12 @@ export default function CapacityDashboard({ session }) {
                                               <div style={{ width: '190px' }}>
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '4px' }}>
                                                   <div>
-                                                    <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Roster</div>
-                                                    <div style={{ fontSize: '14px', fontWeight: 700, color: newRosterDensity > 100 ? 'var(--accent-rose)' : 'rgba(255,255,255,0.7)' }}>{newRosterDensity}% <span style={{ fontSize: '10px', fontWeight: 400 }}>({s.simRoster}/{s.physicalCap})</span></div>
+                                                    <div style={{ fontSize: '0.6rem', opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, color: 'var(--text-primary)' }}>Roster</div>
+                                                    <div style={{ fontSize: '0.85rem', fontWeight: 700, lineHeight: 1.4, color: newRosterDensity > 100 ? 'var(--accent-rose)' : 'inherit' }}>{newRosterDensity}% <span style={{ fontSize: '0.75rem', fontWeight: 400, opacity: 0.8 }}>({s.simRoster}/{s.physicalCap})</span></div>
                                                   </div>
                                                   <div style={{ textAlign: 'right' }}>
-                                                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent-teal)', opacity: 0.8 }}>Actual</div>
-                                                    <div style={{ fontSize: '14px', fontWeight: 700, color: expectedPhysicalDensity > 100 ? 'var(--accent-amber)' : 'var(--accent-emerald)' }}>{expectedPhysicalDensity}% <span style={{ fontSize: '10px', fontWeight: 400 }}>({expectedSimBodies}/{s.physicalCap})</span></div>
+                                                    <div style={{ fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent-teal)', fontWeight: 600 }}>Actual</div>
+                                                    <div style={{ fontSize: '0.85rem', fontWeight: 700, lineHeight: 1.4, color: expectedPhysicalDensity > 100 ? 'var(--accent-amber)' : 'var(--accent-emerald)' }}>{expectedPhysicalDensity}% <span style={{ fontSize: '0.75rem', fontWeight: 400, opacity: 0.8 }}>({expectedSimBodies}/{s.physicalCap})</span></div>
                                                   </div>
                                                 </div>
                                                 {/* Graphic Bar */}
@@ -712,36 +807,36 @@ export default function CapacityDashboard({ session }) {
                                   <div key={i} className="bg-teal-500/5 border border-teal-500/20 rounded-xl p-6">
                                     <div className="flex justify-between items-start mb-4">
                                       <div>
-                                        <div className="text-teal-400 font-bold text-xs uppercase tracking-widest mb-1">{sim.squad} ({(sim.yieldCoeff * 100).toFixed(0)}% Yield)</div>
+                                        <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--accent-teal)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>{sim.squad} ({(sim.yieldCoeff * 100).toFixed(0)}% Yield)</div>
                                         <h4 className="text-xl font-black uppercase">Simulated Swimmer #{sim.swimmerNum}</h4>
                                       </div>
                                       <div className="text-right">
-                                        <div className="text-white/50 font-bold text-[10px] uppercase tracking-widest mb-1">Assigned Hours</div>
+                                        <div style={{ fontSize: '0.6rem', opacity: 0.8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', color: 'var(--text-primary)' }}>Assigned Hours</div>
                                         <div className={`text-lg font-black ${sim.hoursAssigned < sim.targetHours ? 'text-rose-400' : 'text-emerald-400'}`}>
-                                          {sim.hoursAssigned}h <span className="text-sm text-white/50 font-bold">/ {sim.targetHours}h</span>
+                                          {sim.hoursAssigned}h <span style={{ fontSize: '0.85rem', opacity: 0.8, fontWeight: 500 }}>/ {sim.targetHours}h</span>
                                         </div>
                                       </div>
                                     </div>
 
                                     <div className="bg-black/40 rounded-lg p-4 border border-white/5">
-                                      <div className="text-[10px] text-white/50 font-bold uppercase tracking-widest mb-3">Timetable Routing & Oversubscription Density</div>
+                                      <div style={{ fontSize: '0.6rem', opacity: 0.8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.75rem', color: 'var(--text-primary)' }}>Timetable Routing & Oversubscription Density</div>
 
                                       {sim.assignments.length === 0 && (
-                                        <div className="text-rose-400 text-xs font-bold">No physical lane space exists under current isolation rules.</div>
+                                        <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, color: 'var(--accent-rose)' }}>No physical lane space exists under current isolation rules.</div>
                                       )}
 
                                       {sim.assignments.map((assignment, j) => {
                                         const s = assignment.sess;
                                         const newDensity = Math.round((assignment.newSimRoster / assignment.physicalCap) * 100);
                                         return (
-                                          <div key={j} className="flex justify-between items-center border-b border-white/5 pb-3 mb-3 last:border-0 last:pb-0 last:mb-0 text-sm">
+                                          <div key={j} className="flex justify-between items-center border-b border-white/5 pb-3 mb-3 last:border-0 last:pb-0 last:mb-0" style={{ fontSize: '0.85rem', lineHeight: 1.6 }}>
                                             <div>
-                                              <span className="text-teal-400 font-bold mr-2">{s.day_of_week}</span>
-                                              <span className="text-white font-bold">{s.name}</span>
-                                              <span className="text-white/40 ml-2 text-xs">({s.start_time})</span>
+                                              <span style={{ color: 'var(--accent-teal)', fontWeight: 600, marginRight: '0.5rem' }}>{s.day_of_week}</span>
+                                              <span style={{ opacity: 1, fontWeight: 600, color: 'var(--text-primary)' }}>{s.name}</span>
+                                              <span style={{ opacity: 0.5, marginLeft: '0.5rem', fontSize: '0.8rem' }}>({s.start_time})</span>
                                             </div>
                                             <div className="text-right flex flex-col items-end">
-                                              <span className="text-white/50 font-bold text-[10px] uppercase mb-1">Roster vs Physical Cap</span>
+                                              <span style={{ fontSize: '0.6rem', opacity: 0.8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px', color: 'var(--text-primary)' }}>Roster vs Physical Cap</span>
                                               <span className="font-black text-sm px-2 py-1 rounded border" style={{
                                                 backgroundColor: newDensity > 175 ? 'rgba(244, 63, 94, 0.1)' : (newDensity > 100 ? 'rgba(251, 191, 36, 0.1)' : 'rgba(16, 185, 129, 0.1)'),
                                                 borderColor: newDensity > 175 ? 'rgba(244, 63, 94, 0.2)' : (newDensity > 100 ? 'rgba(251, 191, 36, 0.2)' : 'rgba(16, 185, 129, 0.2)'),
@@ -765,6 +860,95 @@ export default function CapacityDashboard({ session }) {
                     );
                   })()}
                 </div>
+              </div>
+            ) : activeTab === 'ghosts' ? (
+              <div className="glass-card animate-fade-in" style={{ padding: '2.5rem' }}>
+                <div className="print-only" style={{ display: 'none', textAlign: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '2px solid #000' }}>
+                  <h1 style={{ fontSize: '24px', fontWeight: '900', letterSpacing: '0.1em', margin: '0 0 8px 0' }}>COACHESEYE STRATEGIC INTELLIGENCE</h1>
+                  <h2 style={{ fontSize: '16px', fontWeight: '600', opacity: 0.8, margin: 0 }}>Ghost Allocations & Capacity Reclamation Report</h2>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <div className="section-title">Capacity Reclamation</div>
+                    <h3 className="text-3xl font-black uppercase mb-2">Ghost Allocations <span style={{ color: 'var(--accent-rose)' }}>({ghostAllocations.length})</span></h3>
+                    <p className="text-white/50 text-sm max-w-2xl" style={{ margin: 0 }}>
+                      Swimmers with a formal session membership but <strong className="text-white">zero recorded swims</strong> in the selected period ({periodDays} days).
+                      These allocations hold lane capacity without contributing to session utilisation.
+                      Review for removal or follow-up.
+                    </p>
+                  </div>
+                  {ghostAllocations.length > 0 && (
+                    <button
+                      onClick={handlePrintReport}
+                      className="btn-premium-action mini no-print"
+                      style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}
+                    >
+                      <span>📄</span> Export PDF Report
+                    </button>
+                  )}
+                </div>
+
+                {waitlistYields.length > 0 && (
+                  <div className="yield-matrix mb-8 no-print">
+                    <div className="kpi-label-mini text-emerald-400 mb-2" style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#34d399', marginBottom: '0.5rem' }}>
+                      💡 Waitlist Admission Yield
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {waitlistYields.map(y => (
+                        <div key={y.squadName} style={{ background: 'linear-gradient(145deg, rgba(16,185,129,0.1) 0%, rgba(5,150,105,0.05) 100%)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: '16px', padding: '16px', textAlign: 'center' }}>
+                          <div style={{ fontSize: '2rem', fontWeight: '900', color: '#34d399', lineHeight: '1' }}>+{y.yield}</div>
+                          <div style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.8, marginTop: '4px', color: '#fff' }}>{y.squadName} Slots</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {ghostAllocations.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '4rem 2rem', gap: '1rem', background: 'rgba(16,185,129,0.05)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: '16px' }}>
+                    <div style={{ fontSize: '3rem' }}>✅</div>
+                    <div style={{ fontWeight: 900, fontSize: '1.1rem', color: 'var(--accent-emerald)' }}>All Clear — No Ghost Allocations</div>
+                    <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem' }}>
+                      Every scheduled allocation has at least one recorded swim in the last {periodDays} days.
+                    </div>
+                  </div>
+                ) : (
+                  <table className="stats-table-glass w-full" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                        <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Swimmer</th>
+                        <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Squad</th>
+                        <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Scheduled Session</th>
+                        <th style={{ textAlign: 'center', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Attendance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ghostAllocations.map((g, idx) => (
+                        <tr key={`${g.swimmerId}-${g.sessionName}-${idx}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                        >
+                          <td style={{ padding: '14px 16px', fontWeight: 700, color: '#fff', fontSize: '0.9rem' }}>{g.swimmerName}</td>
+                          <td style={{ padding: '14px 16px' }}>
+                            <span style={{ background: 'rgba(6,182,212,0.15)', border: '1px solid rgba(6,182,212,0.3)', color: 'var(--accent-cyan)', borderRadius: '6px', padding: '3px 10px', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              {g.squadName}
+                            </span>
+                          </td>
+                          <td style={{ padding: '14px 16px', color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>
+                            <span style={{ fontWeight: 700, textTransform: 'capitalize', color: 'rgba(255,255,255,0.9)' }}>{g.sessionDay}</span>
+                            {g.sessionTime && <span style={{ color: 'rgba(255,255,255,0.4)', marginLeft: '6px' }}>{g.sessionTime}</span>}
+                            <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', marginTop: '2px' }}>{g.sessionName}</div>
+                          </td>
+                          <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                            <span style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171', borderRadius: '6px', padding: '4px 12px', fontSize: '0.7rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                              👻 0 Recorded Swims
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             ) : null}
           </>

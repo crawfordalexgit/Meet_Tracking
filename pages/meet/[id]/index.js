@@ -261,12 +261,46 @@ export default function MeetReport({ session }) {
     await supabase.from('meets').update({ pdf_text: null }).eq('id', id);
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     setIsExporting(true);
-    setTimeout(() => {
-      window.print();
+    try {
+      const browserStorage = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        browserStorage[key] = localStorage.getItem(key);
+      }
+
+      const res = await fetch('/api/export-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meetId: meet.id,
+          meetName: meet.name,
+          type: 'meet',
+          storage: browserStorage
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to generate PDF (Server Error)');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${meet.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (error) {
+      console.error('Export error:', error);
+      alert(error.message || 'Failed to generate PDF report.');
+    } finally {
       setIsExporting(false);
-    }, 500);
+    }
   };
 
   const handleStaffUpload = async (e) => {
@@ -837,7 +871,7 @@ export default function MeetReport({ session }) {
                 <>
                   <div className="flex justify-between items-start mb-10">
                     <div>
-                      <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--accent-cyan)', letterSpacing: '0.2em', textTransform: 'uppercase' }}>CoachesEye Premium Community Report</div>
+                      <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--accent-cyan)', letterSpacing: '0.2em', textTransform: 'uppercase' }}>CoachesEye Gala Report</div>
                       <h3 style={{ fontSize: '2.5rem', fontWeight: 950, margin: '12px 0 0', letterSpacing: '-0.02em' }}>{meet.name} Report</h3>
                     </div>
                     <div className="flex gap-3">

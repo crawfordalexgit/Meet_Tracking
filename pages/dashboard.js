@@ -89,7 +89,7 @@ export default function Dashboard({ session }) {
       return [];
     }
     let all = []; let page = 0; let more = true;
-    while (more && page < 20) {
+    while (more && page < 100) {
       let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
       if (filter) q = filter(q);
       const { data: d, error } = await q;
@@ -1193,11 +1193,11 @@ export default function Dashboard({ session }) {
 
           <div className="flex gap-4">
              {/* Predictor boxes */}
-             <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/qt-predictor?level=county&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+             <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/predictor?level=county&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff' }}>{qualifiers?.county || 27}</div>
                 <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>County Predictor</div>
              </div>
-             <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/qt-predictor?level=regional&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+             <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/predictor?level=regional&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{qualifiers?.regional || 9}</div>
                 <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent-cyan)', marginTop: '4px' }}>Regional Predictor</div>
              </div>

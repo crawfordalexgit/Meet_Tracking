@@ -118,8 +118,8 @@ export default function AiInsightCard({
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div style={{ flex: '1 1 30%', minWidth: '200px' }}>
             <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '4px' }}>CoachesEye Insights Lab</div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 900, margin: '0 0 6px 0', letterSpacing: '-0.02em' }}>Technical Performance Analysis</h3>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', lineHeight: '1.4', margin: 0 }}>
+            <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>Technical Performance Analysis</h3>
+            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, margin: 0 }}>
               Synthesizing technical metrics, drop-off ratios, and technical benchmarks into an actionable technical roadmap.
             </p>
           </div>
@@ -235,15 +235,15 @@ export default function AiInsightCard({
       )}
 
       <div className="mb-10">
-        <h2 style={{ fontSize: '2.2rem', fontWeight: 900, marginBottom: '1.5rem', color: 'var(--accent-cyan)', letterSpacing: '-0.03em' }}>{insight.headline}</h2>
+        <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{insight.headline}</h3>
 
       {insight.summary && <><div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
           <div className="md:col-span-2">
              <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Executive Profile</h4>
-             <p style={{ fontSize: '1rem', lineHeight: '1.6', color: 'var(--text-primary)', marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
+             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
              
              <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Technical Review</h4>
-             <div style={{ lineHeight: '1.7', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+             <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>
                {(insight.analysis || '').split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1rem' }}>{p}</p>)}
              </div>
           </div>
@@ -270,6 +270,37 @@ export default function AiInsightCard({
             </div>
           </div>
         </div>
+
+        {/* Beautiful SWOT Quadrant Grid */}
+        {insight.swot_analysis && (
+            <div style={{ marginTop: '2.5rem', marginBottom: '2.5rem' }}>
+                <h3 className="section-title" style={{ color: 'var(--accent-cyan)', marginBottom: '1.5rem' }}>SWOT Analysis</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
+                    {[
+                        { title: 'STRENGTHS', data: insight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.05)' },
+                        { title: 'WEAKNESSES', data: insight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.05)' },
+                        { title: 'OPPORTUNITIES', data: insight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.05)' },
+                        { title: 'THREATS', data: insight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.05)' }
+                    ].map((item, idx) => (
+                        <div key={idx} style={{ background: item.bg, border: `1px solid ${item.color}`, borderRadius: '12px', padding: '1.5rem' }}>
+                            <h4 style={{ color: item.color, margin: '0 0 1rem 0', fontSize: '0.85rem', fontWeight: 900, letterSpacing: '0.1em' }}>{item.title}</h4>
+                            <div 
+                                style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.7' }} 
+                                dangerouslySetInnerHTML={{ 
+                                    __html: (item.data || 'No data generated.')
+                                        // Replace **Text** with White Bold Text
+                                        .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
+                                        // Replace * with clean bullet points and line breaks
+                                        .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
+                                        // Clean up any leading breaks
+                                        .replace(/^<br\/>/, '')
+                                }} 
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-white/5">
           <div>
@@ -351,14 +382,14 @@ export default function AiInsightCard({
         <div className="flex justify-between items-center mb-4">
           <div>
             <div className="insight-tag" style={{ color: 'var(--accent-amber)' }}>VORONTSOV PARENTAL FRAMEWORK</div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase', margin: 0 }}>Parent Development Audit</h3>
+            <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>Parent Development Audit</h3>
           </div>
           <button className="period-btn" onClick={() => setParentInsight(null)} style={{ fontSize: '0.6rem' }}>✕ Close</button>
         </div>
-        {loadingParent && <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--accent-amber)', fontSize: '0.85rem' }}>👪 Generating parental guidance report...</div>}
+        {loadingParent && <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--accent-amber)', fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>👪 Generating parental guidance report...</div>}
         {parentInsight && !parentInsight.error && (
           <div className="space-y-4">
-            <h4 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#fff', margin: 0 }}>{parentInsight.headline}</h4>
+            <h4 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.5rem' }}>{parentInsight.headline}</h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>{parentInsight.overview}</p>
             {parentInsight.development_context && (
               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6, background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '10px' }}>{parentInsight.development_context}</p>

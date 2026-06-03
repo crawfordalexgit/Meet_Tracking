@@ -1,6 +1,6 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.0-beta.1",
+  "version": "1.0.93",
   "description": "",
   "scripts": {
     "dev": "next dev",
@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
+    "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.105.4",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
@@ -20,6 +21,7 @@
     "formidable": "^3.5.4",
     "next": "^16.2.6",
     "puppeteer": "^24.43.1",
+    "puppeteer-core": "^24.43.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-hot-toast": "^2.6.0",

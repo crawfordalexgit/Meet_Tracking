@@ -20,6 +20,7 @@
 - **READ BEFORE WRITE**: Always run a quick git diff or check the git history of a file before modifying it to understand recent custom additions.
 - **DO NOT REFACTOR UNLESS ASKED**: Keep changes strictly localized. Do not touch adjacent functions, clean up "styled" code, or simplify custom logic unless it is part of the explicit request.
 - **VERIFICATION**: Always validate changes by running `npm run build` or the local build script before declaring a task completed.
+- **Automatic Version Bumping**: Every time you successfully execute a code modification or feature implementation, you MUST increment the patch version number (e.g., `1.0.1` to `1.0.2`) in `package.json` as your final step before completing the task.
 
 ## 6. Project-Specific "AI DNA" (DO NOT OVERWRITE)
 - **Athlete Identity**: Legal name vs. preferred ("Known As") alias mapping in SCM pipelines must be preserved.

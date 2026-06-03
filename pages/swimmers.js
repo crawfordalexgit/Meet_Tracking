@@ -37,7 +37,7 @@ export default function SwimmersRegistry({ session }) {
       const y1ago = new Date(new Date() - period * 86400000).toISOString();
       const fetchPaged = async (table, select = '*', filter = null) => {
         let all = []; let page = 0; let more = true;
-        while (more && page < 20) {
+        while (more && page < 100) {
           let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
           if (filter) q = filter(q);
           const { data } = await q;

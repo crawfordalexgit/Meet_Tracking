@@ -64,7 +64,7 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
       <div className="flex justify-between items-start mb-12">
         <div>
           <div className="section-title" style={{ marginBottom: 8, color: 'var(--accent-cyan)', fontSize: '0.8rem' }}>CoachesEye Insights: Performance Audit</div>
-          <h2 className="text-2xl font-black tracking-tight uppercase">{displayData.headline}</h2>
+          <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{displayData.headline}</h3>
         </div>
         <div style={{ padding: '6px 12px', background: 'rgba(6, 182, 212, 0.1)', borderRadius: '8px', border: '1px solid rgba(6, 182, 212, 0.2)' }}>
           <span style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>DNA VERIFIED: {new Date().getFullYear()} SEASON</span>
@@ -95,12 +95,12 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
         <div className="flex flex-col gap-8">
           <section>
             <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.1em' }}>1. Performance Overview</h4>
-            <p style={{ fontSize: '1rem', lineHeight: 1.7, opacity: 0.9, fontWeight: 500 }}>{displayData.overview}</p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>{displayData.overview}</p>
           </section>
           
           <section>
             <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.1em' }}>2. Training Attendance Audit</h4>
-            <p style={{ fontSize: '1rem', lineHeight: 1.7, opacity: 0.9, fontWeight: 500, marginBottom: 12 }}>{displayData.training_analysis}</p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: 12 }}>{displayData.training_analysis}</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
                 <span style={{ opacity: 0.6, fontWeight: 700 }}>⏱️ Weekly Hours Compliance</span>
@@ -121,14 +121,14 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
           
           <section>
             <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.1em' }}>3. Competition Strategy & Usage</h4>
-            <p style={{ fontSize: '1rem', lineHeight: 1.7, opacity: 0.9, fontWeight: 500 }}>{displayData.open_meet_analysis}</p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>{displayData.open_meet_analysis}</p>
           </section>
         </div>
 
         <div className="flex flex-col gap-8">
           <section>
             <h4 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: 12, letterSpacing: '0.1em' }}>4. Attendance-Performance Correlation</h4>
-            <p style={{ fontSize: '1rem', lineHeight: 1.7, opacity: 0.9, fontWeight: 500 }}>{displayData.performance_link}</p>
+            <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>{displayData.performance_link}</p>
           </section>
 
           <section style={{ padding: '2rem', background: 'rgba(6, 182, 212, 0.05)', borderRadius: '24px', border: '1px solid rgba(6, 182, 212, 0.1)' }}>
@@ -138,7 +138,7 @@ export default function CoachesEyeDeepDive({ results, attendance, sessions, swim
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {displayData.recommendations?.map((rec, i) => (
-                <li key={i} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', fontSize: '0.95rem', fontWeight: 600, color: 'rgba(255,255,255,0.95)' }}>
+                <li key={i} style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>
                   <span style={{ color: 'var(--accent-cyan)' }}>•</span>
                   <span>{rec}</span>
                 </li>

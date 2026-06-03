@@ -1,7 +1,50 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import PremiumOrb from './PremiumOrb';
+import { supabase } from '../lib/supabase';
 import { normalizeEvent, timeToSeconds } from '../lib/analytics-utils';
 import { getBenchmarks, timeStringToSeconds, secondsToTimeString } from '../lib/qualifying-times';
+
+function getMaxAcceptedSwimmers(eventStr, age) {
+  const younger = age < 17;
+  if (eventStr.startsWith('50'))  return younger ? 34 : 46;
+  if (eventStr.startsWith('100')) return younger ? 21 : 24;
+  if (eventStr.startsWith('200')) return younger ? 16 : 18;
+  return 14;
+}
+
+function TrafficLightBadge({ rank, maxAccepted }) {
+  const r = rank ? parseInt(rank) : null;
+  if (!r || r <= 0) {
+    return (
+      <span style={{ display: 'inline-block', padding: '2px 6px', background: 'rgba(239,68,68,0.15)', color: '#ef4444', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 900, letterSpacing: '0.04em' }}>
+        🔴 UNRANKED
+      </span>
+    );
+  }
+  const isGreen = r <= maxAccepted;
+  const isAmber = !isGreen && r <= maxAccepted + 10;
+  const color = isGreen ? '#10b981' : isAmber ? '#f59e0b' : '#ef4444';
+  const bg    = isGreen ? 'rgba(16,185,129,0.12)' : isAmber ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)';
+  const dot   = isGreen ? '🟢' : isAmber ? '🟠' : '🔴';
+  const label = isGreen ? 'SAFE' : isAmber ? 'BUBBLE' : 'OUTSIDE';
+  return (
+    <span style={{ display: 'inline-block', padding: '2px 6px', background: bg, color, borderRadius: '4px', fontSize: '0.6rem', fontWeight: 900, whiteSpace: 'nowrap' }}>
+      {dot} #{r}/{maxAccepted} {label}
+    </span>
+  );
+}
+
+const getBestPbRecord = (results, eventName) => {
+    const target = normalizeEvent(eventName);
+    const validResults = (results || []).filter(r => normalizeEvent(r.event || '') === target && r.time);
+    if (validResults.length === 0) return null;
+    
+    // Sort to find the fastest time
+    validResults.sort((a, b) => timeToSeconds(a.time) - timeToSeconds(b.time));
+    
+    // CRITICAL FIX: Grab the first object out of the sorted array
+    return validResults[0];
+};
 
 function isLongCourse(r) {
   const meetName = r.meets?.name?.toLowerCase() || '';
@@ -21,14 +64,57 @@ function getStandardEventName(event) {
   return event;
 }
 
-export default function SquadQualificationPredictor({ swimmers = [], results = [], squads = [], defaultLevel, defaultYear }) {
+export default function SquadQualificationPredictor({ swimmers = [], results = [], squads = [], defaultLevel, defaultYear, rankings: propRankings = [] }) {
   const [targetLevel, setTargetLevel] = useState(defaultLevel || 'COUNTY');
+  const [rankings, setRankings] = useState(propRankings || []);
   const [manualYearOverride, setManualYearOverride] = useState(defaultYear || null);
   const [eventCategory, setEventCategory] = useState('sprints');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMode, setFilterMode] = useState('all'); // 'all', 'auto_met', 'cons_met'
   const [selectedSquad, setSelectedSquad] = useState('all');
   const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'asc' });
+
+  useEffect(() => {
+    if (propRankings && propRankings.length > 0) {
+      setRankings(propRankings);
+    }
+  }, [propRankings]);
+
+  useEffect(() => {
+      // Extract all IDs from the squad array
+      const swimmerIds = (swimmers || []).map(s => s.id).filter(Boolean);
+      if (swimmerIds.length === 0) return;
+
+      supabase
+          .from('rankings')
+          .select('*')
+          .in('swimmer_id', swimmerIds)
+          .then(({ data, error }) => {
+              if (!error && data) {
+                  setRankings(data);
+              }
+          });
+  }, [swimmers]);
+
+  const getRankForPbCourse = (swimmerId, eventName, level, pbCourse) => {
+      if (!rankings || rankings.length === 0) return null;
+
+      const targetDistrict = level?.toUpperCase() === 'REGIONAL' ? 'SOUTH EAST' : 'KENT';
+      const targetEvent = normalizeEvent(eventName);
+      const safeCourse = (pbCourse || 'SC').toUpperCase();
+      const targetPool = safeCourse === 'LC' ? 'L' : 'S';
+
+      const match = rankings.find(r => {
+          const isSwimmerMatch = r.swimmer_id === swimmerId;
+          const isEventMatch = normalizeEvent(r.stroke || '') === targetEvent;
+          const isDistrictMatch = (r.district || '').trim().toUpperCase() === targetDistrict;
+          const isPoolMatch = r.pool?.toUpperCase() === targetPool;
+          
+          return isSwimmerMatch && isEventMatch && isDistrictMatch && isPoolMatch;
+      });
+
+      return match ? parseInt(match.rank) : null;
+  };
 
   React.useEffect(() => {
     if (defaultLevel) {
@@ -566,13 +652,15 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
               filteredAndSorted.map((swimmer) => {
                 const yob = swimmer.yob;
                 const swimmerAge = swimmer.swimmerAge;
+                const currentAge = swimmer.yob ? new Date().getFullYear() - swimmer.yob : (swimmer.swimmerAge || 14);
+
                 return (
                   <tr key={swimmer.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                     <td style={{ padding: '1rem', fontWeight: 800, whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         <span style={{ color: 'white' }}>{swimmer.full_name || swimmer.known_as}</span>
                         <span style={{ fontSize: '0.65rem', opacity: 0.5, marginTop: '2px' }}>
-                          {swimmer.gender} • {swimmerAge} Yrs (YOB: {yob || '?'})
+                           {swimmer.gender} • {swimmerAge} Yrs (YOB: {yob || '?'})
                         </span>
                       </div>
                     </td>
@@ -582,6 +670,12 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
                       const tooltipText = targets
                         ? `${targetLevel} Target Times (${targetAge} Yrs):\n• Auto SC: ${formatTime(targets.autoSC)} | LC: ${formatTime(targets.autoLC)}\n• Cons SC: ${formatTime(targets.consSC)} | LC: ${formatTime(targets.consLC)}`
                         : 'No standard targets defined for this age/event';
+
+                      const swimmerResults = results.filter(r => r.swimmer_id === swimmer.id);
+                      const bestPb = getBestPbRecord(swimmerResults, evt);
+                      const swimmerRank = getRankForPbCourse(swimmer.id, evt, targetLevel, bestPb?.course);
+
+                      const maxAccepted = getMaxAcceptedSwimmers(evt, currentAge);
 
                       let bg = 'rgba(255, 255, 255, 0.01)';
                       let borderLeft = 'none';
@@ -627,6 +721,9 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
                                 {bestCons.isQualified ? `Cons Met [${bestCons.course}]` : `Cons: +${bestCons.gap.timeGap.toFixed(2)}s`}
                               </div>
                             )}
+                            <div style={{ marginTop: '4px' }}>
+                              <TrafficLightBadge rank={swimmerRank} maxAccepted={maxAccepted} />
+                            </div>
                           </div>
                         </td>
                       );
