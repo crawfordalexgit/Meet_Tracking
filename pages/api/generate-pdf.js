@@ -1,4 +1,5 @@
-import puppeteer from 'puppeteer';
+import puppeteerCore from 'puppeteer-core';
+import chromium from '@sparticuz/chromium-min';
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -24,10 +25,20 @@ export default async function handler(req, res) {
 
         console.log(`[PDF Engine] Target URL: ${targetUrl}`);
 
-        browser = await puppeteer.launch({
-            headless: "new",
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+        if (process.env.NODE_ENV === 'production' || process.env.CHROMIUM_EXECUTABLE_PATH) {
+            browser = await puppeteerCore.launch({
+                args: chromium.args,
+                defaultViewport: chromium.defaultViewport,
+                executablePath: await chromium.executablePath(process.env.CHROMIUM_EXECUTABLE_PATH),
+                headless: chromium.headless,
+            });
+        } else {
+            const puppeteerLocal = await import('puppeteer');
+            browser = await puppeteerLocal.default.launch({
+                headless: "new",
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+        }
 
         const page = await browser.newPage();
 

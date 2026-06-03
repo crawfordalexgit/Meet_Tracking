@@ -185,6 +185,11 @@ const [decayDistance, setDecayDistance] = useState('100');
   const [normalizeWA, setNormalizeWA] = useState(false);
   const [isWaGuideOpen, setIsWaGuideOpen] = useState(false);
   const [squadTrends, setSquadTrends] = useState({});
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   const allAvailableSplits = useMemo(() => {
     const list = [];
@@ -2009,6 +2014,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                     </div>
 
                     <div style={{ height: '380px', width: '100%' }}>
+                        {isClient && (
                         <ResponsiveContainer width="100%" height="100%">
                             {/* Adjusted margins to make room for the new axis labels */}
                             <ComposedChart data={chartDataWithTrends} margin={{ top: 20, right: 90, left: 20, bottom: 25 }}>
@@ -2124,6 +2130,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                                 />
                             </ComposedChart>
                         </ResponsiveContainer>
+                        )}
                     </div>
 
         </div>
@@ -2393,6 +2400,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                 </div>
              </div>
              <div style={{ height: 350, cursor: 'pointer' }}>
+               {isClient && (
                <ResponsiveContainer width="100%" height="100%">
                  <ComposedChart data={workloadChartData} onClick={(e) => { if (e?.activePayload) setSelectedChartWeek(e.activePayload[0]?.payload); }}>
                    <defs>
@@ -2499,6 +2507,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                    <Line yAxisId="left" type="stepAfter" dataKey="target" name="Target Hours" stroke="rgba(255,255,255,0.2)" strokeDasharray="5 5" dot={false} strokeWidth={2} />
                   </ComposedChart>
                 </ResponsiveContainer>
+                )}
              </div>
               <div style={{ marginTop: '2rem', overflowX: 'auto', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.05)', maxHeight: '400px', overflowY: 'auto' }} className="custom-scrollbar">
                   <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
@@ -2702,6 +2711,7 @@ const [decayDistance, setDecayDistance] = useState('100');
             <div className="section-title relative z-10" style={{ marginBottom: 4 }}>Competitive Load</div>
             <h3 className="text-xl font-black tracking-tight mb-8 relative z-10">Competition Intensity</h3>
             <div style={{ height: 250, position: 'relative', zIndex: 10 }}>
+              {isClient && (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={meetTimelineData}>
                   <defs>
@@ -2724,6 +2734,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              )}
             </div>
           </div>
           <div className="lg:col-span-1 glass-card no-print" style={{ padding: 0, overflow: 'hidden', height: '500px', display: 'flex', flexDirection: 'column' }}>
