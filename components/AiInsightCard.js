@@ -12,7 +12,8 @@ export default function AiInsightCard({
   squadTargetCompliance = 75,
   insight: initialInsight,
   loading: initialLoading,
-  onGenerate
+  onGenerate,
+  type = 'general'
 }) {
   const [insight, setInsight] = useState(initialInsight || null);
   const [loading, setLoading] = useState(initialLoading || false);
@@ -25,18 +26,29 @@ export default function AiInsightCard({
 
   useEffect(() => {
     if (swimmerId) fetchLatestInsight();
-  }, [swimmerId]);
+  }, [swimmerId, type]);
 
   const fetchLatestInsight = async () => {
     try {
       const { data, error } = await supabase
-        .from('swimmer_insights')
+        .from('ai_reports')
         .select('*')
         .eq('swimmer_id', swimmerId)
+        .eq('type', type)
         .order('created_at', { ascending: false })
         .limit(1);
       if (data && data.length > 0) {
-        setInsight(data[0].full_report || data[0]);
+        setInsight(data[0].content || data[0]);
+      } else if (type === 'general') {
+        const { data: legacyData } = await supabase
+          .from('swimmer_insights')
+          .select('*')
+          .eq('swimmer_id', swimmerId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        if (legacyData && legacyData.length > 0) {
+          setInsight(legacyData[0].full_report || legacyData[0]);
+        }
       }
     } catch (err) {
       console.error('Failed to fetch insight', err);
@@ -113,14 +125,19 @@ export default function AiInsightCard({
   };
 
   if (!insight && !loading) {
+    const isTraining = type === 'training';
     return (
       <div className="glass-card animate-fade-in no-print" style={{ padding: '1.5rem 2rem' }}>
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div style={{ flex: '1 1 30%', minWidth: '200px' }}>
             <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '4px' }}>CoachesEye Insights Lab</div>
-            <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>Technical Performance Analysis</h3>
+            <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>
+              {isTraining ? 'Training Workload Analysis' : 'Technical Performance Analysis'}
+            </h3>
             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, margin: 0 }}>
-              Synthesizing technical metrics, drop-off ratios, and technical benchmarks into an actionable technical roadmap.
+              {isTraining 
+                ? 'Synthesizing training consistency, volume benchmarks, and biological maturation metrics into an actionable training plan.'
+                : 'Synthesizing technical metrics, drop-off ratios, and technical benchmarks into an actionable technical roadmap.'}
             </p>
           </div>
           
@@ -130,7 +147,9 @@ export default function AiInsightCard({
             </label>
             <textarea
               className="glass-input w-full"
-              placeholder="Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')..."
+              placeholder={isTraining 
+                ? "Specify directives for this workload audit (e.g. 'Prorate for late start in squad')..." 
+                : "Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')..."}
               value={coachNotes}
               onChange={(e) => setCoachNotes(e.target.value)}
               style={{ 
@@ -149,25 +168,33 @@ export default function AiInsightCard({
           </div>
           
           <div className="flex flex-col gap-2" style={{ flex: '1 1 20%', minWidth: '160px', width: '100%' }}>
-            <button className="intel-toggle w-full" onClick={() => generateInsight('general')} style={{ padding: '10px 16px', fontSize: '0.8rem' }}>
-              <span>✨</span> Performance Insight
-            </button>
-            <button 
-              className="intel-toggle w-full" 
-              onClick={() => generateInsight('burnout')} 
-              style={{ 
-                borderColor: 'var(--accent-rose)', 
-                color: 'var(--accent-rose)', 
-                background: 'rgba(244, 63, 94, 0.1)',
-                padding: '10px 16px',
-                fontSize: '0.8rem'
-              }}
-            >
-              <span>🔥</span> Burnout Check
-            </button>
-            <button className="intel-toggle w-full" onClick={generateParentInsight} style={{ borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)', background: 'rgba(245,158,11,0.1)', padding: '10px 16px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>👪</span> Parent Audit
-            </button>
+            {isTraining ? (
+              <button className="intel-toggle w-full" onClick={() => generateInsight('training')} style={{ padding: '10px 16px', fontSize: '0.8rem' }}>
+                <span>✨</span> Workload Insight
+              </button>
+            ) : (
+              <>
+                <button className="intel-toggle w-full" onClick={() => generateInsight('general')} style={{ padding: '10px 16px', fontSize: '0.8rem' }}>
+                  <span>✨</span> Performance Insight
+                </button>
+                <button 
+                  className="intel-toggle w-full" 
+                  onClick={() => generateInsight('burnout')} 
+                  style={{ 
+                    borderColor: 'var(--accent-rose)', 
+                    color: 'var(--accent-rose)', 
+                    background: 'rgba(244, 63, 94, 0.1)',
+                    padding: '10px 16px',
+                    fontSize: '0.8rem'
+                  }}
+                >
+                  <span>🔥</span> Burnout Check
+                </button>
+                <button className="intel-toggle w-full" onClick={generateParentInsight} style={{ borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)', background: 'rgba(245,158,11,0.1)', padding: '10px 16px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>👪</span> Parent Audit
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -175,11 +202,16 @@ export default function AiInsightCard({
   }
 
   if (loading) {
+    const isTraining = type === 'training';
     return (
       <div className="glass-card animate-fade-in no-print" style={{ padding: '4rem', textAlign: 'center' }}>
         <div className="loading-spinner" style={{ marginBottom: '1.5rem' }}>✨</div>
-        <p className="animate-pulse" style={{ fontSize: '1.1rem', fontWeight: 600 }}>Synthesizing Technical Roadmap...</p>
-        <p style={{ fontSize: '0.7rem', opacity: 0.5, marginTop: '10px' }}>Analyzing Technical DNA & Meet Temperament</p>
+        <p className="animate-pulse" style={{ fontSize: '1.1rem', fontWeight: 600 }}>
+          {isTraining ? 'Synthesizing Workload Audit...' : 'Synthesizing Technical Roadmap...'}
+        </p>
+        <p style={{ fontSize: '0.7rem', opacity: 0.5, marginTop: '10px' }}>
+          {isTraining ? 'Analyzing Consistency DNA & Volume Curves' : 'Analyzing Technical DNA & Meet Temperament'}
+        </p>
       </div>
     );
   }
@@ -192,23 +224,38 @@ export default function AiInsightCard({
       
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-4">
-          <div className="section-title">CoachesEye Insights: Technical Profile</div>
+          <div className="section-title">
+            {type === 'training' ? 'CoachesEye Insights: Training Workload' : 'CoachesEye Insights: Technical Profile'}
+          </div>
           {insight.flag && (
             <div className={`status-badge ${insight.risk_level === 'high' ? 'critical' : (insight.risk_level === 'medium' ? 'attention' : 'success')}`} style={{ fontSize: '0.6rem', padding: '4px 10px' }}>
               {insight.flag}
             </div>
           )}
+          {type === 'training' && insight.attendance_rating && (
+            <div className={`status-badge ${insight.attendance_rating === 'RED' ? 'critical' : (insight.attendance_rating === 'AMBER' ? 'attention' : 'success')}`} style={{ fontSize: '0.6rem', padding: '4px 10px' }}>
+              {insight.attendance_rating} Consistency
+            </div>
+          )}
         </div>
         <div className="flex gap-2 items-center no-print flex-wrap" style={{ zIndex: 10 }}>
-          <button className="btn-premium-action" style={{ padding: '6px 12px', fontSize: '0.65rem' }} onClick={() => generateInsight('general')}>
-            <span>✨</span> PERFORMANCE
-          </button>
-          <button className="btn-premium-intel" style={{ padding: '6px 12px', fontSize: '0.65rem', borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }} onClick={() => generateInsight('burnout')}>
-            <span>🔥</span> BURNOUT
-          </button>
-          <button className="btn-premium-intel" style={{ padding: '6px 12px', fontSize: '0.65rem', borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)' }} onClick={generateParentInsight}>
-            <span>👪</span> PARENT
-          </button>
+          {type === 'training' ? (
+            <button className="btn-premium-action" style={{ padding: '6px 12px', fontSize: '0.65rem' }} onClick={() => generateInsight('training')}>
+              <span>✨</span> WORKLOAD INSIGHT
+            </button>
+          ) : (
+            <>
+              <button className="btn-premium-action" style={{ padding: '6px 12px', fontSize: '0.65rem' }} onClick={() => generateInsight('general')}>
+                <span>✨</span> PERFORMANCE
+              </button>
+              <button className="btn-premium-intel" style={{ padding: '6px 12px', fontSize: '0.65rem', borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }} onClick={() => generateInsight('burnout')}>
+                <span>🔥</span> BURNOUT
+              </button>
+              <button className="btn-premium-intel" style={{ padding: '6px 12px', fontSize: '0.65rem', borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)' }} onClick={generateParentInsight}>
+                <span>👪</span> PARENT
+              </button>
+            </>
+          )}
           <button className="period-btn" onClick={() => handleFeedback(true)} style={{ fontSize: '0.6rem', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981' }}>👍</button>
           <button className="period-btn" onClick={() => handleFeedback(false)} style={{ fontSize: '0.6rem', background: 'rgba(244, 63, 94, 0.1)', color: 'var(--accent-rose)' }}>👎</button>
           <button className="period-btn" onClick={() => onGenerate('reset')} style={{ fontSize: '0.6rem' }}>Reset</button>
@@ -237,10 +284,110 @@ export default function AiInsightCard({
       <div className="mb-10">
         <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{insight.headline}</h3>
 
-      {insight.summary && <><div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-          <div className="md:col-span-2">
-             <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Executive Profile</h4>
-             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
+      {type === 'training' ? (
+        <>
+          {/* SWOT quadrant grid */}
+          {insight.swot_analysis && (
+            <div style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
+                <h4 className="section-title" style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)', marginBottom: '1rem' }}>SWOT Analysis</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                    {[
+                        { title: 'STRENGTHS', data: insight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.03)' },
+                        { title: 'WEAKNESSES', data: insight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)' },
+                        { title: 'OPPORTUNITIES', data: insight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)' },
+                        { title: 'THREATS', data: insight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)' }
+                    ].map((item, idx) => (
+                        <div key={idx} style={{ background: item.bg, border: `1px solid ${item.color}40`, borderRadius: '12px', padding: '1.25rem' }}>
+                            <h4 style={{ color: item.color, margin: '0 0 0.75rem 0', fontSize: '0.8rem', fontWeight: 900, letterSpacing: '0.05em' }}>{item.title}</h4>
+                            <div 
+                                className="swot-quadrant-text text-[0.8rem]"
+                                style={{ color: 'rgba(255,255,255,0.85)', lineHeight: '1.6' }} 
+                                dangerouslySetInnerHTML={{ 
+                                    __html: (item.data || 'No data generated.')
+                                        .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
+                                        .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
+                                        .replace(/^<br\/>/, '')
+                                }} 
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+          )}
+
+          {/* SMART goal block */}
+          {insight.smart_goals && (
+            <div className="glass-card mb-8" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.02)', margin: '1.5rem 0' }}>
+                <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.75rem 0', fontSize: '0.9rem', fontWeight: 900, textTransform: 'uppercase' }}>🎯 SMART Goal: Next 4 Weeks</h4>
+                <div style={{ fontSize: '0.85rem', lineHeight: '1.6' }}>
+                    <div style={{ marginBottom: '0.5rem' }}><strong>Goal:</strong> {insight.smart_goals.current_goal}</div>
+                    <div style={{ marginBottom: '0.5rem' }}><strong>Metric:</strong> {insight.smart_goals.tracking_metric}</div>
+                    <div><strong>Status:</strong> {insight.smart_goals.status}</div>
+                </div>
+            </div>
+          )}
+
+          {/* Squad Comparison & Coach View */}
+          {insight.squad_comparison && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <h4 style={{ color: 'white', margin: '0 0 0.5rem 0', fontSize: '0.85rem', fontWeight: 800 }}>Squad Comparison</h4>
+                    <p style={{ fontSize: '0.8rem', margin: 0, opacity: 0.85, lineHeight: '1.5' }}>{insight.squad_comparison.swimmer_vs_squad}</p>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                    <h4 style={{ color: 'white', margin: '0 0 0.5rem 0', fontSize: '0.85rem', fontWeight: 800 }}>Coach Directives</h4>
+                    <p style={{ fontSize: '0.8rem', margin: 0, opacity: 0.85, lineHeight: '1.5' }}>{insight.squad_comparison.coach_view}</p>
+                </div>
+            </div>
+          )}
+
+          {/* Metrics Deep Dive */}
+          {insight.metrics_deep_dive && (
+            <div className="mb-8">
+                <h4 className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1rem' }}>Metrics Deep Dive</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                        <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Consistency Status</div>
+                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>{insight.metrics_deep_dive.consistency_status}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                        <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Volume Audit</div>
+                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>{insight.metrics_deep_dive.volume_audit}</div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                        <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Racing Readiness</div>
+                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>{insight.metrics_deep_dive.racing_readiness}</div>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {/* Risk Flags & Action Items */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginTop: '1.5rem' }}>
+              {insight.risk_flags && insight.risk_flags.length > 0 && (
+                  <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.15)', padding: '1.25rem', borderRadius: '12px' }}>
+                      <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
+                      <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', opacity: 0.9, lineHeight: '1.5' }}>
+                          {insight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 4 }}>{flag}</li>)}
+                      </ul>
+                  </div>
+              )}
+              {insight.action_items && insight.action_items.length > 0 && (
+                  <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1.25rem', borderRadius: '12px' }}>
+                      <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 900 }}>⚡ Action Items</h4>
+                      <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', opacity: 0.9, lineHeight: '1.5' }}>
+                          {insight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 4 }}>{item}</li>)}
+                      </ul>
+                  </div>
+              )}
+          </div>
+        </>
+      ) : (
+        <>
+          {insight.summary && <><div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
+              <div className="md:col-span-2">
+                 <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Executive Profile</h4>
+                 <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
              
              <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Technical Review</h4>
              <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>
@@ -326,6 +473,7 @@ export default function AiInsightCard({
         </div>
       </div>
       </>}
+    </>)}
       </div>
 
       <div className="no-print mt-8 pt-6 border-t border-white/5">

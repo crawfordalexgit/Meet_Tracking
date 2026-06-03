@@ -181,6 +181,9 @@ const [decayDistance, setDecayDistance] = useState('100');
   const [printTheme, setPrintTheme] = useState('dark');
   const [aiInsight, setAiInsight] = useState(null);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [workloadInsight, setWorkloadInsight] = useState(null);
+  const [isGeneratingWorkload, setIsGeneratingWorkload] = useState(false);
+  const [readinessInsight, setReadinessInsight] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [syncingPbs, setSyncingPbs] = useState(false);
   const [normalizeWA, setNormalizeWA] = useState(false);
@@ -415,13 +418,14 @@ const [decayDistance, setDecayDistance] = useState('100');
         return all;
       };
 
-      const [resData, attData, sessData, insData, exemptData, memRes] = await Promise.all([
+      const [resData, attData, sessData, insData, exemptData, memRes, aiReportsRes] = await Promise.all([
         fetchPaged('results', '*, meets(*)', q => q.eq('swimmer_id', id)),
         fetchPaged('training_attendance', '*', q => q.eq('swimmer_id', id)),
         fetchPaged('sessions', '*'),
         supabase.from('swimmer_insights').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }),
         supabase.from('club_exemptions').select('*'),
-        fetch(`/api/memberships?swimmerId=${id}`).then(r => r.json())
+        fetch(`/api/memberships?swimmerId=${id}`).then(r => r.json()),
+        supabase.from('ai_reports').select('*').eq('swimmer_id', id).order('created_at', { ascending: false })
       ]);
       
       const { data: pbsData } = await supabase.from('swimmer_pbs').select('*').eq('swimmer_id', id);
@@ -435,6 +439,23 @@ const [decayDistance, setDecayDistance] = useState('100');
       setInsights(insData.data || []);
       setExemptions(exemptData.data || []);
       setSessionMemberships(memRes || []);
+
+      // Extract and populate AI reports
+      const reports = aiReportsRes.data || [];
+      const trainingReport = reports.find(r => r.type === 'training');
+      if (trainingReport) {
+        setWorkloadInsight(trainingReport.content || trainingReport);
+      }
+      const readinessReport = reports.find(r => r.type === 'readiness');
+      if (readinessReport) {
+        setReadinessInsight(readinessReport.content || readinessReport);
+      }
+      const generalReport = reports.find(r => r.type === 'general');
+      if (generalReport) {
+        setAiInsight(generalReport.content || generalReport);
+      } else if (insData.data && insData.data.length > 0) {
+        setAiInsight(insData.data[0].full_report || insData.data[0]);
+      }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
@@ -474,6 +495,43 @@ const [decayDistance, setDecayDistance] = useState('100');
       alert(err.message || 'Failed to generate technical roadmap');
     } finally {
       setIsGeneratingAi(false);
+    }
+  };
+
+  const generateWorkloadInsight = async (type = 'training', coachNotes = '') => {
+    if (type === 'reset') {
+      setWorkloadInsight(null);
+      return;
+    }
+    setIsGeneratingWorkload(true);
+    try {
+      const res = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          swimmerId: id, 
+          type: 'training', 
+          performance_slope,
+          totalActualHours: Math.round(totalActualHours),
+          meetAttendance: `${rel?.meetsAttended || 0}/${rel?.targetMeets || 5} meets (${progressPercent || 0}%)`,
+          complianceRelativeToSquad: `${(progressPercent || 0) - (squad?.target_training_percent || 75)}%`,
+          instructions: [
+            ...(coachNotes ? [coachNotes] : []),
+            "CRITICAL: Analyze training attendance consistency and volume compliance.",
+            "CRITICAL: Reference Vorontsov’s Multi-Year Periodisation models and standard Swim England LTAD guidelines for this swimmer's maturation stage.",
+            "Identify 2 key strengths and 2 weaknesses in consistency, and propose a specific 4-week SMART goal."
+          ]
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setWorkloadInsight(data);
+      return data;
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to generate training workload insight');
+    } finally {
+      setIsGeneratingWorkload(false);
     }
   };
 
@@ -1181,6 +1239,11 @@ const [decayDistance, setDecayDistance] = useState('100');
     );
   };
 
+  // Championship season age for QT benchmarks
+  const _now = new Date();
+  const targetYear = _now.getMonth() >= 4 ? _now.getFullYear() + 1 : _now.getFullYear();
+  const targetAge = swimmer?.year_of_birth ? targetYear - swimmer.year_of_birth : null;
+
   const chartDataWithTrends = useMemo(() => {
         if (!uniqueMeetsList || uniqueMeetsList.length === 0) return [];
         
@@ -1281,15 +1344,104 @@ const [decayDistance, setDecayDistance] = useState('100');
                   </div>
                   <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
                       <ComposedChart width={700} height={300} data={workloadChartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
-                          <XAxis dataKey="week" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
-                          <YAxis stroke="rgba(255,255,255,0.5)" fontSize={9} />
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} />
+                          <XAxis dataKey="week" stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'} fontSize={9} tickMargin={10} tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }} />
+                          <YAxis stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'} fontSize={9} tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }} />
                           <Bar dataKey="credit" stackId="a" fill="#fbbf24" name="Credits/Holidays" isAnimationActive={false} />
                           <Bar dataKey="training" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
                           <Bar dataKey="gala" stackId="a" fill="#10b981" name="Gala Hours" isAnimationActive={false} />
                           <Line type="stepAfter" dataKey="target" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Target Hours" isAnimationActive={false} />
                       </ComposedChart>
                   </div>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Workload AI Insights Page
+    if (reportConfig.sections.attendance && workloadInsight) {
+      pages.push({
+        id: 'workload-ai',
+        title: '3b. Workload AI Insights',
+        element: (
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="workload-ai">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>3b. Workload AI Insights</h2>
+              <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: 0 }}>Consistency & Maturation Audit</h3>
+                      {workloadInsight.attendance_rating && (
+                          <span style={{ 
+                              fontSize: '0.7rem', 
+                              fontWeight: 900, 
+                              padding: '4px 10px', 
+                              borderRadius: '6px', 
+                              background: workloadInsight.attendance_rating === 'GREEN' ? 'rgba(16, 185, 129, 0.15)' : (workloadInsight.attendance_rating === 'AMBER' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)'), 
+                              color: workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e'),
+                              border: `1px solid ${workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e')}`
+                          }}>
+                              {workloadInsight.attendance_rating} CONSISTENCY
+                          </span>
+                      )}
+                  </div>
+                  <p style={{ fontSize: '0.85rem', lineHeight: '1.6', opacity: 0.9 }} className="print-text-dim">
+                      {workloadInsight.headline}
+                  </p>
+              </div>
+
+              {workloadInsight.swot_analysis && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                      {[
+                          { title: 'STRENGTHS', data: workloadInsight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.03)', border: '#10b981' },
+                          { title: 'WEAKNESSES', data: workloadInsight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)', border: '#f43f5e' },
+                          { title: 'OPPORTUNITIES', data: workloadInsight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)', border: '#0ea5e9' },
+                          { title: 'THREATS', data: workloadInsight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)', border: '#f59e0b' }
+                      ].map((item, idx) => (
+                          <div key={idx} style={{ background: item.bg, border: `1px solid ${item.border}40`, borderRadius: '10px', padding: '1rem' }}>
+                              <h4 style={{ color: item.color, margin: '0 0 0.5rem 0', fontSize: '0.75rem', fontWeight: 900 }}>{item.title}</h4>
+                              <div 
+                                  className="swot-quadrant-text print-text-dim"
+                                  style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.5' }} 
+                                  dangerouslySetInnerHTML={{ 
+                                      __html: (item.data || 'No data generated.')
+                                          .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
+                                          .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
+                                          .replace(/^<br\/>/, '')
+                                  }} 
+                              />
+                          </div>
+                      ))}
+                  </div>
+              )}
+
+              {workloadInsight.smart_goals && (
+                  <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+                      <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0', fontSize: '0.8rem', fontWeight: 900 }}>🎯 SMART Goal: Next 4 Weeks</h4>
+                      <div style={{ fontSize: '0.75rem', lineHeight: '1.5' }} className="print-text-dim">
+                          <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {workloadInsight.smart_goals.current_goal}</div>
+                          <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {workloadInsight.smart_goals.tracking_metric}</div>
+                          <div><strong>Status:</strong> {workloadInsight.smart_goals.status}</div>
+                      </div>
+                  </div>
+              )}
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  {workloadInsight.risk_flags && workloadInsight.risk_flags.length > 0 && (
+                      <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.15)', padding: '1rem', borderRadius: '10px' }}>
+                          <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
+                          <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
+                              {workloadInsight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 2 }}>{flag}</li>)}
+                          </ul>
+                      </div>
+                  )}
+                  {workloadInsight.action_items && workloadInsight.action_items.length > 0 && (
+                      <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1rem', borderRadius: '10px' }}>
+                          <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚡ Action Items</h4>
+                          <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
+                              {workloadInsight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 2 }}>{item}</li>)}
+                          </ul>
+                      </div>
+                  )}
               </div>
           </div>
         )
@@ -1303,20 +1455,51 @@ const [decayDistance, setDecayDistance] = useState('100');
         title: '4. Competition Record',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="competition">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>4. Competition Record</h2>
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>4. Competition Record</h2>
               
-              <div className="flex justify-between items-center mb-6">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                   <div>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
-                      <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
                   </div>
               </div>
 
+              {/* Monthly Meets Timeline Bar Chart */}
+              <div className="glass-card mb-6" style={{ padding: '1rem' }}>
+                  <h3 style={{ fontSize: '0.85rem', fontWeight: 900, margin: '0 0 0.5rem 0' }}>Competition Intensity (Timeline Load)</h3>
+                  <div style={{ height: '180px', width: '100%' }}>
+                      <BarChart width={700} height={180} data={meetTimelineData}>
+                          <defs>
+                              <linearGradient id="meetGradPrint" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="var(--accent-cyan)" stopOpacity={1}/>
+                                  <stop offset="100%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
+                              </linearGradient>
+                          </defs>
+                          <CartesianGrid vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} strokeDasharray="3 3" />
+                          <XAxis dataKey="month" tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                          <Bar dataKey="count" name="Meets" radius={[4, 4, 0, 0]}>
+                              {meetTimelineData?.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill="url(#meetGradPrint)" fillOpacity={entry.count > 0 ? 1 : 0.2} />
+                              ))}
+                          </Bar>
+                      </BarChart>
+                  </div>
+              </div>
+
+              {/* CoachesEye guide */}
+              <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+                  <h4 style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', margin: '0 0 4px 0' }}>COACHESEYE GUIDE: COMPETITION & RACING</h4>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }} className="print-text-dim">
+                      Tracks the athlete&apos;s competitive rhythm and &apos;Big Meet Temperament&apos;. Regular racing builds race-execution skills, while tracking Point Progression indicates whether training is converting into race speed. A steep, positive trendline tells the story of an athlete successfully adapting to their training load.
+                  </p>
+              </div>
+
               <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
-                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
                       <thead>
                           <tr>
                               <th>Date</th>
@@ -1330,20 +1513,20 @@ const [decayDistance, setDecayDistance] = useState('100');
                       <tbody>
                           {uniqueMeetsList && uniqueMeetsList.map((m, i) => (
                               <tr key={i}>
-                                  <td style={{ fontWeight: 600, padding: '12px 8px' }}>
+                                  <td style={{ fontWeight: 600, padding: '8px' }}>
                                       {new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
                                   </td>
-                                  <td style={{ fontWeight: 800, padding: '12px 8px' }}>{m.name}</td>
-                                  <td style={{ textAlign: 'center', padding: '12px 8px' }}>
-                                      <span style={{ padding: '4px 8px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b' : '#0369a1', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 800 }}>
+                                  <td style={{ fontWeight: 800, padding: '8px' }}>{m.name}</td>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>
+                                      <span style={{ padding: '2px 6px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b' : '#0369a1', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 800 }}>
                                           {m.level || 'L3'}
                                       </span>
                                   </td>
-                                  <td style={{ textAlign: 'center', padding: '12px 8px' }}>{m.eventCount}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 800, padding: '12px 8px' }}>{Math.round(m.peakWa)} pts</td>
-                                  <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>{m.eventCount}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 800, padding: '8px' }}>{Math.round(m.peakWa)} pts</td>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>
                                       {m.pbCount > 0 ? (
-                                          <span style={{ color: '#059669', fontWeight: 900, fontSize: '0.75rem', background: '#d1fae5', padding: '4px 8px', borderRadius: '6px' }}>
+                                          <span style={{ color: '#059669', fontWeight: 900, fontSize: '0.7rem', background: '#d1fae5', padding: '2px 6px', borderRadius: '4px' }}>
                                               ★ {m.pbCount} PB{m.pbCount > 1 ? 's' : ''}
                                           </span>
                                       ) : '-'}
@@ -1358,30 +1541,283 @@ const [decayDistance, setDecayDistance] = useState('100');
       });
     }
 
-    // Page 6: Readiness Audit
+    // Page 5.5: Progress Page
+    if (reportConfig.sections.progress) {
+      pages.push({
+        id: 'progress',
+        title: '5. Points Progression & Baselines',
+        element: (
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="progress">
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Points Progression & Baselines</h2>
+              
+              <div className="glass-card" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--print-text, white)', margin: '0 0 1rem 0' }}>WA POINTS PROGRESSION</h3>
+                  <div style={{ height: '300px', width: '100%' }}>
+                      <ComposedChart width={700} height={300} data={chartDataWithTrends} margin={{ top: 20, right: 90, left: 10, bottom: 25 }}>
+                          <defs>
+                              <linearGradient id="poolWaterPrint" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.6}/>
+                                  <stop offset="50%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                                  <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+                              </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} />
+                          <XAxis
+                              dataKey="name"
+                              stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'}
+                              fontSize={9}
+                              tickFormatter={(str) => (typeof str === 'string' ? (str.length > 15 ? str.substring(0, 15) + '...' : str) : '')}
+                              tickMargin={5}
+                              height={35}
+                              tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }}
+                          />
+                          <YAxis
+                              stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'}
+                              fontSize={9}
+                              tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }}
+                              domain={[
+                                  dataMin => (isFinite(dataMin) && dataMin > 30 ? Math.max(0, dataMin - 30) : 0),
+                                  dataMax => {
+                                      const highestTarget = chartDataWithTrends[chartDataWithTrends.length - 1]?.narTarget || 480;
+                                      return Math.max(isFinite(dataMax) ? dataMax + 20 : 0, Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 300, highestTarget + 20);
+                                  }
+                              ]}
+                          />
+                          <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'COUNTY')) || 250} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)'} strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'COUNTY', fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: 800 }} isAnimationActive={false} />
+                          <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 350} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)'} strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'REGIONAL', fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: 800 }} isAnimationActive={false} />
+                          <Line
+                              type="monotone"
+                              dataKey="ageTarget"
+                              stroke="#2dd4bf"
+                              strokeDasharray="6 6"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Age Squad Target"
+                              isAnimationActive={false}
+                              label={(props) => {
+                                  if (props.index === chartDataWithTrends.length - 1) {
+                                      return <text x={props.x + 8} y={props.y} fill="#2dd4bf" fontSize={8} fontWeight={900} dominantBaseline="central">AGE SQUAD</text>;
+                                  }
+                                  return null;
+                              }}
+                          />
+                          <Line
+                              type="monotone"
+                              dataKey="goldTarget"
+                              stroke="#f59e0b"
+                              strokeDasharray="6 6"
+                              strokeWidth={2}
+                              dot={false}
+                              name="Gold Squad Target"
+                              isAnimationActive={false}
+                              label={(props) => {
+                                  if (props.index === chartDataWithTrends.length - 1) {
+                                      return <text x={props.x + 8} y={props.y} fill="#f59e0b" fontSize={8} fontWeight={900} dominantBaseline="central">GOLD SQUAD</text>;
+                                  }
+                                  return null;
+                              }}
+                          />
+                          <Line
+                              type="monotone"
+                              dataKey="narTarget"
+                              stroke="#ef4444"
+                              strokeDasharray="6 6"
+                              strokeWidth={2}
+                              dot={false}
+                              name="NAR Squad Target"
+                              isAnimationActive={false}
+                              label={(props) => {
+                                  if (props.index === chartDataWithTrends.length - 1) {
+                                      return <text x={props.x + 8} y={props.y} fill="#ef4444" fontSize={8} fontWeight={900} dominantBaseline="central">NAR SQUAD</text>;
+                                  }
+                                  return null;
+                              }}
+                          />
+                          <Area
+                              type="monotone"
+                              dataKey="peakWa"
+                              stroke="#00d4ff"
+                              strokeWidth={3}
+                              fillOpacity={1}
+                              fill="url(#poolWaterPrint)"
+                              name="Athlete Peak Capability"
+                              isAnimationActive={false}
+                              dot={{ r: 3, fill: '#0a0a0a', stroke: '#00d4ff', strokeWidth: 1.5 }}
+                              label={(props) => {
+                                  if (props.index === chartDataWithTrends.length - 1) {
+                                      return <text x={props.x + 8} y={props.y - 8} fill="#00d4ff" fontSize={9} fontWeight={900} dominantBaseline="central">ATHLETE PEAK</text>;
+                                  }
+                                  return null;
+                              }}
+                          />
+                      </ComposedChart>
+                  </div>
+              </div>
+
+              <div className="glass-card" style={{ padding: '1.25rem' }}>
+                  <h3 style={{ fontSize: '0.9rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.75rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      How to Read this Chart
+                  </h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', fontSize: '0.75rem', lineHeight: '1.5' }}>
+                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-cyan)' }}>
+                          <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>1. Peak Capability</h4>
+                          <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
+                              The blue line plots the single highest World Aquatics (WA) point score achieved at each meet. This ceiling represents the swimmer&apos;s peak biological performance, which is key for qualification.
+                          </p>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-amber)' }}>
+                          <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>2. Pathway Baselines</h4>
+                          <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
+                              Flat COUNTY and REGIONAL line thresholds reflect the average WA point standard required for Kent County and South East Regional automatic standard times at the swimmer&apos;s age/gender.
+                          </p>
+                      </div>
+                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-rose)' }}>
+                          <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>3. Squad Velocity</h4>
+                          <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
+                              The dashed AGE, GOLD, and NAR squad lines show squad-wide trends calculated using linear regression over the last 365 days, mapping where an athlete stands compared to peers on the date of each gala.
+                          </p>
+                      </div>
+                  </div>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Performance Roadmap Page
+    if (reportConfig.sections.strokeRoadmap) {
+      pages.push({
+        id: 'roadmap',
+        title: '5b. Stroke Performance Roadmap',
+        element: (
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="roadmap">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>5b. Stroke Performance Roadmap</h2>
+              
+              <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-violet)' }}>
+                  <h4 style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--accent-violet)', textTransform: 'uppercase', margin: '0 0 6px 0' }}>CoachesEye Guide: Biological Maturation</h4>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }} className="print-text-dim">
+                      <strong>The Maturation Gap (Vorontsov):</strong> According to Vorontsov's LTAD models, girls experience Peak Height Velocity (PHV) around ages 11-12, approximately 2 years earlier than boys. Normalisation balances this pubertal growth gap, allowing coaches to fairly compare underlying skill and aerobic progression between genders before they reach full maturation.
+                  </p>
+              </div>
+
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1.5rem 0' }}>Pathway Gaps & Stroke-Specific Roadmap</h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                      {Object.entries(statsObj.strokeData)
+                        .filter(([_, d]) => d.count > 0)
+                        .map(([name, d]) => {
+                          const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY');
+                          const regional = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'REGIONAL');
+                          const peak = Math.round(d.peak);
+                          const avg = Math.round(d.avg);
+                          const scale = (val) => Math.min((val / 600) * 100, 100);
+
+                          return (
+                            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                              <div style={{ width: '100px', flexShrink: 0 }}>
+                                 <div style={{ fontSize: '0.72rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '2px' }}>{name}</div>
+                                 <div style={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.5 }}>P: {peak} | A: {avg}</div>
+                              </div>
+                              <div style={{ flex: 1, position: 'relative', paddingTop: '12px', paddingBottom: '16px' }}>
+                                <div style={{ height: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', position: 'relative' }}>
+                                  <div style={{ width: `${scale(peak)}%`, height: '100%', background: 'linear-gradient(90deg, #00d4ff, #0082ff)', borderRadius: '0 3px 3px 0' }} />
+                                  <div style={{ position: 'absolute', left: `${scale(avg)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.8)', zIndex: 10 }} />
+                                </div>
+                                <div style={{ position: 'absolute', left: `${scale(county)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.2)', borderLeft: '1px dashed rgba(255,255,255,0.5)', zIndex: 5 }}>
+                                   <div style={{ position: 'absolute', top: '-12px', left: '-15px', width: '30px', textAlign: 'center', fontSize: '6px', opacity: 0.6, fontWeight: 900 }}>CTY</div>
+                                </div>
+                                <div style={{ position: 'absolute', left: `${scale(regional)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(245, 158, 11, 0.2)', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)', zIndex: 5 }}>
+                                   <div style={{ position: 'absolute', bottom: '-12px', left: '-15px', width: '30px', textAlign: 'center', fontSize: '6px', color: '#f59e0b', opacity: 0.8, fontWeight: 900 }}>REG</div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                  </div>
+                  
+                  <div style={{ marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'center', gap: '30px', fontSize: '8px', opacity: 0.5, textTransform: 'uppercase', fontWeight: 900 }}>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '12px', height: '4px', background: 'linear-gradient(90deg, #00d4ff, #0082ff)' }}></div> Peak Performance</div>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '2px', height: '8px', background: 'rgba(255,255,255,0.8)' }}></div> Season Average</div>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '1px', height: '8px', borderLeft: '1px dashed rgba(255,255,255,0.4)' }}></div> County AQT</div>
+                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '1px', height: '8px', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)' }}></div> Regional Auto</div>
+                  </div>
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Page 6: Readiness & Health Audit
     if (reportConfig.sections.biometrics) {
       pages.push({
         id: 'readiness',
-        title: '5. Readiness & Health Audit',
+        title: '5c. Readiness & Health Audit',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="readiness">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>5. Readiness & Health Audit</h2>
-              <div className="glass-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-                      <h3 style={{ margin: 0 }} className="print-text-dark-override">Biological & Training Readiness</h3>
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5c. Readiness & Health Audit</h2>
+              
+              <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900 }} className="print-text-dark-override">Biological & Training Readiness</h3>
                       <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '2.5rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '1rem', color: '#64748b' }}>/100</span></div>
+                          <div style={{ fontSize: '2rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '0.8rem', color: '#64748b' }}>/100</span></div>
+                          <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Overall Health Score</div>
                       </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
                       {healthData?.components?.map((comp, idx) => (
-                          <div key={idx} style={{ padding: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', textAlign: 'center' }} className="readiness-card">
-                              <div style={{ fontSize: '2rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.5rem' }}>{Math.round(comp.score)}</div>
-                              <div style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', color: '#475569' }} className="readiness-label">{comp.label}</div>
+                          <div key={idx} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', textAlign: 'center' }}>
+                              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.25rem' }}>{Math.round(comp.score)}</div>
+                              <div style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }} className="readiness-label">{comp.label}</div>
                           </div>
                       ))}
                   </div>
               </div>
+
+              {readinessInsight ? (
+                  <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Strategic Readiness Briefing</h4>
+                          {readinessInsight.flag && (
+                              <span style={{ 
+                                  fontSize: '0.6rem', 
+                                  fontWeight: 900, 
+                                  padding: '3px 8px', 
+                                  borderRadius: '4px',
+                                  background: readinessInsight.risk_level === 'high' ? 'rgba(244, 63, 94, 0.15)' : (readinessInsight.risk_level === 'medium' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.15)'),
+                                  color: readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981'),
+                                  border: `1px solid ${readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981')}`
+                              }}>
+                                  {readinessInsight.flag}
+                              </span>
+                          )}
+                      </div>
+                      
+                      <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.03)' }}>
+                          <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0' }}>{readinessInsight.headline}</h3>
+                          <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: 0 }} className="print-text-dim">{readinessInsight.summary?.assessment || readinessInsight.overview}</p>
+                      </div>
+
+                      {readinessInsight.recommendations && readinessInsight.recommendations.length > 0 && (
+                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                              <div style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Key Directives</div>
+                              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                  {readinessInsight.recommendations.map((rec, i) => (
+                                      <li key={i} style={{ fontSize: '0.72rem', display: 'flex', gap: '8px', marginBottom: '6px', lineHeight: 1.4 }} className="print-text-dim">
+                                          <div style={{ minWidth: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '5px' }}></div>
+                                          <span>{rec}</span>
+                                      </li>
+                                  ))}
+                              </ul>
+                          </div>
+                      )}
+                  </div>
+              ) : (
+                  <div className="glass-card" style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.6 }}>
+                      <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No AI Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+                  </div>
+              )}
           </div>
         )
       });
@@ -1395,39 +1831,13 @@ const [decayDistance, setDecayDistance] = useState('100');
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="qt">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
-              <div style={{ display: 'grid', gap: '1.5rem' }}>
-                  {[
-                      { label: 'Sprints (50m - 100m)', filter: (e) => (e.includes('50') || e.includes('100')) && !e.includes('IM') },
-                      { label: 'Middle Distance (200m - 400m)', filter: (e) => (e.includes('200') || e.includes('400')) && !e.includes('IM') },
-                      { label: 'Distance (800m - 1500m)', filter: (e) => e.includes('800') || e.includes('1500') },
-                      { label: 'Individual Medley (IM)', filter: (e) => e.includes('IM') }
-                  ].map((segment, idx) => {
-                      const segmentEvents = Object.entries(statsObj?.strokeData || {}).filter(([eventName]) => segment.filter(eventName));
-                      if (segmentEvents.length === 0) return null;
-                      return (
-                          <div key={idx} className="glass-card" style={{ padding: '1.5rem !important', marginBottom: 0 }}>
-                              <h4 style={{ color: '#0369a1', margin: '0 0 1rem 0', textTransform: 'uppercase', fontSize: '0.85rem' }}>{segment.label}</h4>
-                              <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
-                                  <thead>
-                                      <tr>
-                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1' }}>Event</th>
-                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'center' }}>PB Count</th>
-                                          <th style={{ padding: '8px', borderBottom: '2px solid #cbd5e1', textAlign: 'right' }}>Peak WA</th>
-                                      </tr>
-                                  </thead>
-                                  <tbody>
-                                      {segmentEvents.map(([eventName, data], i) => (
-                                          <tr key={i}>
-                                              <td style={{ padding: '8px', fontWeight: 800 }}>{eventName}</td>
-                                              <td style={{ padding: '8px', textAlign: 'center' }}>{data.pbCount > 0 ? `★ ${data.pbCount}` : '-'}</td>
-                                              <td style={{ padding: '8px', textAlign: 'right', fontWeight: 900, color: '#d97706' }}>{Math.round(data.peak)} pts</td>
-                                          </tr>
-                                      ))}
-                                  </tbody>
-                              </table>
-                          </div>
-                      );
-                  })}
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1rem 0' }}>Qualification Pathway Predictor (Short Course)</h3>
+                  <QtTable
+                      results={results}
+                      age={targetAge}
+                      gender={swimmer?.gender}
+                  />
               </div>
           </div>
         )
@@ -1478,12 +1888,9 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
 
     return pages;
-  }, [swimmer, reportConfig, attendancePct, seasonVolumePct, progressPercent, velocity, narrative, attendance, sessions, exemptions, results, totalActualHours, annualTargetHours, statsObj, squad, workloadChartData, uniqueMeetsList, healthData, weeklyWorkloadData, openMeetsCount, totalMeetsCount]);
+  }, [swimmer, reportConfig, attendancePct, seasonVolumePct, progressPercent, velocity, narrative, attendance, sessions, exemptions, results, totalActualHours, annualTargetHours, statsObj, squad, workloadChartData, uniqueMeetsList, healthData, weeklyWorkloadData, openMeetsCount, totalMeetsCount, workloadInsight, readinessInsight, targetAge, selectedStroke]);
 
-  // Championship season age for QT benchmarks
-  const _now = new Date();
-  const targetYear = _now.getMonth() >= 4 ? _now.getFullYear() + 1 : _now.getFullYear();
-  const targetAge = swimmer?.year_of_birth ? targetYear - swimmer.year_of_birth : null;
+
 
   if (loading) return <Layout session={session}><div style={{ marginTop: 100, textAlign: 'center', opacity: 0.5 }}>Loading Athlete Profile...</div></Layout>;
   if (!swimmer) return <Layout session={session}><div>Athlete not found.</div></Layout>;
@@ -1595,12 +2002,45 @@ const [decayDistance, setDecayDistance] = useState('100');
             }
             
             /* Apply color variable to headers/texts based on theme class */
-            .theme-light h1, .theme-light h2, .theme-light h3, .theme-light h4, .theme-light .section-title, .theme-light p, .theme-light span, .theme-light li, .theme-light strong { 
+            .theme-light h1, .theme-light h2, .theme-light h3, .theme-light h4, .theme-light h5, .theme-light h6, .theme-light .section-title, .theme-light p, .theme-light span, .theme-light li, .theme-light strong, .theme-light td, .theme-light th, .theme-light table, .theme-light a, .theme-light em, .theme-light b, .theme-light i, .theme-light small { 
                 color: #050b10 !important; 
             }
             .theme-light .swot-quadrant-text, .theme-light .swot-quadrant-text strong {
                 color: #050b10 !important;
             }
+            /* Explicitly catch standard inline white text inside theme-light */
+            .theme-light div[style*="color: white"],
+            .theme-light div[style*="color:white"],
+            .theme-light div[style*="color: #fff"],
+            .theme-light div[style*="color:#fff"],
+            .theme-light div[style*="color: #ffffff"],
+            .theme-light div[style*="color:#ffffff"],
+            .theme-light div[style*="rgba(255,255,255"],
+            .theme-light div[style*="rgba(255, 255, 255"],
+            .theme-light span[style*="rgba(255,255,255"],
+            .theme-light span[style*="rgba(255, 255, 255"],
+            .theme-light p[style*="rgba(255,255,255"],
+            .theme-light p[style*="rgba(255, 255, 255"],
+            .theme-light h3[style*="color: white"],
+            .theme-light h3[style*="color:white"],
+            .theme-light h4[style*="color: white"],
+            .theme-light h4[style*="color:white"] {
+                color: #050b10 !important;
+            }
+            /* Keep diagnostic status colors intact even when overridden */
+            .theme-light [style*="color: #10b981"], .theme-light [style*="color:#10b981"] { color: #10b981 !important; }
+            .theme-light [style*="color: #059669"], .theme-light [style*="color:#059669"] { color: #059669 !important; }
+            .theme-light [style*="color: #f43f5e"], .theme-light [style*="color:#f43f5e"] { color: #f43f5e !important; }
+            .theme-light [style*="color: #e11d48"], .theme-light [style*="color:#e11d48"] { color: #e11d48 !important; }
+            .theme-light [style*="color: #fb7185"], .theme-light [style*="color:#fb7185"] { color: #fb7185 !important; }
+            .theme-light [style*="color: #f59e0b"], .theme-light [style*="color:#f59e0b"] { color: #f59e0b !important; }
+            .theme-light [style*="color: #d97706"], .theme-light [style*="color:#d97706"] { color: #d97706 !important; }
+            .theme-light [style*="color: #fb923c"], .theme-light [style*="color:#fb923c"] { color: #fb923c !important; }
+            .theme-light [style*="color: #f87171"], .theme-light [style*="color:#f87171"] { color: #f87171 !important; }
+            .theme-light [style*="color: #0ea5e9"], .theme-light [style*="color:#0ea5e9"] { color: #0ea5e9 !important; }
+            .theme-light [style*="color: #00d4ff"], .theme-light [style*="color:#00d4ff"] { color: #00d4ff !important; }
+            .theme-light [style*="color: #38bdf8"], .theme-light [style*="color:#38bdf8"] { color: #38bdf8 !important; }
+            .theme-light [style*="color: #2dd4bf"], .theme-light [style*="color:#2dd4bf"] { color: #2dd4bf !important; }
             .theme-light .cover-club {
                 color: #0369a1 !important;
             }
@@ -3074,76 +3514,92 @@ const [decayDistance, setDecayDistance] = useState('100');
   Consistent workload is the primary driver of aerobic adaptation. This section tracks volume compliance against the athlete's specific squad targets and LTAD stage. <strong>If an athlete joins a squad mid-season, the system automatically truncates the timeline and prorates their target hours to ensure fair compliance grading.</strong>
 </p>
           </div>
-          <div className="lg:col-span-1 glass-card no-print" style={{ padding: 0, overflow: 'hidden', height: '600px', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, transparent 100%)' }}>
-               <div className="section-title" style={{ marginBottom: 4 }}>Intelligence Trace</div>
-               <h3 className="text-lg font-black tracking-tight">Session Log & {rel.creditedSessions || 0} Credits</h3>
-               <div style={{ fontSize: '0.6rem', opacity: 0.4, marginTop: 4, fontWeight: 800 }}>CLICK A WEEK TO INSPECT</div>
-            </div>
-            <div className="custom-scrollbar" style={{ padding: '1rem', overflowY: 'auto', flex: 1 }}>
+          <div className="lg:col-span-1 flex flex-col gap-6 no-print">
+            <AiInsightCard 
+              swimmerId={id} 
+              coachId={session?.user?.id} 
+              performance_slope={performance_slope}
+              totalActualHours={Math.round(totalActualHours)}
+              meetsAttended={rel?.meetsAttended || 0}
+              targetMeets={rel?.targetMeets || 5}
+              complianceRate={progressPercent || 0}
+              squadTargetCompliance={squad?.target_training_percent || 75}
+              insight={workloadInsight}
+              loading={isGeneratingWorkload}
+              onGenerate={generateWorkloadInsight}
+              type="training"
+            />
+            <div className="glass-card" style={{ padding: 0, overflow: 'hidden', height: '400px', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, transparent 100%)' }}>
+                 <div className="section-title" style={{ marginBottom: 4 }}>Intelligence Trace</div>
+                 <h3 className="text-lg font-black tracking-tight">Session Log & {rel.creditedSessions || 0} Credits</h3>
+                 <div style={{ fontSize: '0.6rem', opacity: 0.4, marginTop: 4, fontWeight: 800 }}>CLICK A WEEK TO INSPECT</div>
+              </div>
+              <div className="custom-scrollbar" style={{ padding: '1rem', overflowY: 'auto', flex: 1 }}>
 
-              <div className="space-y-3">
-                {[...workloadChartData].reverse().map((w, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => {
-                      setSelectedWeek(w);
-                      setIsWorkloadModalOpen(true);
-                    }}
-                    className="hover:bg-white/[0.04] hover:border-cyan-500/30 hover:scale-[1.01]"
-                    style={{
-                      padding: '1rem',
-                      background: 'rgba(255,255,255,0.02)',
-                      borderRadius: '12px',
-                      border: w.isMet ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)',
-                      position: 'relative',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease-in-out'
-                    }}
-                  >
-                    <div className="flex justify-between items-center mb-2">
-                       <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.4 }}>WEEK {w.week}</div>
-                       <span style={{ 
-                         fontSize: '0.5rem', 
-                         fontWeight: 900, 
-                         padding: '2px 8px', 
-                         borderRadius: '4px',
-                         background: w.isMet ? 'rgba(16,185,129,0.1)' : 'rgba(244,63,94,0.1)',
-                         color: w.isMet ? '#10b981' : '#f43f5e'
-                       }}>
-                         {w.isMet ? 'MET' : 'NOT MET'}
-                       </span>
-                    </div>
-                    
-                    <div className="flex justify-between items-end mb-2">
-                      <div>
-                        <div style={{ fontSize: '0.9rem', fontWeight: 900 }}>{w.totalSessions} / {w.requiredSessions} <span style={{ opacity: 0.3, fontSize: '0.7rem' }}>SESSIONS</span></div>
-                        <div style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.5 }}>{w.totalHours.toFixed(1)}h / {w.target}h <span style={{ fontSize: '0.6rem' }}>Volume</span></div>
+                <div className="space-y-3">
+                  {[...workloadChartData].reverse().map((w, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => {
+                        setSelectedWeek(w);
+                        setIsWorkloadModalOpen(true);
+                      }}
+                      className="hover:bg-white/[0.04] hover:border-cyan-500/30 hover:scale-[1.01]"
+                      style={{
+                        padding: '1rem',
+                        background: 'rgba(255,255,255,0.02)',
+                        borderRadius: '12px',
+                        border: w.isMet ? '1px solid rgba(16,185,129,0.1)' : '1px solid rgba(255,255,255,0.05)',
+                        position: 'relative',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease-in-out'
+                      }}
+                    >
+                      <div className="flex justify-between items-center mb-2">
+                         <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.4 }}>WEEK {w.week}</div>
+                         <span style={{ 
+                           fontSize: '0.5rem', 
+                           fontWeight: 900, 
+                           padding: '2px 8px', 
+                           borderRadius: '4px',
+                           background: w.isMet ? 'rgba(16,185,129,0.1)' : 'rgba(244,63,94,0.1)',
+                           color: w.isMet ? '#10b981' : '#f43f5e'
+                         }}>
+                           {w.isMet ? 'MET' : 'NOT MET'}
+                         </span>
                       </div>
-                      {(w.isExempt || w.isCredit) && (
-                        <div style={{ fontSize: '0.5rem', fontWeight: 900, color: 'var(--accent-cyan)', background: 'var(--accent-cyan-fade)', padding: '2px 6px', borderRadius: '4px' }}>
-                          {w.isExempt ? 'WEEK EXEMPT' : 'CREDIT APPLIED'}
+                      
+                      <div className="flex justify-between items-end mb-2">
+                        <div>
+                          <div style={{ fontSize: '0.9rem', fontWeight: 900 }}>{w.totalSessions} / {w.requiredSessions} <span style={{ opacity: 0.3, fontSize: '0.7rem' }}>SESSIONS</span></div>
+                          <div style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.5 }}>{w.totalHours.toFixed(1)}h / {w.target}h <span style={{ fontSize: '0.6rem' }}>Volume</span></div>
+                        </div>
+                        {(w.isExempt || w.isCredit) && (
+                          <div style={{ fontSize: '0.5rem', fontWeight: 900, color: 'var(--accent-cyan)', background: 'var(--accent-cyan-fade)', padding: '2px 6px', borderRadius: '4px' }}>
+                            {w.isExempt ? 'WEEK EXEMPT' : 'CREDIT APPLIED'}
+                          </div>
+                        )}
+                      </div>
+
+                      {w.exceptionDetails && w.exceptionDetails.length > 0 && (
+                        <div style={{ marginTop: 8, padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
+                           {w.exceptionDetails.map((ex, i) => (
+                             <div key={i} style={{ marginBottom: i < w.exceptionDetails.length - 1 ? 8 : 0 }}>
+                               <div style={{ fontSize: '0.6rem', fontWeight: 900, color: ex.type === 'credit' ? 'var(--accent-cyan)' : 'var(--accent-rose)', textTransform: 'uppercase' }}>{ex.name}</div>
+                               {ex.days && ex.days.map((d, di) => (
+                                 <div key={di} style={{ fontSize: '0.55rem', opacity: 0.6, display: 'flex', justifyContent: 'space-between' }}>
+                                   <span>• {d.date}: {d.sessions}</span>
+                                   <span style={{ fontWeight: 900, color: d.applied ? '#10b981' : '#f43f5e' }}>{d.applied ? 'OK' : 'OFF'}</span>
+                                 </div>
+                               ))}
+                             </div>
+                           ))}
                         </div>
                       )}
                     </div>
-
-                    {w.exceptionDetails && w.exceptionDetails.length > 0 && (
-                      <div style={{ marginTop: 8, padding: '8px', background: 'rgba(0,0,0,0.2)', borderRadius: '6px' }}>
-                         {w.exceptionDetails.map((ex, i) => (
-                           <div key={i} style={{ marginBottom: i < w.exceptionDetails.length - 1 ? 8 : 0 }}>
-                             <div style={{ fontSize: '0.6rem', fontWeight: 900, color: ex.type === 'credit' ? 'var(--accent-cyan)' : 'var(--accent-rose)', textTransform: 'uppercase' }}>{ex.name}</div>
-                             {ex.days && ex.days.map((d, di) => (
-                               <div key={di} style={{ fontSize: '0.55rem', opacity: 0.6, display: 'flex', justifyContent: 'space-between' }}>
-                                 <span>• {d.date}: {d.sessions}</span>
-                                 <span style={{ fontWeight: 900, color: d.applied ? '#10b981' : '#f43f5e' }}>{d.applied ? 'OK' : 'OFF'}</span>
-                               </div>
-                             ))}
-                           </div>
-                         ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
           </div>
