@@ -1208,7 +1208,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'overview',
         title: '1. Executive Overview & KPIs',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="overview">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="overview">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
               <div className="glass-card" style={{ marginBottom: '2rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: '2rem', padding: '1rem' }}>
@@ -1243,7 +1243,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'ai',
         title: '2. Performance AI Report',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="ai">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="ai">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Performance AI Report</h2>
               <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
           </div>
@@ -1257,7 +1257,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'workload',
         title: '3. Training Workload & Compliance',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="workload">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="workload">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>3. Training Workload</h2>
               <div className="glass-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -1276,8 +1276,8 @@ const [decayDistance, setDecayDistance] = useState('100');
                           <XAxis dataKey="weekLabel" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
                           <YAxis stroke="rgba(255,255,255,0.5)" fontSize={9} />
                           <Bar dataKey="credit" stackId="a" fill="#fbbf24" name="Credits/Holidays" isAnimationActive={false} />
-                          <Bar dataKey="hours" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
-                          <Bar dataKey="galaHours" stackId="a" fill="#10b981" name="Gala Hours" isAnimationActive={false} />
+                          <Bar dataKey="training" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
+                          <Bar dataKey="gala" stackId="a" fill="#10b981" name="Gala Hours" isAnimationActive={false} />
                           <Line type="stepAfter" dataKey="target" stroke="#f43f5e" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Target Hours" isAnimationActive={false} />
                       </ComposedChart>
                   </div>
@@ -1293,7 +1293,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'competition',
         title: '4. Competition Record',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="competition">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="competition">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>4. Competition Record</h2>
               
               <div className="flex justify-between items-center mb-6">
@@ -1355,7 +1355,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'readiness',
         title: '5. Readiness & Health Audit',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="readiness">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="readiness">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>5. Readiness & Health Audit</h2>
               <div className="glass-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
@@ -1384,7 +1384,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'qt',
         title: '6. Qualifying Times Assessment',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="qt">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="qt">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
               <div style={{ display: 'grid', gap: '1.5rem' }}>
                   {[
@@ -1431,7 +1431,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         id: 'appendix',
         title: 'Appendix: Weekly Workload Details',
         element: (
-          <div style={{ pageBreakAfter: 'always' }} key="appendix">
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="appendix">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
               <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
                   <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
@@ -1540,7 +1540,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                 --print-grid: rgba(255, 255, 255, 0.1);
             }
 
-            @page { size: portrait; margin: 10mm !important; }
+            @page { size: portrait; margin: 0 !important; }
             html, body { 
                 margin: 0 !important; 
                 padding: 0 !important; 
@@ -1554,12 +1554,32 @@ const [decayDistance, setDecayDistance] = useState('100');
             .no-print, button, nav, .profile-header, .period-selector { display: none !important; }
             .print-only { display: block !important; }
             
+            /* Cover Page Layout */
+            .cover-page {
+              display: flex !important;
+              height: 100vh !important;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              text-align: center;
+              page-break-after: always;
+              background: var(--print-bg);
+              color: var(--print-text) !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+              box-sizing: border-box;
+            }
+            
             /* Apply color variable to headers/texts based on theme class */
             .theme-light h1, .theme-light h2, .theme-light h3, .theme-light h4, .theme-light .section-title, .theme-light p, .theme-light span, .theme-light div, .theme-light li, .theme-light strong { 
                 color: #050b10 !important; 
             }
             .theme-light .cover-club {
                 color: #0369a1 !important;
+            }
+            .theme-light .cover-bar {
+                background: #0369a1 !important;
             }
             .theme-light .cover-index-title {
                 border-bottom: 2px solid #cbd5e1 !important;
@@ -1590,6 +1610,9 @@ const [decayDistance, setDecayDistance] = useState('100');
             .theme-dark .cover-club {
                 color: #00d4ff !important;
             }
+            .theme-dark .cover-bar {
+                background: #00d4ff !important;
+            }
             .theme-dark .cover-index-title {
                 border-bottom: 2px solid rgba(255,255,255,0.1) !important;
             }
@@ -1602,6 +1625,14 @@ const [decayDistance, setDecayDistance] = useState('100');
                 page-break-inside: avoid !important; 
                 padding: 1.5rem !important; /* Fixed large margins */
                 margin-bottom: 1.5rem !important; 
+            }
+            
+            /* Large structures override to allow pagination */
+            .workload-table-card {
+                page-break-inside: auto !important;
+            }
+            .stats-table-glass tr {
+                page-break-inside: avoid !important;
             }
 
             /* Match the Meet Report Tables */
@@ -3321,23 +3352,82 @@ const [decayDistance, setDecayDistance] = useState('100');
 
       <div className={`print-only theme-${printTheme}`}>
           
-          {/* PAGE 1: Cover Page & Index */}
-          <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pageBreakAfter: 'always' }}>
-              <h4 className="cover-club" style={{ letterSpacing: '0.2em', margin: 0 }}>TONBRIDGE SWIMMING CLUB</h4>
-              <h1 className="cover-name" style={{ fontSize: '4rem', fontWeight: 950, margin: '1rem 0', textTransform: 'uppercase' }}>{swimmer.full_name}</h1>
-              <h3 className="cover-title" style={{ opacity: 0.6, letterSpacing: '0.1em' }}>ANNUAL ATHLETE PERFORMANCE REPORT</h3>
-              <p className="cover-date" style={{ marginTop: '1rem', fontStyle: 'italic' }}>Generated: {new Date().toLocaleDateString('en-GB')}</p>
+          {/* PAGE 1: Cover Page */}
+          <div className="cover-page" style={{ height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', pageBreakAfter: 'always', margin: 0, padding: 0, boxSizing: 'border-box' }}>
+              <img src="/coacheseye-logo.png" alt="CoachesEye Logo" style={{ height: '140px', marginBottom: '3.5rem' }} />
+              <h4 className="cover-club" style={{ fontSize: '1.2rem', fontWeight: 900, letterSpacing: '0.4em', marginBottom: '2rem', textTransform: 'uppercase' }}>TONBRIDGE SWIMMING CLUB</h4>
+              <h1 className="cover-name" style={{ fontSize: '4.8rem', fontWeight: 950, margin: '1rem 2rem', lineHeight: 1.1, letterSpacing: '-0.04em', textTransform: 'uppercase', textAlign: 'center' }}>{swimmer.full_name}</h1>
+              <div className="cover-bar" style={{ height: '8px', width: '140px', margin: '4rem 0' }}></div>
+              <h3 className="cover-title" style={{ fontSize: '1.6rem', fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.1em' }}>ANNUAL ATHLETE PERFORMANCE REPORT</h3>
+              <p className="cover-date" style={{ marginTop: '1.5rem', fontStyle: 'italic', fontSize: '0.95rem', opacity: 0.6 }}>Generated: {new Date().toLocaleDateString('en-GB')}</p>
+          </div>
+
+          {/* PAGE 2: Table of Contents & Athlete Profile */}
+          <div style={{ padding: '20mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }}>
+              <h2 className="section-title" style={{ marginBottom: '2.5rem', fontSize: '2rem', borderBottom: '2px solid var(--print-border-heavy)', paddingBottom: '0.5rem' }}>
+                  Report Directory & Athlete Profile
+              </h2>
               
-              <div style={{ marginTop: '4rem', textAlign: 'left', width: '100%', maxWidth: '600px' }}>
-                  <h2 className="cover-index-title" style={{ paddingBottom: '1rem', marginBottom: '1.5rem' }}>Report Index</h2>
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '1.1rem', lineHeight: '2.2', fontWeight: 600 }}>
-                      {printPages.map((p, idx) => (
-                          <li key={p.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>{p.title}</span> 
-                              <span>... {idx + 2}</span>
-                          </li>
-                      ))}
-                  </ul>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '3rem', marginTop: '2rem' }}>
+                  {/* Table of Contents */}
+                  <div>
+                      <h3 className="cover-index-title" style={{ paddingBottom: '0.75rem', marginBottom: '1.5rem', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--print-border-light)' }}>
+                          Table of Contents
+                      </h3>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0, fontSize: '0.95rem', lineHeight: '2.4', fontWeight: 600 }}>
+                          {printPages.map((p, idx) => (
+                              <li key={p.id} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed rgba(128,128,128,0.15)', paddingBottom: '4px' }}>
+                                  <span>{p.title}</span> 
+                                  <span style={{ fontWeight: 900 }}>Page {idx + 3}</span>
+                              </li>
+                          ))}
+                      </ul>
+                  </div>
+                  
+                  {/* Athlete Profile Summary */}
+                  <div>
+                      <h3 style={{ paddingBottom: '0.75rem', marginBottom: '1.5rem', fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--print-border-light)' }}>
+                          Athlete Profile
+                      </h3>
+                      <div className="glass-card" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                              <tbody>
+                                  <tr style={{ borderBottom: '1px solid var(--print-border-light)' }}>
+                                      <td style={{ padding: '10px 0', fontWeight: 700, opacity: 0.6 }}>Full Name</td>
+                                      <td style={{ padding: '10px 0', fontWeight: 900, textAlign: 'right' }}>{swimmer.full_name}</td>
+                                  </tr>
+                                  <tr style={{ borderBottom: '1px solid var(--print-border-light)' }}>
+                                      <td style={{ padding: '10px 0', fontWeight: 700, opacity: 0.6 }}>Squad</td>
+                                      <td style={{ padding: '10px 0', fontWeight: 900, textAlign: 'right', color: 'var(--accent-cyan)' }}>{squad?.name || '—'}</td>
+                                  </tr>
+                                  <tr style={{ borderBottom: '1px solid var(--print-border-light)' }}>
+                                      <td style={{ padding: '10px 0', fontWeight: 700, opacity: 0.6 }}>Swim England ID</td>
+                                      <td style={{ padding: '10px 0', fontWeight: 900, textAlign: 'right' }}>{swimmer.member_id || '—'}</td>
+                                  </tr>
+                                  <tr style={{ borderBottom: '1px solid var(--print-border-light)' }}>
+                                      <td style={{ padding: '10px 0', fontWeight: 700, opacity: 0.6 }}>Year of Birth</td>
+                                      <td style={{ padding: '10px 0', fontWeight: 900, textAlign: 'right' }}>{swimmer.year_of_birth || '—'}</td>
+                                  </tr>
+                                  <tr style={{ borderBottom: '1px solid var(--print-border-light)' }}>
+                                      <td style={{ padding: '10px 0', fontWeight: 700, opacity: 0.6 }}>Gender</td>
+                                      <td style={{ padding: '10px 0', fontWeight: 900, textAlign: 'right', textTransform: 'uppercase' }}>{swimmer.gender || '—'}</td>
+                                  </tr>
+                                  <tr>
+                                      <td style={{ padding: '10px 0', fontWeight: 700, opacity: 0.6 }}>Squad Join Date</td>
+                                      <td style={{ padding: '10px 0', fontWeight: 900, textAlign: 'right' }}>
+                                          {swimmer.squad_join_date ? new Date(swimmer.squad_join_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                                      </td>
+                                  </tr>
+                              </tbody>
+                          </table>
+                      </div>
+                  </div>
+              </div>
+              
+              <div style={{ marginTop: '5rem', borderTop: '1px solid var(--print-border-light)', paddingTop: '1.5rem' }}>
+                  <p style={{ fontSize: '0.8rem', opacity: 0.6, lineHeight: 1.6, fontStyle: 'italic' }}>
+                      This diagnostic report aggregates training attendance, session workload history, in-race pacing profiles, and competitive event progression. The analytics therein compile performance indices to inform squad placement, long-term development (LTAD) pathways, and personalized coaching interventions.
+                  </p>
               </div>
           </div>
 
