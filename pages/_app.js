@@ -23,7 +23,7 @@ export default function MyApp({ Component, pageProps }) {
     });
 
     return () => subscription?.unsubscribe();
-  }, [router]);
+  }, []);
 
   const checkProfile = async (currentSession) => {
     if (!currentSession?.user) {
