@@ -1211,25 +1211,25 @@ const [decayDistance, setDecayDistance] = useState('100');
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box' }} key="overview">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
               <div className="glass-card" style={{ marginBottom: '2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', marginBottom: '2rem', padding: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '1rem' }}>
                       <PremiumOrb value={attendancePct} label="Consistency" size={120} unit="%" />
                       <PremiumOrb value={seasonVolumePct} label="Volume vs Target" size={120} unit="%" color={seasonVolumePct >= 80 ? 'cyan' : 'amber'} />
                       <PremiumOrb value={progressPercent} label="Meet Compliance" size={120} unit="%" />
                       <PremiumOrb value={velocity} label="WA Velocity" customValue={true} size={120} unit="pts" color={velocity >= 0 ? 'emerald' : 'rose'} />
                   </div>
+              </div>
                   
-                  <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.1)' }} className="print-narrative-border">
-                      <h3 className="section-title" style={{ marginBottom: '1rem' }}>Strategic Narrative</h3>
-                      <div style={{ display: 'grid', gap: '1rem' }}>
-                          {narrative && narrative.map((item, idx) => (
-                              <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px' }}>
-                                  <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
-                                      <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
-                                      {item.text}
-                                  </p>
-                              </div>
-                          ))}
-                      </div>
+              <div className="glass-card strategic-narrative-card" style={{ marginTop: '2rem' }}>
+                  <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>Strategic Narrative</h3>
+                  <div style={{ display: 'grid', gap: '1rem' }}>
+                      {narrative && narrative.map((item, idx) => (
+                          <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px', pageBreakInside: 'avoid' }}>
+                              <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
+                                  <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
+                                  {item.text}
+                              </p>
+                          </div>
+                      ))}
                   </div>
               </div>
           </div>
@@ -1273,7 +1273,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                   <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
                       <ComposedChart width={700} height={300} data={workloadChartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
-                          <XAxis dataKey="weekLabel" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
+                          <XAxis dataKey="week" stroke="rgba(255,255,255,0.5)" fontSize={9} tickMargin={10} />
                           <YAxis stroke="rgba(255,255,255,0.5)" fontSize={9} />
                           <Bar dataKey="credit" stackId="a" fill="#fbbf24" name="Credits/Holidays" isAnimationActive={false} />
                           <Bar dataKey="training" stackId="a" fill="#38bdf8" name="Pool Hours" isAnimationActive={false} />
@@ -1551,6 +1551,12 @@ const [decayDistance, setDecayDistance] = useState('100');
                 print-color-adjust: exact !important; 
                 text-align: left !important;
             }
+            main, .layout-container, .main-content, #__next { 
+                padding: 0 !important; 
+                margin: 0 !important; 
+                min-height: auto !important; 
+                position: static !important; 
+            }
             .no-print, button, nav, .profile-header, .period-selector { display: none !important; }
             .print-only { display: block !important; }
             
@@ -1628,7 +1634,7 @@ const [decayDistance, setDecayDistance] = useState('100');
             }
             
             /* Large structures override to allow pagination */
-            .workload-table-card {
+            .workload-table-card, .strategic-narrative-card {
                 page-break-inside: auto !important;
             }
             .stats-table-glass tr {
