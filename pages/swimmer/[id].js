@@ -559,7 +559,7 @@ const [decayDistance, setDecayDistance] = useState('100');
             ...(coachNotes ? [coachNotes] : []),
             "CRITICAL: Analyze Points Progression Chart trends (celebrating progress, noting ceiling vs. average trends).",
             "CRITICAL: Evaluate swimmer points standing relative to squad targets, Kent County standards, and South East Regional standards.",
-            "CRITICAL: Give a clear indication if the swimmer seems ready for promotion/transition to the next squad above in the progression hierarchy (Bronze -> Silver -> Gold Development -> Technical Development -> Age Development) or non-competitive pathway (Technical Development (14 & under) or Club 2 (14+)). Identify targets for readiness."
+            "CRITICAL: Give a clear indication if the swimmer seems ready for promotion/transition to the next squad above in the progression hierarchy (Bronze -> Silver -> Gold Development -> Age Development -> NAR (Nationals & Regionals)) or non-competitive pathway (Technical Development (14 & under) or Club 2 (14+)). Identify targets for readiness."
           ]
         })
       });
