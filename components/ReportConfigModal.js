@@ -15,8 +15,8 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
     aiParent: false,
     progress: true,
     competition: true,
-    qtPredictor: false,
-    biometrics: false
+    qtPredictor: true,
+    biometrics: true
   });
   const [audience, setAudience] = useState('Coach');
   const [printTheme, setPrintTheme] = useState('dark');

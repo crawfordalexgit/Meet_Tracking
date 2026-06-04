@@ -173,7 +173,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       aiTechnical: true, aiDeepDive: true, performanceNarrative: true,
       strokeRoadmap: true, progression: true,
       aiPerformance: true, aiBurnout: false, aiParent: false,
-      progress: true, competition: true, qtPredictor: false, biometrics: false
+      progress: true, competition: true, qtPredictor: true, biometrics: true
     },
     audience: 'Coach'
   });
@@ -1854,104 +1854,108 @@ const [decayDistance, setDecayDistance] = useState('100');
       });
     }
 
-    // Section 5: Readiness & Qualifying Times
-    if (reportConfig.sections.biometrics || reportConfig.sections.qtPredictor) {
+    // Section 5: Biological & Training Readiness
+    if (reportConfig.sections.biometrics) {
       pages.push({
-        id: 'readiness',
-        title: '5. Readiness & Qualifying Times',
+        id: 'biometrics',
+        title: '5. Biological & Training Readiness',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="readiness">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Readiness & Qualifying Times</h2>
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="biometrics">
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Biological & Training Readiness</h2>
               
-              {reportConfig.sections.biometrics && (
-                <>
-                  <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900 }} className="print-text-dark-override">Biological & Training Readiness</h3>
-                          <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontSize: '2rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '0.8rem', color: '#64748b' }}>/100</span></div>
-                              <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Overall Health Score</div>
-                          </div>
-                      </div>
-                      
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-                          {healthData?.components?.map((comp, idx) => (
-                              <div key={idx} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', textAlign: 'center' }}>
-                                  <div style={{ fontSize: '1.5rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.25rem' }}>{Math.round(comp.score)}</div>
-                                  <div style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }} className="readiness-label">{comp.label}</div>
-                              </div>
-                          ))}
+              <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900 }} className="print-text-dark-override">Biological & Training Readiness</h3>
+                      <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '2rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '0.8rem', color: '#64748b' }}>/100</span></div>
+                          <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Overall Health Score</div>
                       </div>
                   </div>
-
-                  {readinessInsight ? (
-                      <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
-                              <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Strategic Readiness Briefing</h4>
-                              {readinessInsight.flag && (
-                                  <span style={{ 
-                                      fontSize: '0.6rem', 
-                                      fontWeight: 900, 
-                                      padding: '3px 8px', 
-                                      borderRadius: '4px',
-                                      background: readinessInsight.risk_level === 'high' ? 'rgba(244, 63, 94, 0.15)' : (readinessInsight.risk_level === 'medium' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.15)'),
-                                      color: readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981'),
-                                      border: `1px solid ${readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981')}`
-                                  }}>
-                                      {readinessInsight.flag}
-                                  </span>
-                              )}
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                      {healthData?.components?.map((comp, idx) => (
+                          <div key={idx} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', textAlign: 'center' }}>
+                              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.25rem' }}>{Math.round(comp.score)}</div>
+                              <div style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }} className="readiness-label">{comp.label}</div>
                           </div>
-                          
-                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.03)' }}>
-                              <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0' }}>{readinessInsight.headline}</h3>
-                              <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: 0 }} className="print-text-dim">{readinessInsight.summary?.assessment || readinessInsight.overview}</p>
-                          </div>
+                      ))}
+                  </div>
+              </div>
 
-                          {readinessInsight.recommendations && readinessInsight.recommendations.length > 0 && (
-                              <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
-                                  <div style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Key Directives</div>
-                                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                      {readinessInsight.recommendations.map((rec, i) => (
-                                          <li key={i} style={{ fontSize: '0.72rem', display: 'flex', gap: '8px', marginBottom: '6px', lineHeight: 1.4 }} className="print-text-dim">
-                                              <div style={{ minWidth: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '5px' }}></div>
-                                              <span>{rec}</span>
-                                          </li>
-                                      ))}
-                                  </ul>
-                              </div>
+              {readinessInsight ? (
+                  <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                          <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Strategic Readiness Briefing</h4>
+                          {readinessInsight.flag && (
+                              <span style={{ 
+                                  fontSize: '0.6rem', 
+                                  fontWeight: 900, 
+                                  padding: '3px 8px', 
+                                  borderRadius: '4px',
+                                  background: readinessInsight.risk_level === 'high' ? 'rgba(244, 63, 94, 0.15)' : (readinessInsight.risk_level === 'medium' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.15)'),
+                                  color: readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981'),
+                                  border: `1px solid ${readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981')}`
+                              }}>
+                                  {readinessInsight.flag}
+                              </span>
                           )}
                       </div>
-                  ) : (
-                      <div className="glass-card mb-6" style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.6 }}>
-                          <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No AI Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+                      
+                      <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.03)' }}>
+                          <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0' }}>{readinessInsight.headline}</h3>
+                          <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: 0 }} className="print-text-dim">{readinessInsight.summary?.assessment || readinessInsight.overview}</p>
                       </div>
-                  )}
-                </>
-              )}
 
-              {reportConfig.sections.qtPredictor && (
-                <div style={{ marginTop: '2rem', pageBreakInside: 'avoid' }}>
-                  <div className="glass-card" style={{ padding: '1.5rem' }}>
-                      <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1rem 0' }}>Qualification Pathway Predictor (Short Course)</h3>
-                      <QtTable
-                          results={results}
-                          age={targetAge}
-                          gender={swimmer?.gender}
-                      />
+                      {readinessInsight.recommendations && readinessInsight.recommendations.length > 0 && (
+                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                              <div style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Key Directives</div>
+                              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                  {readinessInsight.recommendations.map((rec, i) => (
+                                      <li key={i} style={{ fontSize: '0.72rem', display: 'flex', gap: '8px', marginBottom: '6px', lineHeight: 1.4 }} className="print-text-dim">
+                                          <div style={{ minWidth: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '5px' }}></div>
+                                          <span>{rec}</span>
+                                      </li>
+                                  ))}
+                              </ul>
+                          </div>
+                      )}
                   </div>
-                </div>
+              ) : (
+                  <div className="glass-card mb-6" style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.6 }}>
+                      <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No AI Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+                  </div>
               )}
           </div>
         )
       });
     }
 
-    // Section 6: Appendix
+    // Section 6: Qualification Pathway Predictor
+    if (reportConfig.sections.qtPredictor) {
+      pages.push({
+        id: 'qtPredictor',
+        title: '6. Qualification Pathway Predictor',
+        element: (
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="qtPredictor">
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>6. Qualification Pathway Predictor</h2>
+              <div className="glass-card" style={{ padding: '1.5rem' }}>
+                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1rem 0' }}>Qualification Pathway Predictor (Short Course)</h3>
+                  <QtTable
+                      results={results}
+                      age={targetAge}
+                      gender={swimmer?.gender}
+                  />
+              </div>
+          </div>
+        )
+      });
+    }
+
+    // Section 7: Appendix
     if (reportConfig.sections.attendance) {
       pages.push({
         id: 'appendix',
-        title: 'Appendix: Weekly Workload Details',
+        title: '7. Appendix: Weekly Workload Details',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="appendix">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
@@ -2057,6 +2061,14 @@ const [decayDistance, setDecayDistance] = useState('100');
                 --print-border-light: 1px solid rgba(255,255,255,0.05);
                 --print-border-heavy: 2px solid rgba(255,255,255,0.1);
                 --print-grid: rgba(255, 255, 255, 0.1);
+            }
+
+            h2.section-title {
+                font-size: 2rem !important;
+                border-bottom: 2px solid var(--print-border-heavy) !important;
+                padding-bottom: 0.5rem !important;
+                margin-bottom: 2.5rem !important;
+                display: block !important;
             }
 
             @page { size: portrait; margin: 0 !important; }
@@ -2351,7 +2363,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                  info: { bg: 'rgba(14, 165, 233, 0.1)', border: '#0ea5e9', text: '#0ea5e9' }
                };
                const c = colors[item.type] || colors.info;
-               const isStroke = item.category === 'strokes';
+               const isStroke = ['freestyle', 'backstroke', 'breaststroke', 'butterfly', 'im', 'medley', 'individual medley'].includes(item.category.toLowerCase());
                
                return (
                  <div key={idx} style={{ 
@@ -2359,24 +2371,24 @@ const [decayDistance, setDecayDistance] = useState('100');
                    gap: '1.25rem', 
                    alignItems: 'center', 
                    padding: '1rem 1.5rem', 
-                   paddingLeft: isStroke ? '3.5rem' : '1.5rem',
+                   paddingLeft: isStroke ? '2.5rem' : '1.5rem',
                    background: c.bg, 
                    borderRadius: '12px', 
                    borderLeft: `4px solid ${c.border}`,
                    transition: 'transform 0.2s',
-                   opacity: isStroke ? 0.9 : 1
+                   opacity: isStroke ? 0.95 : 1
                  }}>
                     <div style={{ 
                       fontSize: '0.7rem', 
                       fontWeight: 900, 
                       textTransform: 'uppercase', 
                       letterSpacing: '0.1em', 
-                      width: isStroke ? '60px' : '80px', 
+                      width: '90px', 
                       color: c.text,
                       opacity: 0.8
                     }}>{item.category}</div>
                     <p style={{ 
-                      fontSize: isStroke ? '0.95rem' : '1rem', 
+                      fontSize: isStroke ? '0.92rem' : '1rem', 
                       fontWeight: 500, 
                       lineHeight: 1.5, 
                       color: 'rgba(255,255,255,0.9)', 
