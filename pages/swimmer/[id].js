@@ -1708,6 +1708,45 @@ const [decayDistance, setDecayDistance] = useState('100');
                               <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: '0 0 1rem 0' }} className="print-text-dim">
                                   {pathwayInsight.squad_transition?.transition_analysis || pathwayInsight.overview}
                               </p>
+
+                              {/* Safety build up roadmap in print */}
+                              {pathwayInsight.squad_transition?.safety_build_up && (
+                                  <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.05)', marginBottom: '1rem' }}>
+                                      <h5 style={{ fontSize: '0.7rem', fontWeight: 900, color: 'var(--accent-amber)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.5rem 0' }}>
+                                          Injury Prevention & Safety Progression Roadmap
+                                      </h5>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.4rem 0.6rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                              <div style={{ fontSize: '0.5rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }} className="print-text-dim">Weekly Hours</div>
+                                              <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'white', marginTop: '1px' }} className="print-text-bright">
+                                                  {pathwayInsight.squad_transition.safety_build_up.current_weekly_hours}h ➔ {pathwayInsight.squad_transition.safety_build_up.target_weekly_hours}h
+                                              </div>
+                                          </div>
+                                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.4rem 0.6rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                              <div style={{ fontSize: '0.5rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }} className="print-text-dim">Safe Ramp Up</div>
+                                              <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--accent-amber)', marginTop: '1px' }}>
+                                                  +{pathwayInsight.squad_transition.safety_build_up.ramp_up_weeks_required} Wks
+                                              </div>
+                                          </div>
+                                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.4rem 0.6rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                              <div style={{ fontSize: '0.5rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }} className="print-text-dim">Hold Target</div>
+                                              <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--accent-cyan)', marginTop: '1px' }}>
+                                                  {pathwayInsight.squad_transition.safety_build_up.holding_months_required} Mos
+                                              </div>
+                                          </div>
+                                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.4rem 0.6rem', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                              <div style={{ fontSize: '0.5rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }} className="print-text-dim">Timeline</div>
+                                              <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '1px' }}>
+                                                  ~{pathwayInsight.squad_transition.safety_build_up.estimated_months_to_ready} Mos
+                                              </div>
+                                          </div>
+                                      </div>
+                                      <p style={{ fontSize: '0.72rem', lineHeight: '1.4', margin: 0 }} className="print-text-dim">
+                                          {pathwayInsight.squad_transition.safety_build_up.detailed_safety_plan}
+                                      </p>
+                                  </div>
+                              )}
+
                               {pathwayInsight.action_items && pathwayInsight.action_items.length > 0 && (
                                   <div style={{ marginTop: '0.5rem' }}>
                                       <div style={{ fontSize: '0.68rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>Next Pathway Action Items</div>

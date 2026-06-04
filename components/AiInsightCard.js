@@ -324,6 +324,44 @@ export default function AiInsightCard({
                   <strong>Pathway Audit:</strong> {insight.pathway_audit}
                 </p>
               )}
+
+              {/* Safety build up roadmap */}
+              {insight.squad_transition.safety_build_up && (
+                <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                  <h5 style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--accent-amber)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 0.5rem 0' }}>
+                    ⚠️ CoachesEye Injury Prevention & Safety Roadmap
+                  </h5>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                      <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }}>Weekly Hours</div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#fff', marginTop: '2px' }}>
+                        {insight.squad_transition.safety_build_up.current_weekly_hours}h ➔ {insight.squad_transition.safety_build_up.target_weekly_hours}h
+                      </div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                      <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }}>Safe Ramp Up</div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-amber)', marginTop: '2px' }}>
+                        +{insight.squad_transition.safety_build_up.ramp_up_weeks_required} Weeks
+                      </div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                      <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }}>Hold Target</div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-cyan)', marginTop: '2px' }}>
+                        {insight.squad_transition.safety_build_up.holding_months_required} Months
+                      </div>
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.01)', padding: '0.6rem 0.8rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                      <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase' }}>Target Timeline</div>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '2px' }}>
+                        ~{insight.squad_transition.safety_build_up.estimated_months_to_ready} Months
+                      </div>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5, margin: 0 }}>
+                    {insight.squad_transition.safety_build_up.detailed_safety_plan}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
