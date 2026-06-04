@@ -1414,19 +1414,19 @@ const [decayDistance, setDecayDistance] = useState('100');
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="workload">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Training Workload & Compliance</h2>
-              <div className="glass-card" style={{ marginBottom: '2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
+              <div className="glass-card" style={{ marginBottom: '1.25rem', padding: '1rem 1.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                       <div>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{totalActualHours.toFixed(1)}h / {annualTargetHours.toFixed(1)}h</div>
-                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Volume Achieved</div>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>{totalActualHours.toFixed(1)}h / {annualTargetHours.toFixed(1)}h</div>
+                          <div style={{ fontSize: '0.65rem', opacity: 0.6, textTransform: 'uppercase' }}>Volume Achieved</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '1.2rem', fontWeight: 900, color: (statsObj?.percentage || 0) >= (squad?.target_training_percent || 75) ? '#059669' : '#e11d48' }}>{statsObj?.percentage || 0}%</div>
-                          <div style={{ fontSize: '0.7rem', opacity: 0.6, textTransform: 'uppercase' }}>Target Compliance</div>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 900, color: (statsObj?.percentage || 0) >= (squad?.target_training_percent || 75) ? '#059669' : '#e11d48' }}>{statsObj?.percentage || 0}%</div>
+                          <div style={{ fontSize: '0.65rem', opacity: 0.6, textTransform: 'uppercase' }}>Target Compliance</div>
                       </div>
                   </div>
-                  <div style={{ height: '300px', width: '100%', marginTop: '1rem' }}>
-                      <ComposedChart width={700} height={300} data={workloadChartData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+                  <div style={{ height: '220px', width: '100%', marginTop: '0.5rem' }}>
+                      <ComposedChart width={700} height={220} data={workloadChartData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} />
                           <XAxis dataKey="week" stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'} fontSize={9} tickMargin={10} tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }} />
                           <YAxis stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'} fontSize={9} tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }} />
@@ -1437,17 +1437,17 @@ const [decayDistance, setDecayDistance] = useState('100');
                       </ComposedChart>
                   </div>
               </div>
-
+ 
               {workloadInsight && (
-                <div style={{ pageBreakInside: 'avoid', marginTop: '2rem' }}>
-                  <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                          <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: 0 }}>Consistency & Maturation Audit</h3>
+                <div style={{ pageBreakInside: 'avoid', marginTop: '1rem' }}>
+                  <div className="glass-card" style={{ padding: '1rem', marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                          <h3 style={{ fontSize: '0.9rem', fontWeight: 900, color: 'white', margin: 0 }}>Consistency & Maturation Audit</h3>
                           {workloadInsight.attendance_rating && (
                               <span style={{ 
-                                  fontSize: '0.7rem', 
+                                  fontSize: '0.65rem', 
                                   fontWeight: 900, 
-                                  padding: '4px 10px', 
+                                  padding: '3px 8px', 
                                   borderRadius: '6px', 
                                   background: workloadInsight.attendance_rating === 'GREEN' ? 'rgba(16, 185, 129, 0.15)' : (workloadInsight.attendance_rating === 'AMBER' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)'), 
                                   color: workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e'),
@@ -1457,24 +1457,24 @@ const [decayDistance, setDecayDistance] = useState('100');
                               </span>
                           )}
                       </div>
-                      <p style={{ fontSize: '0.85rem', lineHeight: '1.6', opacity: 0.9 }} className="print-text-dim">
+                      <p style={{ fontSize: '0.8rem', lineHeight: '1.4', opacity: 0.9, margin: 0 }} className="print-text-dim">
                           {workloadInsight.headline}
                       </p>
                   </div>
-
+ 
                   {workloadInsight.swot_analysis && (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem', marginBottom: '1rem' }}>
                           {[
                               { title: 'STRENGTHS', data: workloadInsight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.03)', border: '#10b981' },
                               { title: 'WEAKNESSES', data: workloadInsight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)', border: '#f43f5e' },
                               { title: 'OPPORTUNITIES', data: workloadInsight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)', border: '#0ea5e9' },
                               { title: 'THREATS', data: workloadInsight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)', border: '#f59e0b' }
                           ].map((item, idx) => (
-                              <div key={idx} style={{ background: item.bg, border: `1px solid ${item.border}40`, borderRadius: '10px', padding: '1rem' }}>
-                                  <h4 style={{ color: item.color, margin: '0 0 0.5rem 0', fontSize: '0.75rem', fontWeight: 900 }}>{item.title}</h4>
+                              <div key={idx} style={{ background: item.bg, border: `1px solid ${item.border}40`, borderRadius: '10px', padding: '0.85rem 1rem' }}>
+                                  <h4 style={{ color: item.color, margin: '0 0 0.4rem 0', fontSize: '0.7rem', fontWeight: 900 }}>{item.title}</h4>
                                   <div 
                                       className="swot-quadrant-text print-text-dim"
-                                      style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.5' }} 
+                                      style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.4' }} 
                                       dangerouslySetInnerHTML={{ 
                                           __html: (item.data || 'No data generated.')
                                               .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
@@ -1486,31 +1486,32 @@ const [decayDistance, setDecayDistance] = useState('100');
                           ))}
                       </div>
                   )}
-
-                  {workloadInsight.smart_goals && (
-                      <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
-                          <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0', fontSize: '0.8rem', fontWeight: 900 }}>🎯 SMART Goal: Next 4 Weeks</h4>
-                          <div style={{ fontSize: '0.75rem', lineHeight: '1.5' }} className="print-text-dim">
-                              <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {workloadInsight.smart_goals.current_goal}</div>
-                              <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {workloadInsight.smart_goals.tracking_metric}</div>
-                              <div><strong>Status:</strong> {workloadInsight.smart_goals.status}</div>
+ 
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 0.9fr', gap: '0.75rem' }}>
+                      {workloadInsight.smart_goals && (
+                          <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: '4px solid var(--accent-cyan)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
+                              <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>🎯 SMART Goal: Next 4 Weeks</h4>
+                              <div style={{ fontSize: '0.68rem', lineHeight: '1.4' }} className="print-text-dim">
+                                  <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {workloadInsight.smart_goals.current_goal}</div>
+                                  <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {workloadInsight.smart_goals.tracking_metric}</div>
+                                  <div><strong>Status:</strong> {workloadInsight.smart_goals.status}</div>
+                              </div>
                           </div>
-                      </div>
-                  )}
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      )}
+                      
                       {workloadInsight.risk_flags && workloadInsight.risk_flags.length > 0 && (
-                          <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.15)', padding: '1rem', borderRadius: '10px' }}>
-                              <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
-                              <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
+                          <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.12)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
+                              <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
+                              <ul style={{ margin: 0, paddingLeft: '0.75rem', fontSize: '0.68rem', opacity: 0.9, lineHeight: '1.4' }} className="print-text-dim">
                                   {workloadInsight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 2 }}>{flag}</li>)}
                               </ul>
                           </div>
                       )}
+                      
                       {workloadInsight.action_items && workloadInsight.action_items.length > 0 && (
-                          <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1rem', borderRadius: '10px' }}>
-                              <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚡ Action Items</h4>
-                              <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
+                          <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.12)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
+                              <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>⚡ Action Items</h4>
+                              <ul style={{ margin: 0, paddingLeft: '0.75rem', fontSize: '0.68rem', opacity: 0.9, lineHeight: '1.4' }} className="print-text-dim">
                                   {workloadInsight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 2 }}>{item}</li>)}
                               </ul>
                           </div>
