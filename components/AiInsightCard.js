@@ -56,9 +56,7 @@ export default function AiInsightCard({
   };
 
   useEffect(() => {
-    if (initialInsight) {
-      setInsight(initialInsight);
-    }
+    setInsight(initialInsight || null);
   }, [initialInsight]);
 
   useEffect(() => {
@@ -126,18 +124,21 @@ export default function AiInsightCard({
 
   if (!insight && !loading) {
     const isTraining = type === 'training';
+    const isPathway = type === 'pathway';
     return (
       <div className="glass-card animate-fade-in no-print" style={{ padding: '1.5rem 2rem' }}>
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           <div style={{ flex: '1 1 30%', minWidth: '200px' }}>
             <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '4px' }}>CoachesEye Insights Lab</div>
             <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>
-              {isTraining ? 'Training Workload Analysis' : 'Technical Performance Analysis'}
+              {isTraining ? 'Training Workload Analysis' : (isPathway ? 'Progression & Transition Analysis' : 'Technical Performance Analysis')}
             </h3>
             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, margin: 0 }}>
               {isTraining 
                 ? 'Synthesizing training consistency, volume benchmarks, and biological maturation metrics into an actionable training plan.'
-                : 'Synthesizing technical metrics, drop-off ratios, and technical benchmarks into an actionable technical roadmap.'}
+                : (isPathway 
+                  ? 'Evaluating points progression ceiling trends, pathway gaps, and transition readiness for the next squad up.'
+                  : 'Synthesizing technical metrics, drop-off ratios, and technical benchmarks into an actionable technical roadmap.')}
             </p>
           </div>
           
@@ -149,7 +150,9 @@ export default function AiInsightCard({
               className="glass-input w-full"
               placeholder={isTraining 
                 ? "Specify directives for this workload audit (e.g. 'Prorate for late start in squad')..." 
-                : "Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')..."}
+                : (isPathway 
+                  ? "Specify directives for this progression audit (e.g. 'Analyze readiness for Gold Squad next term')..." 
+                  : "Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')...")}
               value={coachNotes}
               onChange={(e) => setCoachNotes(e.target.value)}
               style={{ 
@@ -171,6 +174,10 @@ export default function AiInsightCard({
             {isTraining ? (
               <button className="intel-toggle w-full" onClick={() => generateInsight('training')} style={{ padding: '10px 16px', fontSize: '0.8rem' }}>
                 <span>✨</span> Workload Insight
+              </button>
+            ) : isPathway ? (
+              <button className="intel-toggle w-full" onClick={() => generateInsight('pathway')} style={{ padding: '10px 16px', fontSize: '0.8rem' }}>
+                <span>✨</span> Pathway Insight
               </button>
             ) : (
               <>
@@ -203,14 +210,15 @@ export default function AiInsightCard({
 
   if (loading) {
     const isTraining = type === 'training';
+    const isPathway = type === 'pathway';
     return (
       <div className="glass-card animate-fade-in no-print" style={{ padding: '4rem', textAlign: 'center' }}>
         <div className="loading-spinner" style={{ marginBottom: '1.5rem' }}>✨</div>
         <p className="animate-pulse" style={{ fontSize: '1.1rem', fontWeight: 600 }}>
-          {isTraining ? 'Synthesizing Workload Audit...' : 'Synthesizing Technical Roadmap...'}
+          {isTraining ? 'Synthesizing Workload Audit...' : (isPathway ? 'Synthesizing Pathway Transition Audit...' : 'Synthesizing Technical Roadmap...')}
         </p>
         <p style={{ fontSize: '0.7rem', opacity: 0.5, marginTop: '10px' }}>
-          {isTraining ? 'Analyzing Consistency DNA & Volume Curves' : 'Analyzing Technical DNA & Meet Temperament'}
+          {isTraining ? 'Analyzing Consistency DNA & Volume Curves' : (isPathway ? 'Analyzing Points Velocity & Squad Target Milestones' : 'Analyzing Technical DNA & Meet Temperament')}
         </p>
       </div>
     );
@@ -225,7 +233,7 @@ export default function AiInsightCard({
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-4">
           <div className="section-title">
-            {type === 'training' ? 'CoachesEye Insights: Training Workload' : 'CoachesEye Insights: Technical Profile'}
+            {type === 'training' ? 'CoachesEye Insights: Training Workload' : (type === 'pathway' ? 'CoachesEye Insights: Progression & Squad Transition' : 'CoachesEye Insights: Technical Profile')}
           </div>
           {insight.flag && (
             <div className={`status-badge ${insight.risk_level === 'high' ? 'critical' : (insight.risk_level === 'medium' ? 'attention' : 'success')}`} style={{ fontSize: '0.6rem', padding: '4px 10px' }}>
@@ -237,11 +245,27 @@ export default function AiInsightCard({
               {insight.attendance_rating} Consistency
             </div>
           )}
+          {type === 'pathway' && insight.compliance_rating && (
+            <div className={`status-badge ${insight.compliance_rating === 'RED' ? 'critical' : (insight.compliance_rating === 'AMBER' ? 'attention' : 'success')}`} style={{ fontSize: '0.6rem', padding: '4px 10px' }}>
+              {insight.compliance_rating} Pathway Compliance
+            </div>
+          )}
+          {type === 'pathway' && insight.squad_transition?.readiness_status && (
+            <div className={`status-badge ${
+              insight.squad_transition.readiness_status === 'READY' ? 'success' : (insight.squad_transition.readiness_status === 'DEVELOPING' ? 'attention' : 'critical')
+            }`} style={{ fontSize: '0.6rem', padding: '4px 10px' }}>
+              {insight.squad_transition.readiness_status} FOR {insight.squad_transition.target_squad?.toUpperCase()}
+            </div>
+          )}
         </div>
         <div className="flex gap-2 items-center no-print flex-wrap" style={{ zIndex: 10 }}>
           {type === 'training' ? (
             <button className="btn-premium-action" style={{ padding: '6px 12px', fontSize: '0.65rem' }} onClick={() => generateInsight('training')}>
               <span>✨</span> WORKLOAD INSIGHT
+            </button>
+          ) : type === 'pathway' ? (
+            <button className="btn-premium-action" style={{ padding: '6px 12px', fontSize: '0.65rem' }} onClick={() => generateInsight('pathway')}>
+              <span>✨</span> PATHWAY INSIGHT
             </button>
           ) : (
             <>
@@ -284,8 +308,25 @@ export default function AiInsightCard({
       <div className="mb-10">
         <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{insight.headline}</h3>
 
-      {type === 'training' ? (
+      {(type === 'training' || type === 'pathway') ? (
         <>
+          {/* Pathway Transition analysis header block */}
+          {type === 'pathway' && insight.squad_transition && (
+            <div className="glass-card mb-8" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)', background: 'rgba(6, 182, 212, 0.02)', margin: '1.5rem 0' }}>
+              <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.75rem 0', fontSize: '0.9rem', fontWeight: 900, textTransform: 'uppercase' }}>
+                📣 Transition Target: {insight.squad_transition.target_squad}
+              </h4>
+              <p style={{ fontSize: '0.85rem', lineHeight: '1.6', margin: 0 }}>
+                <strong>Readiness Summary:</strong> {insight.squad_transition.transition_analysis || insight.overview}
+              </p>
+              {insight.pathway_audit && (
+                <p style={{ fontSize: '0.85rem', lineHeight: '1.6', marginTop: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <strong>Pathway Audit:</strong> {insight.pathway_audit}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* SWOT quadrant grid */}
           {insight.swot_analysis && (
             <div style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>

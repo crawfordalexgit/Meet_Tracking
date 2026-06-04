@@ -184,6 +184,8 @@ const [decayDistance, setDecayDistance] = useState('100');
   const [workloadInsight, setWorkloadInsight] = useState(null);
   const [isGeneratingWorkload, setIsGeneratingWorkload] = useState(false);
   const [readinessInsight, setReadinessInsight] = useState(null);
+  const [pathwayInsight, setPathwayInsight] = useState(null);
+  const [isGeneratingPathway, setIsGeneratingPathway] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [syncingPbs, setSyncingPbs] = useState(false);
   const [normalizeWA, setNormalizeWA] = useState(false);
@@ -450,6 +452,10 @@ const [decayDistance, setDecayDistance] = useState('100');
       if (readinessReport) {
         setReadinessInsight(readinessReport.content || readinessReport);
       }
+      const pathwayReport = reports.find(r => r.type === 'pathway');
+      if (pathwayReport) {
+        setPathwayInsight(pathwayReport.content || pathwayReport);
+      }
       const generalReport = reports.find(r => r.type === 'general');
       if (generalReport) {
         setAiInsight(generalReport.content || generalReport);
@@ -532,6 +538,40 @@ const [decayDistance, setDecayDistance] = useState('100');
       alert(err.message || 'Failed to generate training workload insight');
     } finally {
       setIsGeneratingWorkload(false);
+    }
+  };
+
+  const generatePathwayInsight = async (type = 'pathway', coachNotes = '') => {
+    if (type === 'reset') {
+      setPathwayInsight(null);
+      return;
+    }
+    setIsGeneratingPathway(true);
+    try {
+      const res = await fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          swimmerId: id, 
+          type: 'pathway', 
+          performance_slope,
+          instructions: [
+            ...(coachNotes ? [coachNotes] : []),
+            "CRITICAL: Analyze Points Progression Chart trends (celebrating progress, noting ceiling vs. average trends).",
+            "CRITICAL: Evaluate swimmer points standing relative to squad targets, Kent County standards, and South East Regional standards.",
+            "CRITICAL: Give a clear indication if the swimmer seems ready for promotion/transition to the next squad above (e.g., from Age Squad to Gold Squad, or Gold to NAR Squad). Identify targets for readiness."
+          ]
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setPathwayInsight(data);
+      return data;
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to generate pathway progression insight');
+    } finally {
+      setIsGeneratingPathway(false);
     }
   };
 
@@ -1274,64 +1314,62 @@ const [decayDistance, setDecayDistance] = useState('100');
 
     const pages = [];
 
-    // Page 2: Executive Overview
-    if (reportConfig.sections.performanceNarrative) {
+    // Section 1: Executive Overview & AI Report
+    if (reportConfig.sections.performanceNarrative || reportConfig.sections.aiPerformance) {
       pages.push({
         id: 'overview',
-        title: '1. Executive Overview & KPIs',
+        title: '1. Executive Overview & AI Report',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="overview">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview</h2>
-              <div className="glass-card" style={{ marginBottom: '2rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '1rem' }}>
-                      <PremiumOrb value={attendancePct} label="Consistency" size={120} unit="%" />
-                      <PremiumOrb value={seasonVolumePct} label="Volume vs Target" size={120} unit="%" color={seasonVolumePct >= 80 ? 'cyan' : 'amber'} />
-                      <PremiumOrb value={progressPercent} label="Meet Compliance" size={120} unit="%" />
-                      <PremiumOrb value={velocity} label="WA Velocity" customValue={true} size={120} unit="pts" color={velocity >= 0 ? 'emerald' : 'rose'} />
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview & AI Report</h2>
+              
+              {reportConfig.sections.performanceNarrative && (
+                <>
+                  <div className="glass-card" style={{ marginBottom: '2rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '1rem' }}>
+                          <PremiumOrb value={attendancePct} label="Consistency" size={120} unit="%" />
+                          <PremiumOrb value={seasonVolumePct} label="Volume vs Target" size={120} unit="%" color={seasonVolumePct >= 80 ? 'cyan' : 'amber'} />
+                          <PremiumOrb value={progressPercent} label="Meet Compliance" size={120} unit="%" />
+                          <PremiumOrb value={velocity} label="WA Velocity" customValue={true} size={120} unit="pts" color={velocity >= 0 ? 'emerald' : 'rose'} />
+                      </div>
                   </div>
-              </div>
-                  
-              <div className="glass-card strategic-narrative-card" style={{ marginTop: '2rem' }}>
-                  <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>Strategic Narrative</h3>
-                  <div style={{ display: 'grid', gap: '1rem' }}>
-                      {narrative && narrative.map((item, idx) => (
-                          <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px', pageBreakInside: 'avoid' }}>
-                              <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
-                                  <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
-                                  {item.text}
-                              </p>
-                          </div>
-                      ))}
+                      
+                  <div className="glass-card strategic-narrative-card" style={{ marginTop: '2rem', marginBottom: '2rem' }}>
+                      <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>Strategic Narrative</h3>
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                          {narrative && narrative.map((item, idx) => (
+                              <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px', pageBreakInside: 'avoid' }}>
+                                  <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
+                                      <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
+                                      {item.text}
+                                  </p>
+                              </div>
+                          ))}
+                      </div>
                   </div>
-              </div>
+                </>
+              )}
+
+              {reportConfig.sections.aiPerformance && (
+                <div style={{ marginTop: '2rem', pageBreakInside: 'avoid' }}>
+                    <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>AI Technical Roadmap</h3>
+                    <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
+                </div>
+              )}
           </div>
         )
       });
     }
 
-    // Page 3: Performance AI
-    if (reportConfig.sections.aiPerformance) {
-      pages.push({
-        id: 'ai',
-        title: '2. Performance AI Report',
-        element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="ai">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Performance AI Report</h2>
-              <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
-          </div>
-        )
-      });
-    }
-
-    // Page 4: Training Workload
+    // Section 2: Training Workload & Compliance
     if (reportConfig.sections.attendance) {
       pages.push({
         id: 'workload',
-        title: '3. Training Workload & Compliance',
+        title: '2. Training Workload & Compliance',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="workload">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>3. Training Workload</h2>
-              <div className="glass-card">
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>2. Training Workload & Compliance</h2>
+              <div className="glass-card" style={{ marginBottom: '2rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
                       <div>
                           <div style={{ fontSize: '1.2rem', fontWeight: 900 }}>{totalActualHours.toFixed(1)}h / {annualTargetHours.toFixed(1)}h</div>
@@ -1354,108 +1392,100 @@ const [decayDistance, setDecayDistance] = useState('100');
                       </ComposedChart>
                   </div>
               </div>
-          </div>
-        )
-      });
-    }
 
-    // Workload AI Insights Page
-    if (reportConfig.sections.attendance && workloadInsight) {
-      pages.push({
-        id: 'workload-ai',
-        title: '3b. Workload AI Insights',
-        element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="workload-ai">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>3b. Workload AI Insights</h2>
-              <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                      <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: 0 }}>Consistency & Maturation Audit</h3>
-                      {workloadInsight.attendance_rating && (
-                          <span style={{ 
-                              fontSize: '0.7rem', 
-                              fontWeight: 900, 
-                              padding: '4px 10px', 
-                              borderRadius: '6px', 
-                              background: workloadInsight.attendance_rating === 'GREEN' ? 'rgba(16, 185, 129, 0.15)' : (workloadInsight.attendance_rating === 'AMBER' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)'), 
-                              color: workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e'),
-                              border: `1px solid ${workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e')}`
-                          }}>
-                              {workloadInsight.attendance_rating} CONSISTENCY
-                          </span>
+              {workloadInsight && (
+                <div style={{ pageBreakInside: 'avoid', marginTop: '2rem' }}>
+                  <div className="glass-card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                          <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: 0 }}>Consistency & Maturation Audit</h3>
+                          {workloadInsight.attendance_rating && (
+                              <span style={{ 
+                                  fontSize: '0.7rem', 
+                                  fontWeight: 900, 
+                                  padding: '4px 10px', 
+                                  borderRadius: '6px', 
+                                  background: workloadInsight.attendance_rating === 'GREEN' ? 'rgba(16, 185, 129, 0.15)' : (workloadInsight.attendance_rating === 'AMBER' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(244, 63, 94, 0.15)'), 
+                                  color: workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e'),
+                                  border: `1px solid ${workloadInsight.attendance_rating === 'GREEN' ? '#10b981' : (workloadInsight.attendance_rating === 'AMBER' ? '#f59e0b' : '#f43f5e')}`
+                              }}>
+                                  {workloadInsight.attendance_rating} CONSISTENCY
+                              </span>
+                          )}
+                      </div>
+                      <p style={{ fontSize: '0.85rem', lineHeight: '1.6', opacity: 0.9 }} className="print-text-dim">
+                          {workloadInsight.headline}
+                      </p>
+                  </div>
+
+                  {workloadInsight.swot_analysis && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                          {[
+                              { title: 'STRENGTHS', data: workloadInsight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.03)', border: '#10b981' },
+                              { title: 'WEAKNESSES', data: workloadInsight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)', border: '#f43f5e' },
+                              { title: 'OPPORTUNITIES', data: workloadInsight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)', border: '#0ea5e9' },
+                              { title: 'THREATS', data: workloadInsight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)', border: '#f59e0b' }
+                          ].map((item, idx) => (
+                              <div key={idx} style={{ background: item.bg, border: `1px solid ${item.border}40`, borderRadius: '10px', padding: '1rem' }}>
+                                  <h4 style={{ color: item.color, margin: '0 0 0.5rem 0', fontSize: '0.75rem', fontWeight: 900 }}>{item.title}</h4>
+                                  <div 
+                                      className="swot-quadrant-text print-text-dim"
+                                      style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.5' }} 
+                                      dangerouslySetInnerHTML={{ 
+                                          __html: (item.data || 'No data generated.')
+                                              .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
+                                              .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
+                                              .replace(/^<br\/>/, '')
+                                      }} 
+                                  />
+                              </div>
+                          ))}
+                      </div>
+                  )}
+
+                  {workloadInsight.smart_goals && (
+                      <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+                          <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0', fontSize: '0.8rem', fontWeight: 900 }}>🎯 SMART Goal: Next 4 Weeks</h4>
+                          <div style={{ fontSize: '0.75rem', lineHeight: '1.5' }} className="print-text-dim">
+                              <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {workloadInsight.smart_goals.current_goal}</div>
+                              <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {workloadInsight.smart_goals.tracking_metric}</div>
+                              <div><strong>Status:</strong> {workloadInsight.smart_goals.status}</div>
+                          </div>
+                      </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      {workloadInsight.risk_flags && workloadInsight.risk_flags.length > 0 && (
+                          <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.15)', padding: '1rem', borderRadius: '10px' }}>
+                              <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
+                              <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
+                                  {workloadInsight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 2 }}>{flag}</li>)}
+                              </ul>
+                          </div>
+                      )}
+                      {workloadInsight.action_items && workloadInsight.action_items.length > 0 && (
+                          <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1rem', borderRadius: '10px' }}>
+                              <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚡ Action Items</h4>
+                              <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
+                                  {workloadInsight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 2 }}>{item}</li>)}
+                              </ul>
+                          </div>
                       )}
                   </div>
-                  <p style={{ fontSize: '0.85rem', lineHeight: '1.6', opacity: 0.9 }} className="print-text-dim">
-                      {workloadInsight.headline}
-                  </p>
-              </div>
-
-              {workloadInsight.swot_analysis && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                      {[
-                          { title: 'STRENGTHS', data: workloadInsight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.03)', border: '#10b981' },
-                          { title: 'WEAKNESSES', data: workloadInsight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)', border: '#f43f5e' },
-                          { title: 'OPPORTUNITIES', data: workloadInsight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)', border: '#0ea5e9' },
-                          { title: 'THREATS', data: workloadInsight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)', border: '#f59e0b' }
-                      ].map((item, idx) => (
-                          <div key={idx} style={{ background: item.bg, border: `1px solid ${item.border}40`, borderRadius: '10px', padding: '1rem' }}>
-                              <h4 style={{ color: item.color, margin: '0 0 0.5rem 0', fontSize: '0.75rem', fontWeight: 900 }}>{item.title}</h4>
-                              <div 
-                                  className="swot-quadrant-text print-text-dim"
-                                  style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.5' }} 
-                                  dangerouslySetInnerHTML={{ 
-                                      __html: (item.data || 'No data generated.')
-                                          .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
-                                          .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
-                                          .replace(/^<br\/>/, '')
-                                  }} 
-                              />
-                          </div>
-                      ))}
-                  </div>
+                </div>
               )}
-
-              {workloadInsight.smart_goals && (
-                  <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
-                      <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0', fontSize: '0.8rem', fontWeight: 900 }}>🎯 SMART Goal: Next 4 Weeks</h4>
-                      <div style={{ fontSize: '0.75rem', lineHeight: '1.5' }} className="print-text-dim">
-                          <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {workloadInsight.smart_goals.current_goal}</div>
-                          <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {workloadInsight.smart_goals.tracking_metric}</div>
-                          <div><strong>Status:</strong> {workloadInsight.smart_goals.status}</div>
-                      </div>
-                  </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                  {workloadInsight.risk_flags && workloadInsight.risk_flags.length > 0 && (
-                      <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.15)', padding: '1rem', borderRadius: '10px' }}>
-                          <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
-                          <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
-                              {workloadInsight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 2 }}>{flag}</li>)}
-                          </ul>
-                      </div>
-                  )}
-                  {workloadInsight.action_items && workloadInsight.action_items.length > 0 && (
-                      <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1rem', borderRadius: '10px' }}>
-                          <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.5rem 0', fontSize: '0.78rem', fontWeight: 900 }}>⚡ Action Items</h4>
-                          <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.72rem', opacity: 0.9 }} className="print-text-dim">
-                              {workloadInsight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 2 }}>{item}</li>)}
-                          </ul>
-                      </div>
-                  )}
-              </div>
           </div>
         )
       });
     }
 
-    // Page 5: Competition Record
+    // Section 3: Competition Record
     if (reportConfig.sections.competition || reportConfig.sections.openMeets || reportConfig.sections.internalGalas) {
       pages.push({
         id: 'competition',
-        title: '4. Competition Record',
+        title: '3. Competition Record',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="competition">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>4. Competition Record</h2>
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>3. Competition Record & Intensity</h2>
               
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                   <div>
@@ -1541,310 +1571,344 @@ const [decayDistance, setDecayDistance] = useState('100');
       });
     }
 
-    // Page 5.5: Progress Page
-    if (reportConfig.sections.progress) {
+    // Section 4: Points Progression & Stroke Roadmap
+    if (reportConfig.sections.progress || reportConfig.sections.strokeRoadmap) {
       pages.push({
         id: 'progress',
-        title: '5. Points Progression & Baselines',
+        title: '4. Progression & Stroke Roadmap',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="progress">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Points Progression & Baselines</h2>
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>4. Progression & Stroke Roadmap</h2>
               
-              <div className="glass-card" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--print-text, white)', margin: '0 0 1rem 0' }}>WA POINTS PROGRESSION</h3>
-                  <div style={{ height: '300px', width: '100%' }}>
-                      <ComposedChart width={700} height={300} data={chartDataWithTrends} margin={{ top: 20, right: 90, left: 10, bottom: 25 }}>
-                          <defs>
-                              <linearGradient id="poolWaterPrint" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.6}/>
-                                  <stop offset="50%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                                  <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
-                              </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} />
-                          <XAxis
-                              dataKey="name"
-                              stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'}
-                              fontSize={9}
-                              tickFormatter={(str) => (typeof str === 'string' ? (str.length > 15 ? str.substring(0, 15) + '...' : str) : '')}
-                              tickMargin={5}
-                              height={35}
-                              tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }}
-                          />
-                          <YAxis
-                              stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'}
-                              fontSize={9}
-                              tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }}
-                              domain={[
-                                  dataMin => (isFinite(dataMin) && dataMin > 30 ? Math.max(0, dataMin - 30) : 0),
-                                  dataMax => {
-                                      const highestTarget = chartDataWithTrends[chartDataWithTrends.length - 1]?.narTarget || 480;
-                                      return Math.max(isFinite(dataMax) ? dataMax + 20 : 0, Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 300, highestTarget + 20);
-                                  }
-                              ]}
-                          />
-                          <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'COUNTY')) || 250} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)'} strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'COUNTY', fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: 800 }} isAnimationActive={false} />
-                          <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 350} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)'} strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'REGIONAL', fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: 800 }} isAnimationActive={false} />
-                          <Line
-                              type="monotone"
-                              dataKey="ageTarget"
-                              stroke="#2dd4bf"
-                              strokeDasharray="6 6"
-                              strokeWidth={2}
-                              dot={false}
-                              name="Age Squad Target"
-                              isAnimationActive={false}
-                              label={(props) => {
-                                  if (props.index === chartDataWithTrends.length - 1) {
-                                      return <text x={props.x + 8} y={props.y} fill="#2dd4bf" fontSize={8} fontWeight={900} dominantBaseline="central">AGE SQUAD</text>;
-                                  }
-                                  return null;
-                              }}
-                          />
-                          <Line
-                              type="monotone"
-                              dataKey="goldTarget"
-                              stroke="#f59e0b"
-                              strokeDasharray="6 6"
-                              strokeWidth={2}
-                              dot={false}
-                              name="Gold Squad Target"
-                              isAnimationActive={false}
-                              label={(props) => {
-                                  if (props.index === chartDataWithTrends.length - 1) {
-                                      return <text x={props.x + 8} y={props.y} fill="#f59e0b" fontSize={8} fontWeight={900} dominantBaseline="central">GOLD SQUAD</text>;
-                                  }
-                                  return null;
-                              }}
-                          />
-                          <Line
-                              type="monotone"
-                              dataKey="narTarget"
-                              stroke="#ef4444"
-                              strokeDasharray="6 6"
-                              strokeWidth={2}
-                              dot={false}
-                              name="NAR Squad Target"
-                              isAnimationActive={false}
-                              label={(props) => {
-                                  if (props.index === chartDataWithTrends.length - 1) {
-                                      return <text x={props.x + 8} y={props.y} fill="#ef4444" fontSize={8} fontWeight={900} dominantBaseline="central">NAR SQUAD</text>;
-                                  }
-                                  return null;
-                              }}
-                          />
-                          <Area
-                              type="monotone"
-                              dataKey="peakWa"
-                              stroke="#00d4ff"
-                              strokeWidth={3}
-                              fillOpacity={1}
-                              fill="url(#poolWaterPrint)"
-                              name="Athlete Peak Capability"
-                              isAnimationActive={false}
-                              dot={{ r: 3, fill: '#0a0a0a', stroke: '#00d4ff', strokeWidth: 1.5 }}
-                              label={(props) => {
-                                  if (props.index === chartDataWithTrends.length - 1) {
-                                      return <text x={props.x + 8} y={props.y - 8} fill="#00d4ff" fontSize={9} fontWeight={900} dominantBaseline="central">ATHLETE PEAK</text>;
-                                  }
-                                  return null;
-                              }}
-                          />
-                      </ComposedChart>
-                  </div>
-              </div>
-
-              <div className="glass-card" style={{ padding: '1.25rem' }}>
-                  <h3 style={{ fontSize: '0.9rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.75rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      How to Read this Chart
-                  </h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', fontSize: '0.75rem', lineHeight: '1.5' }}>
-                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-cyan)' }}>
-                          <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>1. Peak Capability</h4>
-                          <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
-                              The blue line plots the single highest World Aquatics (WA) point score achieved at each meet. This ceiling represents the swimmer&apos;s peak biological performance, which is key for qualification.
-                          </p>
+              {reportConfig.sections.progress && (
+                <>
+                  <div className="glass-card" style={{ marginBottom: '1.5rem', padding: '1.5rem' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--print-text, white)', margin: '0 0 1rem 0' }}>WA POINTS PROGRESSION</h3>
+                      <div style={{ height: '300px', width: '100%', marginBottom: '1rem' }}>
+                          <ComposedChart width={700} height={300} data={chartDataWithTrends} margin={{ top: 20, right: 90, left: 10, bottom: 25 }}>
+                              <defs>
+                                  <linearGradient id="poolWaterPrint" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor="#00d4ff" stopOpacity={0.6}/>
+                                      <stop offset="50%" stopColor="#3b82f6" stopOpacity={0.2}/>
+                                      <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+                                  </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} />
+                              <XAxis
+                                  dataKey="name"
+                                  stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'}
+                                  fontSize={9}
+                                  tickFormatter={(str) => (typeof str === 'string' ? (str.length > 15 ? str.substring(0, 15) + '...' : str) : '')}
+                                  tickMargin={5}
+                                  height={35}
+                                  tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }}
+                              />
+                              <YAxis
+                                  stroke={printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)'}
+                                  fontSize={9}
+                                  tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)' }}
+                                  domain={[
+                                      dataMin => (isFinite(dataMin) && dataMin > 30 ? Math.max(0, dataMin - 30) : 0),
+                                      dataMax => {
+                                          const highestTarget = chartDataWithTrends[chartDataWithTrends.length - 1]?.narTarget || 480;
+                                          return Math.max(isFinite(dataMax) ? dataMax + 20 : 0, Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 300, highestTarget + 20);
+                                      }
+                                  ]}
+                              />
+                              <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'COUNTY')) || 250} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.3)'} strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'COUNTY', fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 9, fontWeight: 800 }} isAnimationActive={false} />
+                              <ReferenceLine y={Number(getCategoryBenchmark(statsObj?.age, swimmer?.gender, selectedStroke === 'All' ? '' : selectedStroke, 'REGIONAL')) || 350} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.5)'} strokeDasharray="3 3" strokeWidth={1} label={{ position: 'right', value: 'REGIONAL', fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.7)', fontSize: 9, fontWeight: 800 }} isAnimationActive={false} />
+                              <Line
+                                  type="monotone"
+                                  dataKey="ageTarget"
+                                  stroke="#2dd4bf"
+                                  strokeDasharray="6 6"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  name="Age Squad Target"
+                                  isAnimationActive={false}
+                                  label={(props) => {
+                                      if (props.index === chartDataWithTrends.length - 1) {
+                                          return <text x={props.x + 8} y={props.y} fill="#2dd4bf" fontSize={8} fontWeight={900} dominantBaseline="central">AGE SQUAD</text>;
+                                      }
+                                      return null;
+                                  }}
+                              />
+                              <Line
+                                  type="monotone"
+                                  dataKey="goldTarget"
+                                  stroke="#f59e0b"
+                                  strokeDasharray="6 6"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  name="Gold Squad Target"
+                                  isAnimationActive={false}
+                                  label={(props) => {
+                                      if (props.index === chartDataWithTrends.length - 1) {
+                                          return <text x={props.x + 8} y={props.y} fill="#f59e0b" fontSize={8} fontWeight={900} dominantBaseline="central">GOLD SQUAD</text>;
+                                      }
+                                      return null;
+                                  }}
+                              />
+                              <Line
+                                  type="monotone"
+                                  dataKey="narTarget"
+                                  stroke="#ef4444"
+                                  strokeDasharray="6 6"
+                                  strokeWidth={2}
+                                  dot={false}
+                                  name="NAR Squad Target"
+                                  isAnimationActive={false}
+                                  label={(props) => {
+                                      if (props.index === chartDataWithTrends.length - 1) {
+                                          return <text x={props.x + 8} y={props.y} fill="#ef4444" fontSize={8} fontWeight={900} dominantBaseline="central">NAR SQUAD</text>;
+                                      }
+                                      return null;
+                                  }}
+                              />
+                              <Area
+                                  type="monotone"
+                                  dataKey="peakWa"
+                                  stroke="#00d4ff"
+                                  strokeWidth={3}
+                                  fillOpacity={1}
+                                  fill="url(#poolWaterPrint)"
+                                  name="Athlete Peak Capability"
+                                  isAnimationActive={false}
+                                  dot={{ r: 3, fill: '#0a0a0a', stroke: '#00d4ff', strokeWidth: 1.5 }}
+                                  label={(props) => {
+                                      if (props.index === chartDataWithTrends.length - 1) {
+                                          return <text x={props.x + 8} y={props.y - 8} fill="#00d4ff" fontSize={9} fontWeight={900} dominantBaseline="central">ATHLETE PEAK</text>;
+                                      }
+                                      return null;
+                                  }}
+                              />
+                          </ComposedChart>
                       </div>
-                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-amber)' }}>
-                          <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>2. Pathway Baselines</h4>
-                          <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
-                              Flat COUNTY and REGIONAL line thresholds reflect the average WA point standard required for Kent County and South East Regional automatic standard times at the swimmer&apos;s age/gender.
-                          </p>
-                      </div>
-                      <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-rose)' }}>
-                          <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>3. Squad Velocity</h4>
-                          <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
-                              The dashed AGE, GOLD, and NAR squad lines show squad-wide trends calculated using linear regression over the last 365 days, mapping where an athlete stands compared to peers on the date of each gala.
-                          </p>
-                      </div>
-                  </div>
-              </div>
-          </div>
-        )
-      });
-    }
 
-    // Performance Roadmap Page
-    if (reportConfig.sections.strokeRoadmap) {
-      pages.push({
-        id: 'roadmap',
-        title: '5b. Stroke Performance Roadmap',
-        element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="roadmap">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>5b. Stroke Performance Roadmap</h2>
-              
-              <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-violet)' }}>
-                  <h4 style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--accent-violet)', textTransform: 'uppercase', margin: '0 0 6px 0' }}>CoachesEye Guide: Biological Maturation</h4>
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }} className="print-text-dim">
-                      <strong>The Maturation Gap (Vorontsov):</strong> According to Vorontsov's LTAD models, girls experience Peak Height Velocity (PHV) around ages 11-12, approximately 2 years earlier than boys. Normalisation balances this pubertal growth gap, allowing coaches to fairly compare underlying skill and aerobic progression between genders before they reach full maturation.
-                  </p>
-              </div>
-
-              <div className="glass-card" style={{ padding: '1.5rem' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1.5rem 0' }}>Pathway Gaps & Stroke-Specific Roadmap</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-                      {Object.entries(statsObj.strokeData)
-                        .filter(([_, d]) => d.count > 0)
-                        .map(([name, d]) => {
-                          const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY');
-                          const regional = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'REGIONAL');
-                          const peak = Math.round(d.peak);
-                          const avg = Math.round(d.avg);
-                          const scale = (val) => Math.min((val / 600) * 100, 100);
-
-                          return (
-                            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                              <div style={{ width: '100px', flexShrink: 0 }}>
-                                 <div style={{ fontSize: '0.72rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '2px' }}>{name}</div>
-                                 <div style={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.5 }}>P: {peak} | A: {avg}</div>
+                      {/* NEW: AI Progression Analysis directly under the graph */}
+                      {pathwayInsight ? (
+                          <div style={{ background: 'rgba(6,182,212,0.02)', padding: '1.25rem', borderRadius: '12px', borderLeft: '4px solid var(--accent-cyan)', marginBottom: '1.5rem', pageBreakInside: 'avoid' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                                  <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Progression & Transition Analysis</h4>
+                                  {pathwayInsight.squad_transition?.readiness_status && (
+                                      <span style={{ 
+                                          fontSize: '0.65rem', 
+                                          fontWeight: 900, 
+                                          padding: '2px 8px', 
+                                          borderRadius: '4px',
+                                          background: pathwayInsight.squad_transition.readiness_status === 'READY' ? 'rgba(16, 185, 129, 0.15)' : (pathwayInsight.squad_transition.readiness_status === 'DEVELOPING' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(244, 63, 94, 0.15)'),
+                                          color: pathwayInsight.squad_transition.readiness_status === 'READY' ? '#10b981' : (pathwayInsight.squad_transition.readiness_status === 'DEVELOPING' ? '#f59e0b' : '#f43f5e'),
+                                          border: `1px solid ${pathwayInsight.squad_transition.readiness_status === 'READY' ? '#10b981' : (pathwayInsight.squad_transition.readiness_status === 'DEVELOPING' ? '#f59e0b' : '#f43f5e')}`
+                                      }}>
+                                          {pathwayInsight.squad_transition.readiness_status} FOR {pathwayInsight.squad_transition.target_squad?.toUpperCase()}
+                                      </span>
+                                  )}
                               </div>
-                              <div style={{ flex: 1, position: 'relative', paddingTop: '12px', paddingBottom: '16px' }}>
-                                <div style={{ height: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', position: 'relative' }}>
-                                  <div style={{ width: `${scale(peak)}%`, height: '100%', background: 'linear-gradient(90deg, #00d4ff, #0082ff)', borderRadius: '0 3px 3px 0' }} />
-                                  <div style={{ position: 'absolute', left: `${scale(avg)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.8)', zIndex: 10 }} />
-                                </div>
-                                <div style={{ position: 'absolute', left: `${scale(county)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.2)', borderLeft: '1px dashed rgba(255,255,255,0.5)', zIndex: 5 }}>
-                                   <div style={{ position: 'absolute', top: '-12px', left: '-15px', width: '30px', textAlign: 'center', fontSize: '6px', opacity: 0.6, fontWeight: 900 }}>CTY</div>
-                                </div>
-                                <div style={{ position: 'absolute', left: `${scale(regional)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(245, 158, 11, 0.2)', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)', zIndex: 5 }}>
-                                   <div style={{ position: 'absolute', bottom: '-12px', left: '-15px', width: '30px', textAlign: 'center', fontSize: '6px', color: '#f59e0b', opacity: 0.8, fontWeight: 900 }}>REG</div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                  </div>
-                  
-                  <div style={{ marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'center', gap: '30px', fontSize: '8px', opacity: 0.5, textTransform: 'uppercase', fontWeight: 900 }}>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '12px', height: '4px', background: 'linear-gradient(90deg, #00d4ff, #0082ff)' }}></div> Peak Performance</div>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '2px', height: '8px', background: 'rgba(255,255,255,0.8)' }}></div> Season Average</div>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '1px', height: '8px', borderLeft: '1px dashed rgba(255,255,255,0.4)' }}></div> County AQT</div>
-                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '1px', height: '8px', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)' }}></div> Regional Auto</div>
-                  </div>
-              </div>
-          </div>
-        )
-      });
-    }
-
-    // Page 6: Readiness & Health Audit
-    if (reportConfig.sections.biometrics) {
-      pages.push({
-        id: 'readiness',
-        title: '5c. Readiness & Health Audit',
-        element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="readiness">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5c. Readiness & Health Audit</h2>
-              
-              <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                      <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900 }} className="print-text-dark-override">Biological & Training Readiness</h3>
-                      <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '2rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '0.8rem', color: '#64748b' }}>/100</span></div>
-                          <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Overall Health Score</div>
-                      </div>
-                  </div>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-                      {healthData?.components?.map((comp, idx) => (
-                          <div key={idx} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', textAlign: 'center' }}>
-                              <div style={{ fontSize: '1.5rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.25rem' }}>{Math.round(comp.score)}</div>
-                              <div style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }} className="readiness-label">{comp.label}</div>
+                              <h3 style={{ fontSize: '0.9rem', fontWeight: 950, color: 'white', margin: '0 0 0.5rem 0' }}>{pathwayInsight.headline}</h3>
+                              <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: '0 0 1rem 0' }} className="print-text-dim">
+                                  {pathwayInsight.squad_transition?.transition_analysis || pathwayInsight.overview}
+                              </p>
+                              {pathwayInsight.action_items && pathwayInsight.action_items.length > 0 && (
+                                  <div style={{ marginTop: '0.5rem' }}>
+                                      <div style={{ fontSize: '0.68rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>Next Pathway Action Items</div>
+                                      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                          {pathwayInsight.action_items.map((item, idx) => (
+                                              <li key={idx} style={{ fontSize: '0.72rem', display: 'flex', gap: '6px', marginBottom: '4px', lineHeight: 1.4 }} className="print-text-dim">
+                                                  <div style={{ minWidth: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '5px' }}></div>
+                                                  <span>{item}</span>
+                                              </li>
+                                          ))}
+                                      </ul>
+                                  </div>
+                              )}
                           </div>
-                      ))}
-                  </div>
-              </div>
-
-              {readinessInsight ? (
-                  <div className="glass-card" style={{ padding: '1.5rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
-                          <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Strategic Readiness Briefing</h4>
-                          {readinessInsight.flag && (
-                              <span style={{ 
-                                  fontSize: '0.6rem', 
-                                  fontWeight: 900, 
-                                  padding: '3px 8px', 
-                                  borderRadius: '4px',
-                                  background: readinessInsight.risk_level === 'high' ? 'rgba(244, 63, 94, 0.15)' : (readinessInsight.risk_level === 'medium' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.15)'),
-                                  color: readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981'),
-                                  border: `1px solid ${readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981')}`
-                              }}>
-                                  {readinessInsight.flag}
-                              </span>
-                          )}
-                      </div>
-                      
-                      <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.03)' }}>
-                          <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0' }}>{readinessInsight.headline}</h3>
-                          <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: 0 }} className="print-text-dim">{readinessInsight.summary?.assessment || readinessInsight.overview}</p>
-                      </div>
-
-                      {readinessInsight.recommendations && readinessInsight.recommendations.length > 0 && (
-                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
-                              <div style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Key Directives</div>
-                              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                                  {readinessInsight.recommendations.map((rec, i) => (
-                                      <li key={i} style={{ fontSize: '0.72rem', display: 'flex', gap: '8px', marginBottom: '6px', lineHeight: 1.4 }} className="print-text-dim">
-                                          <div style={{ minWidth: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '5px' }}></div>
-                                          <span>{rec}</span>
-                                      </li>
-                                  ))}
-                              </ul>
+                      ) : (
+                          <div className="glass-card mb-6" style={{ padding: '1rem', textAlign: 'center', opacity: 0.6 }}>
+                              <p style={{ fontSize: '0.72rem', margin: 0 }} className="print-text-dim">No CoachesEye AI Progression Analysis has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
                           </div>
                       )}
                   </div>
-              ) : (
-                  <div className="glass-card" style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.6 }}>
-                      <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No AI Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+
+                  <div className="glass-card" style={{ padding: '1.25rem', marginBottom: '2rem' }}>
+                      <h3 style={{ fontSize: '0.9rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.75rem 0', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          How to Read this Chart
+                      </h3>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', fontSize: '0.75rem', lineHeight: '1.5' }}>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-cyan)' }}>
+                              <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>1. Peak Capability</h4>
+                              <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
+                                  The blue line plots the single highest World Aquatics (WA) point score achieved at each meet. This ceiling represents the swimmer&apos;s peak biological performance, which is key for qualification.
+                              </p>
+                          </div>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-amber)' }}>
+                              <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>2. Pathway Baselines</h4>
+                              <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
+                                  Flat COUNTY and REGIONAL line thresholds reflect the average WA point standard required for Kent County and South East Regional automatic standard times at the swimmer&apos;s age/gender.
+                              </p>
+                          </div>
+                          <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.75rem', borderRadius: '8px', borderLeft: '3px solid var(--accent-rose)' }}>
+                              <h4 style={{ color: 'white', fontWeight: 800, margin: '0 0 0.5rem 0' }}>3. Squad Velocity</h4>
+                              <p style={{ margin: 0, opacity: 0.8 }} className="print-text-dim">
+                                  The dashed AGE, GOLD, and NAR squad lines show squad-wide trends calculated using linear regression over the last 365 days, mapping where an athlete stands compared to peers on the date of each gala.
+                              </p>
+                          </div>
+                      </div>
                   </div>
+                </>
+              )}
+
+              {reportConfig.sections.strokeRoadmap && (
+                <div style={{ marginTop: '2rem', pageBreakInside: 'avoid' }}>
+                  <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-violet)' }}>
+                      <h4 style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--accent-violet)', textTransform: 'uppercase', margin: '0 0 6px 0' }}>CoachesEye Guide: Biological Maturation</h4>
+                      <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }} className="print-text-dim">
+                          <strong>The Maturation Gap (Vorontsov):</strong> According to Vorontsov's LTAD models, girls experience Peak Height Velocity (PHV) around ages 11-12, approximately 2 years earlier than boys. Normalisation balances this pubertal growth gap, allowing coaches to fairly compare underlying skill and aerobic progression between genders before they reach full maturation.
+                      </p>
+                  </div>
+
+                  <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1.5rem 0' }}>Pathway Gaps & Stroke-Specific Roadmap</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+                          {Object.entries(statsObj.strokeData)
+                            .filter(([_, d]) => d.count > 0)
+                            .map(([name, d]) => {
+                              const county = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'COUNTY');
+                              const regional = getCategoryBenchmark(statsObj.age, swimmer?.gender, name, 'REGIONAL');
+                              const peak = Math.round(d.peak);
+                              const avg = Math.round(d.avg);
+                              const scale = (val) => Math.min((val / 600) * 100, 100);
+
+                              return (
+                                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                                  <div style={{ width: '100px', flexShrink: 0 }}>
+                                     <div style={{ fontSize: '0.72rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '2px' }}>{name}</div>
+                                     <div style={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.5 }}>P: {peak} | A: {avg}</div>
+                                  </div>
+                                  <div style={{ flex: 1, position: 'relative', paddingTop: '12px', paddingBottom: '16px' }}>
+                                    <div style={{ height: '12px', background: 'rgba(255,255,255,0.05)', borderRadius: '6px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.05)', position: 'relative' }}>
+                                      <div style={{ width: `${scale(peak)}%`, height: '100%', background: 'linear-gradient(90deg, #00d4ff, #0082ff)', borderRadius: '0 3px 3px 0' }} />
+                                      <div style={{ position: 'absolute', left: `${scale(avg)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.8)', zIndex: 10 }} />
+                                    </div>
+                                    <div style={{ position: 'absolute', left: `${scale(county)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(255,255,255,0.2)', borderLeft: '1px dashed rgba(255,255,255,0.5)', zIndex: 5 }}>
+                                       <div style={{ position: 'absolute', top: '-12px', left: '-15px', width: '30px', textAlign: 'center', fontSize: '6px', opacity: 0.6, fontWeight: 900 }}>CTY</div>
+                                    </div>
+                                    <div style={{ position: 'absolute', left: `${scale(regional)}%`, top: 0, bottom: 0, width: '2px', background: 'rgba(245, 158, 11, 0.2)', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)', zIndex: 5 }}>
+                                       <div style={{ position: 'absolute', bottom: '-12px', left: '-15px', width: '30px', textAlign: 'center', fontSize: '6px', color: '#f59e0b', opacity: 0.8, fontWeight: 900 }}>REG</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                      </div>
+                      
+                      <div style={{ marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'center', gap: '30px', fontSize: '8px', opacity: 0.5, textTransform: 'uppercase', fontWeight: 900 }}>
+                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '12px', height: '4px', background: 'linear-gradient(90deg, #00d4ff, #0082ff)' }}></div> Peak Performance</div>
+                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '2px', height: '8px', background: 'rgba(255,255,255,0.8)' }}></div> Season Average</div>
+                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '1px', height: '8px', borderLeft: '1px dashed rgba(255,255,255,0.4)' }}></div> County AQT</div>
+                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '1px', height: '8px', borderLeft: '1px dashed rgba(245, 158, 11, 0.5)' }}></div> Regional Auto</div>
+                      </div>
+                  </div>
+                </div>
               )}
           </div>
         )
       });
     }
 
-    // Page 7: Qualifying Times
-    if (reportConfig.sections.qtPredictor) {
+    // Section 5: Readiness & Qualifying Times
+    if (reportConfig.sections.biometrics || reportConfig.sections.qtPredictor) {
       pages.push({
-        id: 'qt',
-        title: '6. Qualifying Times Assessment',
+        id: 'readiness',
+        title: '5. Readiness & Qualifying Times',
         element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="qt">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>6. Qualifying Times Assessment</h2>
-              <div className="glass-card" style={{ padding: '1.5rem' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1rem 0' }}>Qualification Pathway Predictor (Short Course)</h3>
-                  <QtTable
-                      results={results}
-                      age={targetAge}
-                      gender={swimmer?.gender}
-                  />
-              </div>
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="readiness">
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Readiness & Qualifying Times</h2>
+              
+              {reportConfig.sections.biometrics && (
+                <>
+                  <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900 }} className="print-text-dark-override">Biological & Training Readiness</h3>
+                          <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '2rem', fontWeight: 900 }} className="print-text-dark-override">{healthData?.total || 0}<span style={{ fontSize: '0.8rem', color: '#64748b' }}>/100</span></div>
+                              <div style={{ fontSize: '0.55rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Overall Health Score</div>
+                          </div>
+                      </div>
+                      
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                          {healthData?.components?.map((comp, idx) => (
+                              <div key={idx} style={{ padding: '0.75rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', textAlign: 'center' }}>
+                                  <div style={{ fontSize: '1.5rem', fontWeight: 900, color: comp.score >= 75 ? '#059669' : comp.score < 50 ? '#e11d48' : '#d97706', marginBottom: '0.25rem' }}>{Math.round(comp.score)}</div>
+                                  <div style={{ fontSize: '0.6rem', fontWeight: 800, textTransform: 'uppercase', color: '#64748b' }} className="readiness-label">{comp.label}</div>
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+
+                  {readinessInsight ? (
+                      <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
+                              <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Strategic Readiness Briefing</h4>
+                              {readinessInsight.flag && (
+                                  <span style={{ 
+                                      fontSize: '0.6rem', 
+                                      fontWeight: 900, 
+                                      padding: '3px 8px', 
+                                      borderRadius: '4px',
+                                      background: readinessInsight.risk_level === 'high' ? 'rgba(244, 63, 94, 0.15)' : (readinessInsight.risk_level === 'medium' ? 'rgba(251, 191, 36, 0.15)' : 'rgba(16, 185, 129, 0.15)'),
+                                      color: readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981'),
+                                      border: `1px solid ${readinessInsight.risk_level === 'high' ? '#f43f5e' : (readinessInsight.risk_level === 'medium' ? '#f59e0b' : '#10b981')}`
+                                  }}>
+                                      {readinessInsight.flag}
+                                  </span>
+                              )}
+                          </div>
+                          
+                          <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.03)' }}>
+                              <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', margin: '0 0 0.5rem 0' }}>{readinessInsight.headline}</h3>
+                              <p style={{ fontSize: '0.78rem', lineHeight: '1.5', margin: 0 }} className="print-text-dim">{readinessInsight.summary?.assessment || readinessInsight.overview}</p>
+                          </div>
+
+                          {readinessInsight.recommendations && readinessInsight.recommendations.length > 0 && (
+                              <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
+                                  <div style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>Key Directives</div>
+                                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                      {readinessInsight.recommendations.map((rec, i) => (
+                                          <li key={i} style={{ fontSize: '0.72rem', display: 'flex', gap: '8px', marginBottom: '6px', lineHeight: 1.4 }} className="print-text-dim">
+                                              <div style={{ minWidth: '4px', height: '4px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '5px' }}></div>
+                                              <span>{rec}</span>
+                                          </li>
+                                      ))}
+                                  </ul>
+                              </div>
+                          )}
+                      </div>
+                  ) : (
+                      <div className="glass-card mb-6" style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.6 }}>
+                          <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No AI Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+                      </div>
+                  )}
+                </>
+              )}
+
+              {reportConfig.sections.qtPredictor && (
+                <div style={{ marginTop: '2rem', pageBreakInside: 'avoid' }}>
+                  <div className="glass-card" style={{ padding: '1.5rem' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 900, color: 'white', margin: '0 0 1rem 0' }}>Qualification Pathway Predictor (Short Course)</h3>
+                      <QtTable
+                          results={results}
+                          age={targetAge}
+                          gender={swimmer?.gender}
+                      />
+                  </div>
+                </div>
+              )}
           </div>
         )
       });
     }
 
-    // Page 8: Appendix
+    // Section 6: Appendix
     if (reportConfig.sections.attendance) {
       pages.push({
         id: 'appendix',
@@ -1888,7 +1952,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
 
     return pages;
-  }, [swimmer, reportConfig, attendancePct, seasonVolumePct, progressPercent, velocity, narrative, attendance, sessions, exemptions, results, totalActualHours, annualTargetHours, statsObj, squad, workloadChartData, uniqueMeetsList, healthData, weeklyWorkloadData, openMeetsCount, totalMeetsCount, workloadInsight, readinessInsight, targetAge, selectedStroke]);
+  }, [swimmer, reportConfig, attendancePct, seasonVolumePct, progressPercent, velocity, narrative, attendance, sessions, exemptions, results, totalActualHours, annualTargetHours, statsObj, squad, workloadChartData, uniqueMeetsList, healthData, weeklyWorkloadData, openMeetsCount, totalMeetsCount, workloadInsight, readinessInsight, pathwayInsight, targetAge, selectedStroke, printTheme]);
 
 
 
@@ -3020,6 +3084,19 @@ const [decayDistance, setDecayDistance] = useState('100');
                         )}
                     </div>
 
+        </div>
+
+        {/* CoachesEye AI Progression & Transition Analysis Card */}
+        <div className="mt-6">
+          <AiInsightCard 
+            swimmerId={id} 
+            coachId={session?.user?.id} 
+            performance_slope={velocity}
+            insight={pathwayInsight}
+            loading={isGeneratingPathway}
+            onGenerate={generatePathwayInsight}
+            type="pathway"
+          />
         </div>
       </div>
       
