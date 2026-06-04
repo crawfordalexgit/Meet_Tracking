@@ -1337,7 +1337,9 @@ const [decayDistance, setDecayDistance] = useState('100');
                   <div className="glass-card strategic-narrative-card" style={{ marginTop: '2rem', marginBottom: '2rem' }}>
                       <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>Strategic Narrative</h3>
                       <div style={{ display: 'grid', gap: '1rem' }}>
-                          {narrative && narrative.map((item, idx) => (
+                          {narrative && narrative
+                            .filter(item => ['momentum', 'workload', 'meet attendance', 'benchmarks', 'form', 'coaching', 'strategy'].includes(item.category.toLowerCase()))
+                            .map((item, idx) => (
                               <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px', pageBreakInside: 'avoid' }}>
                                   <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
                                       <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
@@ -1346,6 +1348,49 @@ const [decayDistance, setDecayDistance] = useState('100');
                               </div>
                           ))}
                       </div>
+
+                      {narrative && narrative.some(item => !['momentum', 'workload', 'meet attendance', 'benchmarks', 'form', 'coaching', 'strategy'].includes(item.category.toLowerCase())) && (
+                        <>
+                          <h4 style={{ 
+                            fontSize: '0.9rem', 
+                            marginTop: '2rem', 
+                            marginBottom: '1rem', 
+                            fontWeight: 900, 
+                            letterSpacing: '0.05em', 
+                            color: 'var(--accent-cyan)', 
+                            textTransform: 'uppercase',
+                            borderTop: '1px solid rgba(255,255,255,0.05)',
+                            paddingTop: '1.5rem'
+                          }}>Stroke Performance Insights</h4>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                              {narrative
+                                .filter(item => !['momentum', 'workload', 'meet attendance', 'benchmarks', 'form', 'coaching', 'strategy'].includes(item.category.toLowerCase()))
+                                .map((item, idx) => (
+                                  <div key={idx} style={{ 
+                                    padding: '0.85rem 1rem', 
+                                    background: 'rgba(255,255,255,0.02)', 
+                                    border: '1px solid rgba(255,255,255,0.03)',
+                                    borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, 
+                                    borderRadius: '8px', 
+                                    pageBreakInside: 'avoid',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '0.35rem'
+                                  }}>
+                                      <strong style={{ 
+                                        display: 'block', 
+                                        fontSize: '0.72rem', 
+                                        letterSpacing: '0.05em',
+                                        color: item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'
+                                      }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
+                                      <p style={{ margin: 0, fontSize: '0.76rem', lineHeight: '1.4' }} className="print-text-dim">
+                                          {item.text}
+                                      </p>
+                                  </div>
+                              ))}
+                          </div>
+                        </>
+                      )}
                   </div>
                 </>
               )}
@@ -2355,49 +2400,110 @@ const [decayDistance, setDecayDistance] = useState('100');
         <div className="glass-card" style={{ gridColumn: 'span 1', borderLeft: '4px solid var(--accent-cyan)', padding: '2rem 2.5rem' }}>
           <div className="section-title" style={{ fontSize: '0.75rem', marginBottom: 24, fontWeight: 900, letterSpacing: '0.2em', opacity: 0.9, color: 'var(--accent-cyan)' }}>PERSONAL PERFORMANCE STORY</div>
           <div style={{ display: 'grid', gap: '1rem' }}>
-             {narrative.map((item, idx) => {
+             {(() => {
                const colors = {
                  success: { bg: 'rgba(16, 185, 129, 0.1)', border: '#10b981', text: '#10b981' },
                  warning: { bg: 'rgba(245, 158, 11, 0.1)', border: '#f59e0b', text: '#f59e0b' },
                  danger: { bg: 'rgba(244, 63, 94, 0.1)', border: '#f43f5e', text: '#f43f5e' },
                  info: { bg: 'rgba(14, 165, 233, 0.1)', border: '#0ea5e9', text: '#0ea5e9' }
                };
-               const c = colors[item.type] || colors.info;
-               const isStroke = ['freestyle', 'backstroke', 'breaststroke', 'butterfly', 'im', 'medley', 'individual medley'].includes(item.category.toLowerCase());
                
-               return (
-                 <div key={idx} style={{ 
-                   display: 'flex', 
-                   gap: '1.25rem', 
-                   alignItems: 'center', 
-                   padding: '1rem 1.5rem', 
-                   paddingLeft: isStroke ? '2.5rem' : '1.5rem',
-                   background: c.bg, 
-                   borderRadius: '12px', 
-                   borderLeft: `4px solid ${c.border}`,
-                   transition: 'transform 0.2s',
-                   opacity: isStroke ? 0.95 : 1
-                 }}>
-                    <div style={{ 
-                      fontSize: '0.7rem', 
-                      fontWeight: 900, 
-                      textTransform: 'uppercase', 
-                      letterSpacing: '0.1em', 
-                      width: '90px', 
-                      color: c.text,
-                      opacity: 0.8
-                    }}>{item.category}</div>
-                    <p style={{ 
-                      fontSize: isStroke ? '0.92rem' : '1rem', 
-                      fontWeight: 500, 
-                      lineHeight: 1.5, 
-                      color: 'rgba(255,255,255,0.9)', 
-                      margin: 0,
-                      flex: 1
-                    }}>{item.text}</p>
-                 </div>
+               const generalNarratives = narrative.filter(item => 
+                 ['momentum', 'workload', 'meet attendance', 'benchmarks', 'form', 'coaching', 'strategy'].includes(item.category.toLowerCase())
                );
-             })}
+               
+               const strokeNarratives = narrative.filter(item => 
+                 !['momentum', 'workload', 'meet attendance', 'benchmarks', 'form', 'coaching', 'strategy'].includes(item.category.toLowerCase())
+               );
+
+               return (
+                 <>
+                   {generalNarratives.map((item, idx) => {
+                     const c = colors[item.type] || colors.info;
+                     return (
+                       <div key={idx} style={{ 
+                         display: 'flex', 
+                         gap: '1.25rem', 
+                         alignItems: 'center', 
+                         padding: '1rem 1.5rem', 
+                         background: c.bg, 
+                         borderRadius: '12px', 
+                         borderLeft: `4px solid ${c.border}`,
+                         transition: 'transform 0.2s'
+                       }}>
+                          <div style={{ 
+                            fontSize: '0.7rem', 
+                            fontWeight: 900, 
+                            textTransform: 'uppercase', 
+                            letterSpacing: '0.1em', 
+                            width: '90px', 
+                            color: c.text,
+                            opacity: 0.8
+                          }}>{item.category}</div>
+                          <p style={{ 
+                            fontSize: '1rem', 
+                            fontWeight: 500, 
+                            lineHeight: 1.5, 
+                            color: 'rgba(255,255,255,0.9)', 
+                            margin: 0,
+                            flex: 1
+                          }}>{item.text}</p>
+                       </div>
+                     );
+                   })}
+
+                   {strokeNarratives.length > 0 && (
+                     <>
+                       <div style={{ 
+                         fontSize: '0.75rem', 
+                         marginTop: '2rem', 
+                         marginBottom: '0.5rem', 
+                         fontWeight: 900, 
+                         letterSpacing: '0.15em', 
+                         color: 'rgba(255,255,255,0.4)', 
+                         textTransform: 'uppercase',
+                         borderTop: '1px solid rgba(255,255,255,0.05)',
+                         paddingTop: '1.5rem'
+                       }}>Stroke Performance Insights</div>
+                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+                         {strokeNarratives.map((item, idx) => {
+                           const c = colors[item.type] || colors.info;
+                           return (
+                             <div key={idx} style={{ 
+                               display: 'flex', 
+                               flexDirection: 'column',
+                               gap: '0.4rem', 
+                               padding: '1rem 1.25rem', 
+                               background: c.bg, 
+                               borderRadius: '12px', 
+                               borderLeft: `4px solid ${c.border}`,
+                               transition: 'transform 0.2s',
+                               border: `1px solid ${item.type === 'success' ? 'rgba(16,185,129,0.1)' : item.type === 'danger' ? 'rgba(244,63,94,0.1)' : 'rgba(255,255,255,0.03)'}`,
+                               borderLeftWidth: '4px'
+                             }}>
+                                <div style={{ 
+                                  fontSize: '0.68rem', 
+                                  fontWeight: 900, 
+                                  textTransform: 'uppercase', 
+                                  letterSpacing: '0.1em', 
+                                  color: c.text
+                                }}>{item.category}</div>
+                                <p style={{ 
+                                  fontSize: '0.85rem', 
+                                  fontWeight: 500, 
+                                  lineHeight: 1.4, 
+                                  color: 'rgba(255,255,255,0.85)', 
+                                  margin: 0
+                                }}>{item.text}</p>
+                             </div>
+                           );
+                         })}
+                       </div>
+                     </>
+                   )}
+                 </>
+               );
+             })()}
           </div>
         </div>
         <div className="glass-card" style={{ gridColumn: 'span 1', padding: '2rem' }}>
