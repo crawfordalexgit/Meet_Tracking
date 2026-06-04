@@ -26,6 +26,10 @@
 - **Athlete Identity**: Legal name vs. preferred ("Known As") alias mapping in SCM pipelines must be preserved.
 - **Event Normalization**: Distance normalizers (stripping 'm' and keeping consistent naming) are critical for gala report matches—do not simplify.
 - **Squad Volumes**: Readiness and hours math must remain consistent across individual and squad views.
+- **Squad Progression Hierarchy**:
+  - Competitive progression: Bronze -> Silver -> Gold Development -> Technical Development -> Age Development.
+  - Non-competitive squads: Technical Development (14 and younger) & Club 2 for 14+.
+  - Target squad determinations for transition audits must strictly follow this hierarchy.
 
 ## 7. Browser Testing & Subagent Optimization
 - **Direct Navigation**: Navigate directly to target URLs/routes rather than clicking through homepages or navigation menus.

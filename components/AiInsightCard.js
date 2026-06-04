@@ -151,8 +151,8 @@ export default function AiInsightCard({
               placeholder={isTraining 
                 ? "Specify directives for this workload audit (e.g. 'Prorate for late start in squad')..." 
                 : (isPathway 
-                  ? "Specify directives for this progression audit (e.g. 'Analyze readiness for Gold Squad next term')..." 
-                  : "Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')...")}
+                  ? "Specify directives for this progression audit (e.g. 'Analyze readiness for Gold Development next term')..." 
+                  : "Specify focus areas for this analysis (e.g. 'Focus on training consistency gap')...") }
               value={coachNotes}
               onChange={(e) => setCoachNotes(e.target.value)}
               style={{ 
