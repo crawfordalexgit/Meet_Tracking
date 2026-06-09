@@ -58,6 +58,7 @@ export default function Settings({ session, scmApiKey }) {
   const [sessionSyncProgress, setSessionSyncProgress] = useState(0);
   const [isSessionSyncing, setIsSessionSyncing] = useState(false);
   const [editingCriteriaSquad, setEditingCriteriaSquad] = useState(null);
+  const [editingBrainSquad, setEditingBrainSquad] = useState(null);
   const [isDetectingGaps, setIsDetectingGaps] = useState(false);
   const [gapStatus, setGapStatus] = useState(null);
   const [isReconcilingPbs, setIsReconcilingPbs] = useState(false);
@@ -70,6 +71,22 @@ export default function Settings({ session, scmApiKey }) {
   const [resetPasswordCoach, setResetPasswordCoach] = useState(null);
   const [newPassword, setNewPassword] = useState('');
   const [resetPasswordStatus, setResetPasswordStatus] = useState(null);
+
+  const [aiSettings, setAiSettings] = useState({
+    struggling_consistency_threshold: 60,
+    struggling_volume_threshold: 90,
+    min_wa_points_threshold: 250,
+    exempt_volume_offset: true
+  });
+  const [isSavingAiSettings, setIsSavingAiSettings] = useState(false);
+  const [aiSettingsStatus, setAiSettingsStatus] = useState(null);
+
+  // Timetable
+  const [timetableSessions, setTimetableSessions] = useState([]);
+  const [editingSession, setEditingSession] = useState(null); // { id, name, day_of_week, start_time, end_time, location, lanes_allocated, is_active }
+  const [timetableStatus, setTimetableStatus] = useState(null);
+  const [showAddSession, setShowAddSession] = useState(false);
+  const [newSession, setNewSession] = useState({ name: '', day_of_week: 'Monday', start_time: '', end_time: '', location: '', lanes_allocated: 6 });
 
 
   useEffect(() => {
@@ -182,13 +199,14 @@ export default function Settings({ session, scmApiKey }) {
   };
 
   const loadData = async () => {
-    const [profilesRes, squadsRes, csRes, meetsRes, swimmersRes, exemptRes] = await Promise.all([
+    const [profilesRes, squadsRes, csRes, meetsRes, swimmersRes, exemptRes, sessionsRes] = await Promise.all([
       supabase.from('profiles').select('*').order('email'),
       supabase.from('squads').select('*').order('name'),
       supabase.from('coach_squads').select('*'),
       supabase.from('meets').select('*').order('date', { ascending: false }),
       supabase.from('swimmers').select('*, squads(name)').order('full_name'),
-      supabase.from('club_exemptions').select('*').order('start_date', { ascending: false })
+      supabase.from('club_exemptions').select('*').order('start_date', { ascending: false }),
+      supabase.from('sessions').select('*').order('day_of_week').order('start_time')
     ]);
 
     if (profilesRes.data) setCoaches(profilesRes.data);
@@ -197,7 +215,92 @@ export default function Settings({ session, scmApiKey }) {
     if (meetsRes.data) setMeets(meetsRes.data);
     if (swimmersRes.data) setSwimmers(swimmersRes.data);
     if (exemptRes.data) setClubExemptions(exemptRes.data);
+    if (sessionsRes.data) setTimetableSessions(sessionsRes.data);
+
+    // Fetch custom AI settings from database
+    try {
+      const { data: settingsRow } = await supabase
+        .from('ai_brain_settings')
+        .select('value')
+        .eq('key', 'pathway_transition')
+        .single();
+      if (settingsRow && settingsRow.value) {
+        setAiSettings(settingsRow.value);
+      }
+    } catch (e) {
+      console.warn("No custom AI settings found in DB, using defaults.");
+    }
   };
+
+  const saveAiSettings = async (e) => {
+    if (e) e.preventDefault();
+    setIsSavingAiSettings(true);
+    setAiSettingsStatus({ type: 'info', text: 'Saving AI Brain settings...' });
+    try {
+      const { error } = await supabase
+        .from('ai_brain_settings')
+        .upsert({
+          key: 'pathway_transition',
+          value: aiSettings,
+          updated_at: new Date().toISOString()
+        });
+      if (error) throw error;
+      setAiSettingsStatus({ type: 'success', text: 'AI Brain settings saved successfully!' });
+      toast.success('AI Brain settings saved successfully!');
+    } catch (err) {
+      setAiSettingsStatus({ type: 'error', text: `Failed to save: ${err.message}` });
+      toast.error(`Failed to save AI Brain settings: ${err.message}`);
+    } finally {
+      setIsSavingAiSettings(false);
+    }
+  };
+
+  // ─── Timetable CRUD ───────────────────────────────────────────────────────
+  const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+
+  const saveSession = async () => {
+    if (!editingSession) return;
+    setTimetableStatus({ type: 'info', text: 'Saving...' });
+    const { id, ...fields } = editingSession;
+    const { error } = await supabase.from('sessions').update(fields).eq('id', id);
+    if (error) {
+      setTimetableStatus({ type: 'error', text: error.message });
+    } else {
+      setTimetableSessions(prev => prev.map(s => s.id === id ? { ...s, ...fields } : s));
+      setEditingSession(null);
+      setTimetableStatus({ type: 'success', text: 'Session saved.' });
+      setTimeout(() => setTimetableStatus(null), 3000);
+    }
+  };
+
+  const addSession = async () => {
+    if (!newSession.name || !newSession.day_of_week) return;
+    setTimetableStatus({ type: 'info', text: 'Adding session...' });
+    const { data, error } = await supabase.from('sessions').insert([newSession]).select();
+    if (error) {
+      setTimetableStatus({ type: 'error', text: error.message });
+    } else {
+      setTimetableSessions(prev => [...prev, ...(data || [])]);
+      setNewSession({ name: '', day_of_week: 'Monday', start_time: '', end_time: '', location: '', lanes_allocated: 6 });
+      setShowAddSession(false);
+      setTimetableStatus({ type: 'success', text: 'Session added.' });
+      setTimeout(() => setTimetableStatus(null), 3000);
+    }
+  };
+
+  const deleteSession = async (id, name) => {
+    if (!window.confirm(`Delete session "${name}"? This will also remove all swimmer memberships for this session.`)) return;
+    setTimetableStatus({ type: 'info', text: 'Deleting...' });
+    const { error } = await supabase.from('sessions').delete().eq('id', id);
+    if (error) {
+      setTimetableStatus({ type: 'error', text: error.message });
+    } else {
+      setTimetableSessions(prev => prev.filter(s => s.id !== id));
+      setTimetableStatus({ type: 'success', text: `"${name}" deleted.` });
+      setTimeout(() => setTimetableStatus(null), 3000);
+    }
+  };
+  // ─────────────────────────────────────────────────────────────────────────
 
   const toggleExempt = async (swimmerId, isExempt) => {
     setDebugLog(`Saving ${isExempt ? 'Exemption' : 'Inclusion'} for ID: ${swimmerId}...`);
@@ -626,7 +729,7 @@ export default function Settings({ session, scmApiKey }) {
     }
   };
 
-  const toggleSquad = async (squadId, isSquad, targetMeets, targetSessionsPerWeek, targetTrainingPercent, targetHoursPerWeek, requireWeekend, useOrLogic, wRel, wProg, wComp, wVol, holidayAllowance, ageBasedCriteria) => {
+  const toggleSquad = async (squadId, isSquad, targetMeets, targetSessionsPerWeek, targetTrainingPercent, targetHoursPerWeek, requireWeekend, useOrLogic, wRel, wProg, wComp, wVol, holidayAllowance, ageBasedCriteria, strugglingConsistency, strugglingVolume, minWaPoints, exemptVolume, swimmersPerLane) => {
     setSquads(squads.map(s => s.id === squadId ? { 
       ...s, 
       is_squad: typeof isSquad === 'boolean' ? isSquad : s.is_squad, 
@@ -640,7 +743,12 @@ export default function Settings({ session, scmApiKey }) {
       health_weight_progress: typeof wProg === 'number' ? wProg : s.health_weight_progress,
       health_weight_competition: typeof wComp === 'number' ? wComp : s.health_weight_competition,
       health_weight_volume: typeof wVol === 'number' ? wVol : s.health_weight_volume,
-      holiday_allowance: typeof holidayAllowance === 'number' ? holidayAllowance : s.holiday_allowance
+      holiday_allowance: typeof holidayAllowance === 'number' ? holidayAllowance : s.holiday_allowance,
+      struggling_consistency_threshold: strugglingConsistency !== undefined ? strugglingConsistency : s.struggling_consistency_threshold,
+      struggling_volume_threshold: strugglingVolume !== undefined ? strugglingVolume : s.struggling_volume_threshold,
+      min_wa_points_threshold: minWaPoints !== undefined ? minWaPoints : s.min_wa_points_threshold,
+      exempt_volume_offset: exemptVolume !== undefined ? exemptVolume : s.exempt_volume_offset,
+      swimmers_per_lane: typeof swimmersPerLane === 'number' ? swimmersPerLane : s.swimmers_per_lane
     } : s));
     await fetch('/api/update-squad', { 
       method: 'POST', 
@@ -659,7 +767,12 @@ export default function Settings({ session, scmApiKey }) {
         health_weight_competition: wComp,
         health_weight_volume: wVol,
         holidayAllowance,
-        age_based_criteria: ageBasedCriteria
+        age_based_criteria: ageBasedCriteria,
+        struggling_consistency_threshold: strugglingConsistency,
+        struggling_volume_threshold: strugglingVolume,
+        min_wa_points_threshold: minWaPoints,
+        exempt_volume_offset: exemptVolume,
+        swimmersPerLane
       }) 
     });
   };
@@ -772,8 +885,10 @@ export default function Settings({ session, scmApiKey }) {
           <SidebarItem id="exemptions" label="Exemptions" icon="🛡️" />
           <SidebarItem id="meets" label="Meets" icon="🏊" />
           <SidebarItem id="squads" label="Squads" icon="📋" />
+          <SidebarItem id="timetable" label="Timetable" icon="📆" />
           <SidebarItem id="coaches" label="Coaches" icon="👔" />
           <SidebarItem id="appearance" label="Appearance" icon="🎨" />
+          <SidebarItem id="aibrain" label="AI Brain" icon="🧠" />
         </div>
 
         {/* MAIN PANEL */}
@@ -954,6 +1069,257 @@ export default function Settings({ session, scmApiKey }) {
                     </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {activePanel === 'timetable' && (() => {
+            const sessionsByDay = DAY_ORDER.map(day => ({
+              day,
+              sessions: timetableSessions
+                .filter(s => s.day_of_week?.toLowerCase() === day.toLowerCase())
+                .sort((a,b) => (a.start_time||'').localeCompare(b.start_time||''))
+            }));
+            return (
+              <div className="panel-content">
+                <h1>Timetable</h1>
+                <p className="mb-6" style={{ color: 'var(--text-secondary)' }}>
+                  View and edit training sessions. Sessions synced from SCM are marked with an <strong style={{color:'var(--accent-cyan)'}}>SCM</strong> badge — fields other than <em>Lanes</em> may be overwritten on next SCM sync. Manually added sessions (no SCM badge) are never touched by sync.
+                </p>
+
+                {timetableStatus && (
+                  <div className={`alert ${timetableStatus.type === 'error' ? 'alert-error' : timetableStatus.type === 'success' ? 'alert-success' : 'alert-info'} mb-6`}>
+                    {timetableStatus.text}
+                  </div>
+                )}
+
+                {sessionsByDay.map(({ day, sessions }) => sessions.length === 0 ? null : (
+                  <div key={day} className="card mb-6">
+                    <h3 className="mb-4" style={{ color: 'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'8px' }}>
+                      <span style={{ fontSize:'1rem' }}>📆</span> {day}
+                      <span style={{ fontSize:'0.75rem', fontWeight:400, opacity:0.5, marginLeft:'4px' }}>{sessions.length} session{sessions.length !== 1 ? 's' : ''}</span>
+                    </h3>
+                    <div style={{ overflowX:'auto' }}>
+                      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.85rem' }}>
+                        <thead>
+                          <tr style={{ borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+                            {['Name','Start','End','Location','Lanes','Active',''].map(h => (
+                              <th key={h} style={{ padding:'6px 12px', textAlign:'left', opacity:0.5, fontWeight:700, textTransform:'uppercase', fontSize:'0.7rem', letterSpacing:'0.08em' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessions.map(sess => (
+                            editingSession?.id === sess.id ? (
+                              <tr key={sess.id} style={{ background:'rgba(6,182,212,0.06)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                                <td style={{ padding:'8px 12px' }}>
+                                  <input className="input-field m-0" style={{width:'100%',minWidth:'140px'}} value={editingSession.name}
+                                    onChange={e => setEditingSession(es => ({...es, name: e.target.value}))} />
+                                </td>
+                                <td style={{ padding:'8px 12px' }}>
+                                  <input className="input-field m-0" type="time" style={{width:'100px'}} value={editingSession.start_time||''}
+                                    onChange={e => setEditingSession(es => ({...es, start_time: e.target.value}))} />
+                                </td>
+                                <td style={{ padding:'8px 12px' }}>
+                                  <input className="input-field m-0" type="time" style={{width:'100px'}} value={editingSession.end_time||''}
+                                    onChange={e => setEditingSession(es => ({...es, end_time: e.target.value}))} />
+                                </td>
+                                <td style={{ padding:'8px 12px' }}>
+                                  <input className="input-field m-0" style={{width:'120px'}} value={editingSession.location||''}
+                                    onChange={e => setEditingSession(es => ({...es, location: e.target.value}))} />
+                                </td>
+                                <td style={{ padding:'8px 12px' }}>
+                                  <input className="input-field m-0" type="number" min="1" max="20" style={{width:'60px',textAlign:'center'}} value={editingSession.lanes_allocated||''}
+                                    onChange={e => setEditingSession(es => ({...es, lanes_allocated: parseInt(e.target.value)||null}))} />
+                                </td>
+                                <td style={{ padding:'8px 12px' }}>
+                                  <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
+                                    <input type="checkbox" checked={!!editingSession.is_active}
+                                      onChange={e => setEditingSession(es => ({...es, is_active: e.target.checked}))} />
+                                    <span style={{fontSize:'0.75rem',opacity:0.7}}>{editingSession.is_active ? 'Active' : 'Inactive'}</span>
+                                  </label>
+                                </td>
+                                <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
+                                  <button className="btn btn-primary" style={{fontSize:'0.75rem',padding:'4px 12px',marginRight:'6px'}} onClick={saveSession}>Save</button>
+                                  <button className="btn btn-secondary" style={{fontSize:'0.75rem',padding:'4px 12px'}} onClick={() => setEditingSession(null)}>Cancel</button>
+                                </td>
+                              </tr>
+                            ) : (
+                              <tr key={sess.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', transition:'background 0.15s' }}
+                                  onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.03)'}
+                                  onMouseLeave={e => e.currentTarget.style.background=''}>
+                                <td style={{ padding:'10px 12px', fontWeight:600 }}>
+                                  {sess.name}
+                                  {sess.scm_guid && <span style={{ marginLeft:'6px', fontSize:'0.65rem', fontWeight:800, background:'rgba(6,182,212,0.15)', color:'var(--accent-cyan)', border:'1px solid rgba(6,182,212,0.25)', borderRadius:'4px', padding:'1px 5px', verticalAlign:'middle' }}>SCM</span>}
+                                </td>
+                                <td style={{ padding:'10px 12px', opacity:0.8 }}>{sess.start_time || '—'}</td>
+                                <td style={{ padding:'10px 12px', opacity:0.8 }}>{sess.end_time || '—'}</td>
+                                <td style={{ padding:'10px 12px', opacity:0.6, fontSize:'0.8rem' }}>{sess.location || '—'}</td>
+                                <td style={{ padding:'10px 12px' }}>
+                                  <span style={{ fontWeight:700, color:'var(--accent-cyan)' }}>{sess.lanes_allocated ?? '—'}</span>
+                                </td>
+                                <td style={{ padding:'10px 12px' }}>
+                                  <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 7px', borderRadius:'20px',
+                                    background: sess.is_active ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.1)',
+                                    color: sess.is_active ? 'var(--accent-emerald)' : '#f87171'
+                                  }}>{sess.is_active ? 'Active' : 'Inactive'}</span>
+                                </td>
+                                <td style={{ padding:'10px 12px', whiteSpace:'nowrap' }}>
+                                  <button className="btn btn-secondary" style={{fontSize:'0.75rem',padding:'4px 12px',marginRight:'6px'}}
+                                    onClick={() => setEditingSession({ id:sess.id, name:sess.name, day_of_week:sess.day_of_week, start_time:sess.start_time||'', end_time:sess.end_time||'', location:sess.location||'', lanes_allocated:sess.lanes_allocated, is_active:!!sess.is_active })}>Edit</button>
+                                  <button style={{ fontSize:'0.75rem', padding:'4px 10px', background:'rgba(239,68,68,0.12)', color:'#f87171', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'6px', cursor:'pointer' }}
+                                    onClick={() => deleteSession(sess.id, sess.name)}>Delete</button>
+                                </td>
+                              </tr>
+                            )
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Add Session */}
+                <div className="card" style={{ border: showAddSession ? '1px solid rgba(6,182,212,0.3)' : undefined }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: showAddSession ? '1.5rem' : 0 }}>
+                    <h3 style={{ margin:0 }}>Add Session</h3>
+                    <button className={`btn ${showAddSession ? 'btn-secondary' : 'btn-primary'}`} style={{fontSize:'0.8rem',padding:'6px 16px'}} onClick={() => setShowAddSession(v => !v)}>
+                      {showAddSession ? 'Cancel' : '+ Add Session'}
+                    </button>
+                  </div>
+                  {showAddSession && (
+                    <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 1fr 80px', gap:'12px', alignItems:'end' }}>
+                      <div>
+                        <label style={{ fontSize:'0.7rem', opacity:0.5, textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'4px' }}>Session Name</label>
+                        <input className="input-field m-0" placeholder="e.g. Age Dev Saturday AM" value={newSession.name} onChange={e => setNewSession(ns => ({...ns, name: e.target.value}))} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize:'0.7rem', opacity:0.5, textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'4px' }}>Day</label>
+                        <select className="input-field m-0" value={newSession.day_of_week} onChange={e => setNewSession(ns => ({...ns, day_of_week: e.target.value}))}>
+                          {DAY_ORDER.map(d => <option key={d} value={d}>{d}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize:'0.7rem', opacity:0.5, textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'4px' }}>Start</label>
+                        <input className="input-field m-0" type="time" value={newSession.start_time} onChange={e => setNewSession(ns => ({...ns, start_time: e.target.value}))} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize:'0.7rem', opacity:0.5, textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'4px' }}>End</label>
+                        <input className="input-field m-0" type="time" value={newSession.end_time} onChange={e => setNewSession(ns => ({...ns, end_time: e.target.value}))} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize:'0.7rem', opacity:0.5, textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'4px' }}>Lanes</label>
+                        <input className="input-field m-0" type="number" min="1" max="20" style={{textAlign:'center'}} value={newSession.lanes_allocated} onChange={e => setNewSession(ns => ({...ns, lanes_allocated: parseInt(e.target.value)||6}))} />
+                      </div>
+                      <div style={{ gridColumn:'1 / -1', display:'flex', gap:'8px', alignItems:'center' }}>
+                        <div style={{ flex:1 }}>
+                          <label style={{ fontSize:'0.7rem', opacity:0.5, textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:'4px' }}>Location (optional)</label>
+                          <input className="input-field m-0" placeholder="e.g. Main Pool" value={newSession.location} onChange={e => setNewSession(ns => ({...ns, location: e.target.value}))} />
+                        </div>
+                        <button className="btn btn-primary" style={{ marginTop:'22px', whiteSpace:'nowrap' }} onClick={addSession} disabled={!newSession.name}>
+                          Add Session
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {activePanel === 'aibrain' && (
+            <div className="panel-content">
+              <h1>CoachesEye AI Brain Settings</h1>
+              <p className="mb-8" style={{ color: 'var(--text-secondary)' }}>
+                Configure the threshold parameters used by the pathway transition intelligence engine. These settings apply globally when determining if competitive swimmers are struggling and should be transitioned to non-competitive squads.
+              </p>
+
+              <div className="card">
+                <h3 className="mb-6">Pathway Transition Thresholds</h3>
+                {aiSettingsStatus && (
+                  <div className={`alert ${aiSettingsStatus.type === 'error' ? 'alert-error' : (aiSettingsStatus.type === 'success' ? 'alert-success' : 'alert-info')} mb-6`}>
+                    {aiSettingsStatus.text}
+                  </div>
+                )}
+                
+                <form onSubmit={saveAiSettings} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Struggling Attendance Consistency Threshold</label>
+                      <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Swimmers with consistency below this percentage will be flagged for transition (Default: 60%).</p>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="number" 
+                          className="input-field m-0" 
+                          min="0"
+                          max="100"
+                          value={aiSettings.struggling_consistency_threshold} 
+                          onChange={(e) => setAiSettings({ ...aiSettings, struggling_consistency_threshold: parseInt(e.target.value) || 0 })}
+                        />
+                        <span className="text-sm opacity-40">%</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Struggling Workload Volume Threshold</label>
+                      <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Swimmers with workload volume achieved below this percentage will be flagged for transition (Default: 90%).</p>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="number" 
+                          className="input-field m-0" 
+                          min="0"
+                          max="200"
+                          value={aiSettings.struggling_volume_threshold} 
+                          onChange={(e) => setAiSettings({ ...aiSettings, struggling_volume_threshold: parseInt(e.target.value) || 0 })}
+                        />
+                        <span className="text-sm opacity-40">%</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-white/5">
+                    <div>
+                      <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Competitive Exclusion WA Points Threshold</label>
+                      <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Swimmers with peak World Aquatics points at or above this value are excluded from demotions regardless of training gaps. (Note: The engine scales expectations dynamically for younger athletes under 12.)</p>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="number" 
+                          className="input-field m-0" 
+                          min="0"
+                          value={aiSettings.min_wa_points_threshold} 
+                          onChange={(e) => setAiSettings({ ...aiSettings, min_wa_points_threshold: parseInt(e.target.value) || 0 })}
+                        />
+                        <span className="text-sm opacity-40">pts</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center pt-6">
+                      <label className="flex items-center gap-3 cursor-pointer select-none">
+                        <input 
+                          type="checkbox" 
+                          className="w-4 h-4 rounded border-slate-700 bg-slate-900 accent-blue-500"
+                          style={{ minWidth: '16px', minHeight: '16px' }}
+                          checked={aiSettings.exempt_volume_offset}
+                          onChange={(e) => setAiSettings({ ...aiSettings, exempt_volume_offset: e.target.checked })}
+                        />
+                        <div>
+                          <span className="text-sm font-semibold block">Enable Volume Offset Exemption</span>
+                          <span className="text-xs opacity-40 block font-medium" style={{ color: 'var(--text-secondary)' }}>Swimmers with volume &gt;= 100% are automatically exempt from demotions.</span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-6 border-t border-white/5">
+                    <button 
+                      type="submit" 
+                      className="btn btn-primary"
+                      disabled={isSavingAiSettings}
+                    >
+                      {isSavingAiSettings ? 'Saving Settings...' : '🧠 Save AI Brain Settings'}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
@@ -1483,6 +1849,8 @@ export default function Settings({ session, scmApiKey }) {
                       <th className="text-center">Weekend</th>
                       <th className="text-center">Target %</th>
                       <th className="text-center">Hol/Yr</th>
+                      <th className="text-center" title="Swimmers per Lane Capacity">Sw/Lane</th>
+                      <th className="text-center">Config</th>
                       <th>Coaches</th>
                     </tr>
                   </thead>
@@ -1564,14 +1932,35 @@ export default function Settings({ session, scmApiKey }) {
                             />
                           </td>
                           <td className="text-center">
-                            <button 
-                              className="btn btn-secondary" 
-                              style={{ padding: '4px 8px', fontSize: '0.7rem' }}
-                              onClick={() => setEditingCriteriaSquad(s)}
-                              disabled={!s.is_squad}
-                            >
-                              Rules {(s.age_based_criteria?.length > 0) && `(${s.age_based_criteria.length})`}
-                            </button>
+                            <input 
+                              type="number" 
+                              className="input-field" 
+                              style={{ width: '45px', textAlign: 'center', padding: '4px' }} 
+                              value={s.swimmers_per_lane ?? 8} 
+                              onChange={(e) => toggleSquad(s.id, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, parseInt(e.target.value))} 
+                              disabled={!s.is_squad} 
+                            />
+                          </td>
+                          <td className="text-center">
+                            <div className="flex flex-col gap-1 items-center">
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '2px 6px', fontSize: '0.65rem', width: '80px' }}
+                                onClick={() => setEditingCriteriaSquad(s)}
+                                disabled={!s.is_squad}
+                              >
+                                Rules {(s.age_based_criteria?.length > 0) && `(${s.age_based_criteria.length})`}
+                              </button>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '2px 6px', fontSize: '0.65rem', width: '80px' }}
+                                onClick={() => setEditingBrainSquad(s)}
+                                disabled={!s.is_squad}
+                                title="Pathway Transition Settings"
+                              >
+                                🧠 Pathway
+                              </button>
+                            </div>
                           </td>
                           <td><div className="flex flex-wrap gap-2">{coaches.map(c => (<label key={c.id} style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}><input type="checkbox" checked={assignedCoachIds.includes(c.id)} onChange={(e) => toggleCoachSquad(c.id, s.id, e.target.checked)} disabled={!s.is_squad} />{c.email.split('@')[0]}</label>))}</div></td>
                         </tr>
@@ -1768,6 +2157,144 @@ export default function Settings({ session, scmApiKey }) {
                 setEditingCriteriaSquad(null);
               }}>Save & Apply Rules</button>
               <button className="btn btn-secondary" onClick={() => setEditingCriteriaSquad(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editingBrainSquad && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '1rem',
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)'
+        }}>
+          <div className="glass-card" style={{ 
+            width: '100%', 
+            maxWidth: '550px', 
+            overflow: 'hidden', 
+            display: 'flex', 
+            flexDirection: 'column',
+            padding: 0,
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', margin: 0 }}>{editingBrainSquad.name} - Pathway Settings</h2>
+                <p style={{ fontSize: '0.85rem', opacity: 0.5, margin: '4px 0 0 0' }}>Configure transition thresholds for this specific squad. Unconfigured values fall back to global settings.</p>
+              </div>
+              <button onClick={() => setEditingBrainSquad(null)} className="btn btn-secondary">✕</button>
+            </div>
+            
+            <div style={{ flex: 1, padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div>
+                <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Struggling Attendance Consistency Threshold</label>
+                <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Leave blank to use global setting (Default: {aiSettings.struggling_consistency_threshold}%).</p>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="number" 
+                    placeholder={`Global (${aiSettings.struggling_consistency_threshold}%)`}
+                    className="input-field m-0" 
+                    min="0"
+                    max="100"
+                    value={editingBrainSquad.struggling_consistency_threshold ?? ''} 
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? null : parseInt(e.target.value);
+                      setEditingBrainSquad({ ...editingBrainSquad, struggling_consistency_threshold: val });
+                    }}
+                  />
+                  <span className="text-sm opacity-40">%</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Struggling Workload Volume Threshold</label>
+                <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Leave blank to use global setting (Default: {aiSettings.struggling_volume_threshold}%).</p>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="number" 
+                    placeholder={`Global (${aiSettings.struggling_volume_threshold}%)`}
+                    className="input-field m-0" 
+                    min="0"
+                    max="200"
+                    value={editingBrainSquad.struggling_volume_threshold ?? ''} 
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? null : parseInt(e.target.value);
+                      setEditingBrainSquad({ ...editingBrainSquad, struggling_volume_threshold: val });
+                    }}
+                  />
+                  <span className="text-sm opacity-40">%</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Competitive Exclusion WA Points Threshold</label>
+                <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Exclude high-performing swimmers. (Default: {aiSettings.min_wa_points_threshold} pts. Engine scales dynamically for under 12s.)</p>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="number" 
+                    placeholder={`Global (${aiSettings.min_wa_points_threshold} pts)`}
+                    className="input-field m-0" 
+                    min="0"
+                    value={editingBrainSquad.min_wa_points_threshold ?? ''} 
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? null : parseInt(e.target.value);
+                      setEditingBrainSquad({ ...editingBrainSquad, min_wa_points_threshold: val });
+                    }}
+                  />
+                  <span className="text-sm opacity-40">pts</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase tracking-widest opacity-50 block mb-2 font-bold">Volume Offset Exemption</label>
+                <p className="text-xs opacity-40 mb-2 font-medium" style={{ color: 'var(--text-secondary)' }}>Whether workload volume &gt;= 100% exempts swimmers from transitions.</p>
+                <select 
+                  className="input-field m-0 w-full"
+                  value={editingBrainSquad.exempt_volume_offset === null ? 'global' : (editingBrainSquad.exempt_volume_offset ? 'true' : 'false')}
+                  onChange={(e) => {
+                    const val = e.target.value === 'global' ? null : (e.target.value === 'true');
+                    setEditingBrainSquad({ ...editingBrainSquad, exempt_volume_offset: val });
+                  }}
+                >
+                  <option value="global">Use Global Setting (Default: {aiSettings.exempt_volume_offset ? 'Enabled' : 'Disabled'})</option>
+                  <option value="true">Enabled (Volume &gt;= 100% Exempts)</option>
+                  <option value="false">Disabled (Volume does not offset consistency gaps)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '1rem' }}>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={async () => {
+                await toggleSquad(
+                  editingBrainSquad.id, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined, 
+                  undefined,
+                  editingBrainSquad.struggling_consistency_threshold,
+                  editingBrainSquad.struggling_volume_threshold,
+                  editingBrainSquad.min_wa_points_threshold,
+                  editingBrainSquad.exempt_volume_offset
+                );
+                setSquads(squads.map(s => s.id === editingBrainSquad.id ? editingBrainSquad : s));
+                setEditingBrainSquad(null);
+                toast.success(`Pathway settings for ${editingBrainSquad.name} saved successfully!`);
+              }}>Save & Apply</button>
+              <button className="btn btn-secondary" onClick={() => setEditingBrainSquad(null)}>Cancel</button>
             </div>
           </div>
         </div>

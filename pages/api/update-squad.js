@@ -9,7 +9,9 @@ export default async function handler(req, res) {
     squadId, isSquad, targetMeets, targetSessionsPerWeek, targetTrainingPercent, 
     targetHoursPerWeek, requireWeekend, useOrLogic,
     health_weight_reliability, health_weight_progress, health_weight_competition, health_weight_volume,
-    holidayAllowance, age_based_criteria
+    holidayAllowance, age_based_criteria,
+    struggling_consistency_threshold, struggling_volume_threshold, min_wa_points_threshold, exempt_volume_offset,
+    swimmersPerLane
   } = req.body;
   
   if (!squadId) {
@@ -33,6 +35,12 @@ export default async function handler(req, res) {
     if (typeof health_weight_volume === 'number') updateData.health_weight_volume = health_weight_volume;
     if (typeof holidayAllowance === 'number') updateData.holiday_allowance = holidayAllowance;
     if (age_based_criteria) updateData.age_based_criteria = age_based_criteria;
+    
+    if (struggling_consistency_threshold !== undefined) updateData.struggling_consistency_threshold = struggling_consistency_threshold;
+    if (struggling_volume_threshold !== undefined) updateData.struggling_volume_threshold = struggling_volume_threshold;
+    if (min_wa_points_threshold !== undefined) updateData.min_wa_points_threshold = min_wa_points_threshold;
+    if (exempt_volume_offset !== undefined) updateData.exempt_volume_offset = exempt_volume_offset;
+    if (typeof swimmersPerLane === 'number') updateData.swimmers_per_lane = swimmersPerLane;
 
     const { data, error } = await supabase
       .from('squads')

@@ -25,7 +25,7 @@ export default function Login({ session }) {
         provider: 'google',
         options: {
           // This dynamically detects the host (localhost vs your live Vercel URL)
-          redirectTo: `${window.location.origin}/`
+          redirectTo: `${window.location.origin}/dashboard`
         }
       });
       if (error) throw error;

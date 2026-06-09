@@ -19,6 +19,13 @@ async function exportSquadPDF(squadId, squadName) {
         timeout: 60000
     });
 
+    // Ensure all fonts are fully loaded before generating PDF
+    try {
+        await page.evaluate(() => document.fonts.ready);
+    } catch (fontErr) {
+        console.log('Warning: Font load wait failed, continuing:', fontErr.message);
+    }
+
     // Ensure the reports directory exists
     const reportsDir = path.join(__dirname, '..', 'Reports');
     if (!fs.existsSync(reportsDir)) {

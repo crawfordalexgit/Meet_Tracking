@@ -66,6 +66,15 @@ function GapBadge({ gapSeconds }) {
   );
 }
 
+function getEventStatus(pbSecs, countyBm, regionalBm) {
+  if (!pbSecs) return null;
+  if (regionalBm?.autoSC && pbSecs <= regionalBm.autoSC) return 'REGIONAL_AUTO';
+  if (regionalBm?.consSC && pbSecs <= regionalBm.consSC) return 'REGIONAL_CONS';
+  if (countyBm?.autoSC && pbSecs <= countyBm.autoSC) return 'COUNTY_AUTO';
+  if (countyBm?.consSC && pbSecs <= countyBm.consSC) return 'COUNTY_CONS';
+  return null;
+}
+
 function QtTable({ results, age, gender, course, level }) {
     return (
         <div style={{ overflowX: 'auto' }}>
@@ -91,24 +100,43 @@ function QtTable({ results, age, gender, course, level }) {
                                 const pbSecs = getSwimmerPB(results, eventName);
                                 const countyBm = getBenchmarks(age, gender, eventName, 'COUNTY');
                                 const regionalBm = getBenchmarks(age, gender, eventName, 'REGIONAL');
+                                const status = getEventStatus(pbSecs, countyBm, regionalBm);
+
+                                let rowBg = 'transparent';
+                                if (status === 'REGIONAL_AUTO') rowBg = 'rgba(6, 182, 212, 0.12)';
+                                else if (status === 'REGIONAL_CONS') rowBg = 'rgba(6, 182, 212, 0.04)';
+                                else if (status === 'COUNTY_AUTO') rowBg = 'rgba(16, 185, 129, 0.12)';
+                                else if (status === 'COUNTY_CONS') rowBg = 'rgba(16, 185, 129, 0.04)';
 
                                 return (
-                                    <tr key={eventName} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                                    <tr key={eventName} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', background: rowBg }}>
                                         <td style={{ padding: '12px', fontWeight: 700 }}>{eventName}</td>
                                         <td style={{ padding: '12px', textAlign: 'center', fontWeight: 900, color: 'var(--accent-cyan)' }}>
                                             {pbSecs ? secondsToTime(pbSecs) : '—'}
                                         </td>
                                         <td style={{ padding: '12px', textAlign: 'center' }}>
-                                            <GapBadge gapSeconds={pbSecs && countyBm?.autoSC ? pbSecs - countyBm.autoSC : null} />
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                                <span style={{ fontWeight: 600 }}>{secondsToTime(countyBm?.autoSC)}</span>
+                                                <GapBadge gapSeconds={pbSecs && countyBm?.autoSC ? pbSecs - countyBm.autoSC : null} />
+                                            </div>
                                         </td>
                                         <td style={{ padding: '12px', textAlign: 'center' }}>
-                                            <GapBadge gapSeconds={pbSecs && countyBm?.consSC ? pbSecs - countyBm.consSC : null} />
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                                <span style={{ fontWeight: 600 }}>{secondsToTime(countyBm?.consSC)}</span>
+                                                <GapBadge gapSeconds={pbSecs && countyBm?.consSC ? pbSecs - countyBm.consSC : null} />
+                                            </div>
                                         </td>
                                         <td style={{ padding: '12px', textAlign: 'center' }}>
-                                            <GapBadge gapSeconds={pbSecs && regionalBm?.autoSC ? pbSecs - regionalBm.autoSC : null} />
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                                <span style={{ fontWeight: 600 }}>{secondsToTime(regionalBm?.autoSC)}</span>
+                                                <GapBadge gapSeconds={pbSecs && regionalBm?.autoSC ? pbSecs - regionalBm.autoSC : null} />
+                                            </div>
                                         </td>
                                         <td style={{ padding: '12px', textAlign: 'center' }}>
-                                            <GapBadge gapSeconds={pbSecs && regionalBm?.consSC ? pbSecs - regionalBm.consSC : null} />
+                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                                <span style={{ fontWeight: 600 }}>{secondsToTime(regionalBm?.consSC)}</span>
+                                                <GapBadge gapSeconds={pbSecs && regionalBm?.consSC ? pbSecs - regionalBm.consSC : null} />
+                                            </div>
                                         </td>
                                     </tr>
                                 );
@@ -126,6 +154,17 @@ function QtTable({ results, age, gender, course, level }) {
 export default function SwimmerDetail({ session }) {
   const router = useRouter();
   const { id } = router.query;
+
+  const isPrintMode = router.query.print === 'true' || !!router.query.printToken || (typeof window !== 'undefined' && (window.location.search.includes('print=true') || window.location.search.includes('printToken=')));
+
+  const stripEmojis = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    if (isPrintMode) {
+      return text.replace(/\p{Emoji_Presentation}/gu, '').replace(/\s{2,}/g, ' ').trim();
+    }
+    return text;
+  };
+
   const [loading, setLoading] = useState(true);
 
   const PERIOD_OPTIONS = [
@@ -1314,14 +1353,14 @@ const [decayDistance, setDecayDistance] = useState('100');
 
     const pages = [];
 
-    // Section 1: Executive Overview & AI Report
+    // Section 1: Executive Overview & Performance Report
     if (reportConfig.sections.performanceNarrative || reportConfig.sections.aiPerformance) {
       pages.push({
         id: 'overview',
-        title: '1. Executive Overview & AI Report',
+        title: '1. Executive Overview & Performance Report',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="overview">
-              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview & AI Report</h2>
+              <h2 className="section-title" style={{ marginBottom: '2rem' }}>1. Executive Overview & Performance Report</h2>
               
               {reportConfig.sections.performanceNarrative && (
                 <>
@@ -1343,7 +1382,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                               <div key={idx} style={{ padding: '1rem', background: 'rgba(255,255,255,0.03)', borderLeft: `4px solid ${item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'}`, borderRadius: '8px', pageBreakInside: 'avoid' }}>
                                   <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.6' }} className="print-text-dim">
                                       <strong style={{ display: 'block', marginBottom: '4px', letterSpacing: '0.05em' }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
-                                      {item.text}
+                                      {stripEmojis(item.text)}
                                   </p>
                               </div>
                           ))}
@@ -1384,7 +1423,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                                         color: item.type === 'success' ? '#10b981' : item.type === 'danger' ? '#f43f5e' : item.type === 'warning' ? '#f59e0b' : '#0ea5e9'
                                       }} className="print-text-bright">{item.category.toUpperCase()}</strong> 
                                       <p style={{ margin: 0, fontSize: '0.76rem', lineHeight: '1.4' }} className="print-text-dim">
-                                          {item.text}
+                                          {stripEmojis(item.text)}
                                       </p>
                                   </div>
                               ))}
@@ -1397,7 +1436,7 @@ const [decayDistance, setDecayDistance] = useState('100');
 
               {reportConfig.sections.aiPerformance && (
                 <div style={{ marginTop: '2rem', pageBreakInside: 'avoid' }}>
-                    <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>AI Technical Roadmap</h3>
+                    <h3 className="section-title" style={{ marginBottom: '1.5rem', fontSize: '1.2rem' }}>Technical Roadmap Insights</h3>
                     <AiInsightCard swimmerId={swimmer.id} performance_slope={velocity} />
                 </div>
               )}
@@ -1458,7 +1497,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                           )}
                       </div>
                       <p style={{ fontSize: '0.8rem', lineHeight: '1.4', opacity: 0.9, margin: 0 }} className="print-text-dim">
-                          {workloadInsight.headline}
+                          {stripEmojis(workloadInsight.headline)}
                       </p>
                   </div>
  
@@ -1476,7 +1515,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                                       className="swot-quadrant-text print-text-dim"
                                       style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.4' }} 
                                       dangerouslySetInnerHTML={{ 
-                                          __html: (item.data || 'No data generated.')
+                                          __html: stripEmojis(item.data || 'No data generated.')
                                               .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
                                               .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
                                               .replace(/^<br\/>/, '')
@@ -1490,29 +1529,29 @@ const [decayDistance, setDecayDistance] = useState('100');
                   <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 0.9fr', gap: '0.75rem' }}>
                       {workloadInsight.smart_goals && (
                           <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: '4px solid var(--accent-cyan)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
-                              <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>🎯 SMART Goal: Next 4 Weeks</h4>
+                              <h4 style={{ color: 'var(--accent-cyan)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>{!isPrintMode && '🎯 '}SMART Goal: Next 4 Weeks</h4>
                               <div style={{ fontSize: '0.68rem', lineHeight: '1.4' }} className="print-text-dim">
-                                  <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {workloadInsight.smart_goals.current_goal}</div>
-                                  <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {workloadInsight.smart_goals.tracking_metric}</div>
-                                  <div><strong>Status:</strong> {workloadInsight.smart_goals.status}</div>
+                                  <div style={{ marginBottom: '2px' }}><strong>Goal:</strong> {stripEmojis(workloadInsight.smart_goals.current_goal)}</div>
+                                  <div style={{ marginBottom: '2px' }}><strong>Metric:</strong> {stripEmojis(workloadInsight.smart_goals.tracking_metric)}</div>
+                                  <div><strong>Status:</strong> {stripEmojis(workloadInsight.smart_goals.status)}</div>
                               </div>
                           </div>
                       )}
                       
                       {workloadInsight.risk_flags && workloadInsight.risk_flags.length > 0 && (
                           <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.12)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
-                              <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
+                              <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>{!isPrintMode && '⚠️ '}Risk Flags</h4>
                               <ul style={{ margin: 0, paddingLeft: '0.75rem', fontSize: '0.68rem', opacity: 0.9, lineHeight: '1.4' }} className="print-text-dim">
-                                  {workloadInsight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 2 }}>{flag}</li>)}
+                                  {workloadInsight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 2 }}>{stripEmojis(flag)}</li>)}
                               </ul>
                           </div>
                       )}
                       
                       {workloadInsight.action_items && workloadInsight.action_items.length > 0 && (
                           <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.12)', padding: '0.85rem 1rem', borderRadius: '10px' }}>
-                              <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>⚡ Action Items</h4>
+                              <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.4rem 0', fontSize: '0.72rem', fontWeight: 900 }}>{!isPrintMode && '⚡ '}Action Items</h4>
                               <ul style={{ margin: 0, paddingLeft: '0.75rem', fontSize: '0.68rem', opacity: 0.9, lineHeight: '1.4' }} className="print-text-dim">
-                                  {workloadInsight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 2 }}>{item}</li>)}
+                                  {workloadInsight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 2 }}>{stripEmojis(item)}</li>)}
                               </ul>
                           </div>
                       )}
@@ -1524,107 +1563,14 @@ const [decayDistance, setDecayDistance] = useState('100');
       });
     }
 
-    // Section 3: Competition Record
-    if (reportConfig.sections.competition || reportConfig.sections.openMeets || reportConfig.sections.internalGalas) {
-      pages.push({
-        id: 'competition',
-        title: '3. Competition Record',
-        element: (
-          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="competition">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>3. Competition Record & Intensity</h2>
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                  <div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
-                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
-                  </div>
-              </div>
-
-              {/* Monthly Meets Timeline Bar Chart */}
-              <div className="glass-card mb-6" style={{ padding: '1rem' }}>
-                  <h3 style={{ fontSize: '0.85rem', fontWeight: 900, margin: '0 0 0.5rem 0' }}>Competition Intensity (Timeline Load)</h3>
-                  <div style={{ height: '180px', width: '100%' }}>
-                      <BarChart width={700} height={180} data={meetTimelineData}>
-                          <defs>
-                              <linearGradient id="meetGradPrint" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="0%" stopColor="var(--accent-cyan)" stopOpacity={1}/>
-                                  <stop offset="100%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
-                              </linearGradient>
-                          </defs>
-                          <CartesianGrid vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} strokeDasharray="3 3" />
-                          <XAxis dataKey="month" tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
-                          <YAxis tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
-                          <Bar dataKey="count" name="Meets" radius={[4, 4, 0, 0]}>
-                              {meetTimelineData?.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill="url(#meetGradPrint)" fillOpacity={entry.count > 0 ? 1 : 0.2} />
-                              ))}
-                          </Bar>
-                      </BarChart>
-                  </div>
-              </div>
-
-              {/* CoachesEye guide */}
-              <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
-                  <h4 style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', margin: '0 0 4px 0' }}>COACHESEYE GUIDE: COMPETITION & RACING</h4>
-                  <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }} className="print-text-dim">
-                      Tracks the athlete&apos;s competitive rhythm and &apos;Big Meet Temperament&apos;. Regular racing builds race-execution skills, while tracking Point Progression indicates whether training is converting into race speed. A steep, positive trendline tells the story of an athlete successfully adapting to their training load.
-                  </p>
-              </div>
-
-              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
-                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
-                      <thead>
-                          <tr>
-                              <th>Date</th>
-                              <th>Competition</th>
-                              <th style={{ textAlign: 'center' }}>Level</th>
-                              <th style={{ textAlign: 'center' }}>Races</th>
-                              <th style={{ textAlign: 'right' }}>Peak WA</th>
-                              <th style={{ textAlign: 'center' }}>Highlights</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          {uniqueMeetsList && uniqueMeetsList.map((m, i) => (
-                              <tr key={i}>
-                                  <td style={{ fontWeight: 600, padding: '8px' }}>
-                                      {new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
-                                  </td>
-                                  <td style={{ fontWeight: 800, padding: '8px' }}>{m.name}</td>
-                                  <td style={{ textAlign: 'center', padding: '8px' }}>
-                                      <span style={{ padding: '2px 6px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b' : '#0369a1', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 800 }}>
-                                          {m.level || 'L3'}
-                                      </span>
-                                  </td>
-                                  <td style={{ textAlign: 'center', padding: '8px' }}>{m.eventCount}</td>
-                                  <td style={{ textAlign: 'right', fontWeight: 800, padding: '8px' }}>{Math.round(m.peakWa)} pts</td>
-                                  <td style={{ textAlign: 'center', padding: '8px' }}>
-                                      {m.pbCount > 0 ? (
-                                          <span style={{ color: '#059669', fontWeight: 900, fontSize: '0.7rem', background: '#d1fae5', padding: '2px 6px', borderRadius: '4px' }}>
-                                              ★ {m.pbCount} PB{m.pbCount > 1 ? 's' : ''}
-                                          </span>
-                                      ) : '-'}
-                                  </td>
-                              </tr>
-                          ))}
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-        )
-      });
-    }
-
-    // Section 4: Points Progression & Stroke Roadmap
+    // Section 3: Progression & Stroke Roadmap
     if (reportConfig.sections.progress || reportConfig.sections.strokeRoadmap) {
       pages.push({
         id: 'progress',
-        title: '4. Progression & Stroke Roadmap',
+        title: '3. Progression & Stroke Roadmap',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="progress">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>4. Progression & Stroke Roadmap</h2>
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>3. Progression & Stroke Roadmap</h2>
               
               {reportConfig.sections.progress && (
                 <>
@@ -1735,7 +1681,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                       {pathwayInsight ? (
                           <div style={{ background: 'rgba(6,182,212,0.02)', padding: '1.25rem', borderRadius: '12px', borderLeft: '4px solid var(--accent-cyan)', marginBottom: '1.5rem', pageBreakInside: 'avoid' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
-                                  <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Progression & Transition Analysis</h4>
+                                  <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye Progression & Transition Analysis</h4>
                                   {pathwayInsight.squad_transition?.readiness_status && (
                                       <span style={{ 
                                           fontSize: '0.65rem', 
@@ -1809,7 +1755,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                           </div>
                       ) : (
                           <div className="glass-card mb-6" style={{ padding: '1rem', textAlign: 'center', opacity: 0.6 }}>
-                              <p style={{ fontSize: '0.72rem', margin: 0 }} className="print-text-dim">No CoachesEye AI Progression Analysis has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+                              <p style={{ fontSize: '0.72rem', margin: 0 }} className="print-text-dim">No CoachesEye Progression Analysis has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
                           </div>
                       )}
                   </div>
@@ -1900,14 +1846,14 @@ const [decayDistance, setDecayDistance] = useState('100');
       });
     }
 
-    // Section 5: Biological & Training Readiness
+    // Section 4: Biological & Training Readiness
     if (reportConfig.sections.biometrics) {
       pages.push({
         id: 'biometrics',
-        title: '5. Biological & Training Readiness',
+        title: '4. Biological & Training Readiness',
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="biometrics">
-              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Biological & Training Readiness</h2>
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>4. Biological & Training Readiness</h2>
               
               <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -1931,7 +1877,7 @@ const [decayDistance, setDecayDistance] = useState('100');
               {readinessInsight ? (
                   <div className="glass-card mb-6" style={{ padding: '1.5rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.5rem' }}>
-                          <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye AI Strategic Readiness Briefing</h4>
+                          <h4 style={{ color: 'var(--accent-cyan)', margin: 0, fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.05em' }}>CoachesEye Strategic Readiness Briefing</h4>
                           {readinessInsight.flag && (
                               <span style={{ 
                                   fontSize: '0.6rem', 
@@ -1968,9 +1914,102 @@ const [decayDistance, setDecayDistance] = useState('100');
                   </div>
               ) : (
                   <div className="glass-card mb-6" style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.6 }}>
-                      <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No AI Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
+                      <p style={{ fontSize: '0.8rem', margin: 0 }} className="print-text-dim">No Strategic Readiness Assessment has been generated for this swimmer yet. Generate one on the dashboard to include it here.</p>
                   </div>
               )}
+          </div>
+        )
+      });
+    }
+
+    // Section 5: Competition Record & Intensity
+    if (reportConfig.sections.competition || reportConfig.sections.openMeets || reportConfig.sections.internalGalas) {
+      pages.push({
+        id: 'competition',
+        title: '5. Competition Record & Intensity',
+        element: (
+          <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="competition">
+              <h2 className="section-title" style={{ marginBottom: '1.5rem' }}>5. Competition Record & Intensity</h2>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                  <div>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 900 }}>Meets Attended: {openMeetsCount} Open / {totalMeetsCount - openMeetsCount} Internal</div>
+                      <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>Total Races: {statsObj?.totalRaces || 0}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--accent-amber)' }}>Peak WA Score: {statsObj?.peakWA || 0} pts</div>
+                  </div>
+              </div>
+
+              {/* Monthly Meets Timeline Bar Chart */}
+              <div className="glass-card mb-6" style={{ padding: '1rem' }}>
+                  <h3 style={{ fontSize: '0.85rem', fontWeight: 900, margin: '0 0 0.5rem 0' }}>Competition Intensity (Timeline Load)</h3>
+                  <div style={{ height: '180px', width: '100%' }}>
+                      <BarChart width={700} height={180} data={meetTimelineData}>
+                          <defs>
+                              <linearGradient id="meetGradPrint" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="0%" stopColor="var(--accent-cyan)" stopOpacity={1}/>
+                                  <stop offset="100%" stopColor="var(--accent-cyan)" stopOpacity={0.3}/>
+                              </linearGradient>
+                          </defs>
+                          <CartesianGrid vertical={false} stroke={printTheme === 'light' ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.1)'} strokeDasharray="3 3" />
+                          <XAxis dataKey="month" tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: printTheme === 'light' ? '#050b10' : 'rgba(255,255,255,0.5)', fontSize: 8, fontWeight: 700 }} axisLine={false} tickLine={false} />
+                          <Bar dataKey="count" name="Meets" radius={[4, 4, 0, 0]}>
+                              {meetTimelineData?.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill="url(#meetGradPrint)" fillOpacity={entry.count > 0 ? 1 : 0.2} />
+                              ))}
+                          </Bar>
+                      </BarChart>
+                  </div>
+              </div>
+
+              {/* CoachesEye guide */}
+              <div className="glass-card mb-6" style={{ padding: '1rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+                  <h4 style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', margin: '0 0 4px 0' }}>COACHESEYE GUIDE: COMPETITION & RACING</h4>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }} className="print-text-dim">
+                      Tracks the athlete&apos;s competitive rhythm and &apos;Big Meet Temperament&apos;. Regular racing builds race-execution skills, while tracking Point Progression indicates whether training is converting into race speed. A steep, positive trendline tells the story of an athlete successfully adapting to their training load.
+                  </p>
+              </div>
+
+              <div className="glass-card competition-table-card" style={{ padding: 0, background: 'transparent', border: 'none' }}>
+                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
+                      <thead>
+                          <tr>
+                              <th>Date</th>
+                              <th>Competition</th>
+                              <th style={{ textAlign: 'center' }}>Level</th>
+                              <th style={{ textAlign: 'center' }}>Races</th>
+                              <th style={{ textAlign: 'right' }}>Peak WA</th>
+                              <th style={{ textAlign: 'center' }}>Highlights</th>
+                          </tr>
+                      </thead>
+                      <tbody>
+                          {uniqueMeetsList && uniqueMeetsList.map((m, i) => (
+                              <tr key={i}>
+                                  <td style={{ fontWeight: 600, padding: '8px' }}>
+                                      {new Date(m.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' })}
+                                  </td>
+                                  <td style={{ fontWeight: 800, padding: '8px' }}>{m.name}</td>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>
+                                      <span style={{ padding: '2px 6px', background: m.level === 'L4' ? '#f1f5f9' : '#e0f2fe', color: m.level === 'L4' ? '#64748b !important' : '#0369a1 !important', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 800 }}>
+                                          {m.level || 'L3'}
+                                      </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>{m.eventCount}</td>
+                                  <td style={{ textAlign: 'right', fontWeight: 800, padding: '8px' }}>{Math.round(m.peakWa)} pts</td>
+                                  <td style={{ textAlign: 'center', padding: '8px' }}>
+                                      {m.pbCount > 0 ? (
+                                          <span style={{ color: '#059669 !important', fontWeight: 900, fontSize: '0.7rem', background: '#d1fae5', padding: '2px 6px', borderRadius: '4px' }}>
+                                              ★ {m.pbCount} PB{m.pbCount > 1 ? 's' : ''}
+                                          </span>
+                                      ) : '-'}
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
           </div>
         )
       });
@@ -2005,7 +2044,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         element: (
           <div style={{ padding: '15mm 20mm', minHeight: '100vh', pageBreakAfter: 'always', boxSizing: 'border-box', background: 'var(--print-bg)' }} key="appendix">
               <h2 className="section-title" style={{ marginBottom: '2rem' }}>Appendix A: Weekly Workload Details</h2>
-              <div className="glass-card" style={{ padding: '0 !important', background: 'transparent !important', border: 'none !important' }}>
+              <div className="glass-card appendix-table-card" style={{ padding: 0, background: 'transparent', border: 'none' }}>
                   <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.8rem' }}>
                       <thead style={{ borderBottom: '2px solid rgba(255,255,255,0.1)' }}>
                           <tr>
@@ -2255,11 +2294,23 @@ const [decayDistance, setDecayDistance] = useState('100');
             }
             
             /* Large structures override to allow pagination */
-            .workload-table-card, .strategic-narrative-card {
+            .workload-table-card, .strategic-narrative-card, .competition-table-card, .appendix-table-card {
                 page-break-inside: auto !important;
+                overflow: visible !important;
             }
             .stats-table-glass tr {
                 page-break-inside: avoid !important;
+            }
+            
+            .competition-table-card, .appendix-table-card {
+                padding: 0 !important;
+                background: transparent !important;
+                border: none !important;
+            }
+            
+            /* Prevent headings from being orphaned at the bottom of a page */
+            h1, h2, h3, h4, h5, h6, .section-title {
+                page-break-after: avoid !important;
             }
 
             /* Match the Meet Report Tables */
@@ -2650,11 +2701,11 @@ const [decayDistance, setDecayDistance] = useState('100');
                  if (meetFreq >= target && attendance >= 75) {
                    return `Elite Performance Profile: Kieran is maintaining a high-frequency competitive rhythm backed by ${attendance}% consistency. This synergy between training volume (${volume}%) and race exposure is the gold standard for technical and physiological progression. No immediate workload adjustments required.`;
                  } else if (meetFreq < target && attendance >= 75) {
-                   return `Training Durable / Competition Shy: Kieran has built a robust aerobic engine (${volume}% volume) but is currently under-exposed to high-stakes racing (${meetFreq}/${target} meets). The AI brain recommends increasing Open Meet entries to convert training capacity into race-day pressure handling. The engine is ready; the pilot needs flight hours.`;
+                   return `Training Durable / Competition Shy: Kieran has built a robust aerobic engine (${volume}% volume) but is currently under-exposed to high-stakes racing (${meetFreq}/${target} meets). The analysis recommends increasing Open Meet entries to convert training capacity into race-day pressure handling. The engine is ready; the pilot needs flight hours.`;
                  } else if (meetFreq >= target && attendance < 75) {
                    return `High Competitive Risk: Frequent racing detected, but training consistency (${attendance}%) is insufficient to sustain the load. This profile often leads to 'shallow' PBs that plateau quickly. Priority 1 is restoring the ${volume}% volume baseline to prevent injury and long-term aerobic stagnation. Kieran is over-racing his base.`;
                  } else {
-                   return `Engagement Deficit: Current data shows a dual shortfall in both training consistency (${attendance}%) and competitive frequency (${meetFreq}/${target}). This combination significantly hinders the LTAD (Long-Term Athlete Development) trajectory. AI Recommendation: Immediate 1-to-1 review to identify barriers to session attendance before planning the next racing cycle.`;
+                   return `Engagement Deficit: Current data shows a dual shortfall in both training consistency (${attendance}%) and competitive frequency (${meetFreq}/${target}). This combination significantly hinders the LTAD (Long-Term Athlete Development) trajectory. Recommendation: Immediate 1-to-1 review to identify barriers to session attendance before planning the next racing cycle.`;
                  }
                })()}
              </div>
@@ -2710,7 +2761,8 @@ const [decayDistance, setDecayDistance] = useState('100');
       </div>
 
       {/* PERFORMANCE ANALYTICAL MODULES */}
-      <div className={`no-print ${activeTab !== 'performance' ? 'no-screen' : ''}`}>
+      {activeTab === 'performance' && (
+        <div className="no-print animate-fade-in">
         
         {/* AI Insight & Foresight Timeline container */}
         <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
@@ -3038,6 +3090,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         })()}
 
       </div>
+      )}
 
       {/* Progress Sub-Tab Navigation Toggle */}
       {activeTab === 'progress' && (
@@ -3064,7 +3117,8 @@ const [decayDistance, setDecayDistance] = useState('100');
       )}
 
       {/* Progression Chart Section */}
-      <div className={`mb-16 no-print ${activeTab !== 'progress' || progressSubTab !== 'charts' ? 'no-screen' : ''}`}>
+      {activeTab === 'progress' && progressSubTab === 'charts' && (
+        <div className="mb-16 no-print animate-fade-in">
         <div className="glass-card" style={{ padding: '2rem', minHeight: '400px', position: 'relative', overflow: 'hidden' }}>
            {/* Background Glow */}
            <div style={{ position: 'absolute', top: '-10%', right: '-10%', width: '40%', height: '40%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.05) 0%, transparent 70%)', filter: 'blur(50px)', zIndex: 0 }}></div>
@@ -3257,9 +3311,12 @@ const [decayDistance, setDecayDistance] = useState('100');
           />
         </div>
       </div>
+      )}
       
       {/* COACHESEYE GUIDE: BIOLOGICAL NORMALISATION */}
-      <div className={`mb-8 ${activeTab !== 'progress' || progressSubTab !== 'roadmap' ? 'no-screen' : ''}`}>
+      {activeTab === 'progress' && progressSubTab === 'roadmap' && (
+        <>
+          <div className="mb-8 animate-fade-in">
         <div className="glass-card" style={{ borderLeft: '4px solid var(--accent-violet)' }}>
           <div className="flex justify-between items-center mb-4">
             <div>
@@ -3414,6 +3471,8 @@ const [decayDistance, setDecayDistance] = useState('100');
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>The Roadmap visually anchors the athlete's current 'Peak Performance' (solid bar) against official County and Regional World Aquatics benchmarks. This highlights exactly how close they are to the next elite pathway qualification tier.</p>
         </div>
       </div>
+      </>
+      )}
 
       {/* Readiness & Health Section */}
       {activeTab === 'progress' && progressSubTab === 'readiness' && (
@@ -3422,7 +3481,8 @@ const [decayDistance, setDecayDistance] = useState('100');
         </div>
       )}
 
-      <div className={`no-print ${activeTab !== 'workload' ? 'no-screen' : ''} ${!reportConfig.sections.attendance ? 'hide-in-report' : ''}`}>
+      {activeTab === 'workload' && (
+        <div className={`no-print ${!reportConfig.sections.attendance ? 'hide-in-report' : ''} animate-fade-in`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', minHeight: '400px' }}>
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
@@ -3450,76 +3510,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                      </div>
                    </div>
                 </div>
-                
-                {/* Elegant Toggle Controls */}
-                <div className="flex flex-wrap items-center gap-4 p-2 rounded-xl bg-white/[0.02] border border-white/5 no-print">
-                  {/* Compliance Metric Selector */}
-                  <div className="flex items-center rounded-lg bg-black/40 p-1 border border-white/5">
-                    <button 
-                      onClick={() => setComplianceMode('combined')} 
-                      className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${complianceMode === 'combined' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-white/60 hover:text-white'}`}
-                    >
-                      COMBINED
-                    </button>
-                    <button 
-                      onClick={() => setComplianceMode('hours')} 
-                      className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${complianceMode === 'hours' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-white/60 hover:text-white'}`}
-                    >
-                      HOURS
-                    </button>
-                    <button 
-                      onClick={() => setComplianceMode('sessions')} 
-                      className={`px-3 py-1 rounded-md text-[10px] font-black transition-all ${complianceMode === 'sessions' ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20' : 'text-white/60 hover:text-white'}`}
-                    >
-                      SESS
-                    </button>
-                  </div>
-                  
-                  <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }}></div>
-                  
-                  {/* Exemption and Holiday Toggle Controls */}
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
-                      <input 
-                        type="checkbox" 
-                        checked={includeShutdowns} 
-                        onChange={(e) => setIncludeShutdowns(e.target.checked)}
-                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
-                      />
-                      ❄️ SHUTDOWN
-                    </label>
-                    
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
-                      <input 
-                        type="checkbox" 
-                        checked={includeSessionCredits} 
-                        onChange={(e) => setIncludeSessionCredits(e.target.checked)}
-                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
-                      />
-                      ⚡ CREDIT
-                    </label>
 
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
-                      <input 
-                        type="checkbox" 
-                        checked={includeHolidays} 
-                        onChange={(e) => setIncludeHolidays(e.target.checked)}
-                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
-                      />
-                      🏖️ HOLIDAY
-                    </label>
-
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-black text-white/60 hover:text-white select-none">
-                      <input 
-                        type="checkbox" 
-                        checked={includeGalas} 
-                        onChange={(e) => setIncludeGalas(e.target.checked)}
-                        className="rounded border-white/10 bg-black/40 text-cyan-500 focus:ring-0 focus:ring-offset-0 h-3 w-3"
-                      />
-                      ⛵ GALA
-                    </label>
-                  </div>
-                </div>
              </div>
              <div style={{ height: 350, cursor: 'pointer' }}>
                {isClient && (
@@ -3841,8 +3832,11 @@ const [decayDistance, setDecayDistance] = useState('100');
 
         </div>
       </div>
+      )}
 
-      <div className={`no-print ${activeTab !== 'competition' ? 'no-screen' : ''} ${!reportConfig.sections.openMeets ? 'hide-in-report' : ''}`}>
+      {activeTab === 'competition' && (
+        <>
+          <div className={`no-print ${!reportConfig.sections.openMeets ? 'hide-in-report' : ''} animate-fade-in`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', position: 'relative', overflow: 'hidden' }}>
             <div style={{ position: 'absolute', top: '-10%', left: '-10%', width: '60%', height: '60%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.08) 0%, transparent 70%)', filter: 'blur(50px)', zIndex: 0 }}></div>
@@ -3934,7 +3928,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       </div>
 
 
-      <details className={`glass-card mb-16 no-print ${activeTab !== 'competition' ? 'no-screen' : ''}`} style={{ border: 'none', padding: 0, overflow: 'hidden' }}>
+      <details className="glass-card mb-16 no-print" style={{ border: 'none', padding: 0, overflow: 'hidden' }}>
         <summary style={{ 
           padding: '2rem', 
           cursor: 'pointer', 
@@ -3988,6 +3982,8 @@ const [decayDistance, setDecayDistance] = useState('100');
           </div>
         </div>
       </details>
+      </>
+      )}
 
       {activeTab === 'block_roi' && swimmer && (
         <div className="mb-16 animate-fade-in no-print">

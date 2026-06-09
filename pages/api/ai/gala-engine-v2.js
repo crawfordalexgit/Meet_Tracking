@@ -186,6 +186,100 @@ export default async function handler(req, res) {
       }
     });
 
+    // === RELAY MEDAL DETECTION ===
+    // Parses HY-TEK relay event blocks to find Tonbridge finishing 1st, 2nd, or 3rd.
+    // Relay medals are tracked per relay team (not per swimmer) for the medal counter card,
+    // but each swimmer leg is also tagged in detectedMedals for AI narrative context.
+    const relayMedals = [];
+    if (pdfText && allSwimmers) {
+      const allPdfLines = pdfText.split('\n');
+      let inRelayEvent = false;
+      let currentRelayEvent = '';
+
+      for (let i = 0; i < allPdfLines.length; i++) {
+        const line = allPdfLines[i];
+        // Strip page-continuation parens e.g. "(Event 2 Mixed 13-99 200 SC Meter Freestyle Relay)"
+        const trimmed = line.trim().replace(/^\(/, '').replace(/\)$/, '');
+
+        // Detect relay event header
+        if (/^Event\s+\d+.*relay/i.test(trimmed)) {
+          inRelayEvent = true;
+          currentRelayEvent = trimmed;
+          continue;
+        }
+
+        // New non-relay event resets the flag
+        if (/^Event\s+\d+/i.test(trimmed) && !/relay/i.test(trimmed)) {
+          inRelayEvent = false;
+          currentRelayEvent = '';
+          continue;
+        }
+
+        if (!inRelayEvent) continue;
+
+        // Match Tonbridge finishing 1st, 2nd, or 3rd in this relay
+        const tonbridgePlaceMatch = line.match(/^\s*([123])\s+Tonbridge\b/i);
+        if (!tonbridgePlaceMatch) continue;
+
+        const place = parseInt(tonbridgePlaceMatch[1]);
+        const medalType = place === 1 ? 'Gold' : place === 2 ? 'Silver' : 'Bronze';
+
+        // Get relay label from the result line (e.g. "Tonbridge   A   NT   2:02.78")
+        const labelOnLine = line.match(/Tonbridge\s+([A-H])\s/i);
+        let relayLabel = labelOnLine ? labelOnLine[1] : '';
+        // Fallback: HY-TEK sometimes puts the relay letter on its own line just before the result
+        if (!relayLabel && i > 0) {
+          const prevLine = allPdfLines[i - 1].trim();
+          if (/^[A-H]$/.test(prevLine)) relayLabel = prevLine;
+        }
+
+        // Collect swimmer legs from the next 1–5 lines (page breaks are skipped)
+        const legSwimmers = [];
+        for (let j = i + 1; j <= Math.min(i + 5, allPdfLines.length - 1); j++) {
+          const legLine = allPdfLines[j];
+          if (/^---\s*PAGE BREAK/i.test(legLine)) continue;
+          // Stop if we hit a new result row (e.g. "4   Tonbridge   B   NT...") that isn't a leg
+          if (/^\s*\d+\s+[A-Z]/.test(legLine) && !/^\s*\d+\)/.test(legLine)) break;
+          const legMatches = [...legLine.matchAll(/\d+\)\s+([A-Za-z\s\-']+),\s+([A-Za-z]+)\s+[MWFmwf]\d+/g)];
+          legMatches.forEach(m => {
+            legSwimmers.push({ lastName: m[1].trim(), firstName: m[2].trim().split(' ')[0] });
+          });
+          if (legSwimmers.length >= 4) break;
+        }
+
+        // Match each leg swimmer to the DB; fall back to the parsed name if no match found
+        const matchedNames = legSwimmers.map(leg => {
+          const found = allSwimmers.find(s => {
+            const parts = (s.full_name || '').toLowerCase().replace(/,/g, '').split(/\s+/).filter(w => w.length > 1);
+            const hasLast = parts.some(p => p === leg.lastName.toLowerCase().split(/\s+/)[0]);
+            const hasFirst = parts.some(p => p === leg.firstName.toLowerCase());
+            return hasLast && hasFirst;
+          });
+          return found ? getPreferredName(found) : `${leg.firstName} ${leg.lastName}`;
+        });
+
+        relayMedals.push({
+          event: currentRelayEvent,
+          place,
+          medal_type: medalType,
+          relay_label: relayLabel || 'A',
+          swimmers: matchedNames
+        });
+
+        // Tag each relay swimmer in detectedMedals so the AI narrative can mention them by name
+        matchedNames.forEach(swimmerName => {
+          detectedMedals.push({
+            swimmer_name: swimmerName,
+            medal_type: medalType,
+            event: currentRelayEvent,
+            evidence: `Relay leg — Tonbridge ${relayLabel || 'A'} finished ${place}${place === 1 ? 'st' : place === 2 ? 'nd' : 'rd'} in ${currentRelayEvent}`,
+            is_relay: true
+          });
+        });
+      }
+    }
+    console.log(`>>> RELAY MEDALS: ${relayMedals.length} relay team medals detected.`);
+
     console.log(`>>> FINAL GALA ENGINE: Captured ${detectedMedals.length} medals (Text + Structured).`);
 
     // 3. Fetch Pathway Benchmarks (National Top 40, Regional Top 30, County Top 10)
@@ -410,6 +504,7 @@ export default async function handler(req, res) {
       staff_context: consolidatedStaffText || null,
       user_correction: correction || null,
       benchmarks: benchmarks || [], // Inject benchmarks into the AI context
+      relay_medals: relayMedals, // Relay team medal results for AI narrative
       results: (() => {
         const seen = new Set();
         const deduped = [];
@@ -454,9 +549,13 @@ export default async function handler(req, res) {
 
     const analysis = await analyzeMeet(dna);
 
-    // Merge historical comparisons into AI analysis response
+    // Merge historical comparisons, relay medals, and JS-computed medal counts into AI analysis response.
+    // individual_medal_counts is the single source of truth for the podium card so it always
+    // matches the medal totals the AI references in its narrative text.
     if (analysis) {
       analysis.historical_comparisons = comparisons;
+      analysis.relay_medals = relayMedals;
+      analysis.individual_medal_counts = tonbridgeMedals;
     }
 
     // Save to ai_reports

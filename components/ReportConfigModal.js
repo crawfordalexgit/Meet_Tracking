@@ -102,7 +102,7 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
           <div style={{ position: 'relative', width: '80px', height: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(var(--accent-cyan-rgb), 0.1)', borderRadius: '50%', border: '1px solid rgba(var(--accent-cyan-rgb), 0.2)' }}>
             <span style={{ fontSize: '2.5rem', display: 'inline-block', animation: 'spin-glow 2s linear infinite' }}>✨</span>
           </div>
-          <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.02em' }}>Compiling AI Reports</h3>
+          <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#fff', margin: 0, letterSpacing: '-0.02em' }}>Compiling CoachesEye Reports</h3>
           <p style={{ color: 'rgba(255, 255, 255, 0.6)', margin: 0, fontSize: '0.9rem', maxWidth: '380px', lineHeight: 1.6 }}>
             CoachesEye is running deep diagnostic workflows on {swimmerName}'s physiological and technical datasets...
           </p>
@@ -154,7 +154,7 @@ export default function ReportConfigModal({ isOpen, onClose, onGenerate, swimmer
           </div>
 
           <div>
-            <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-violet)', display: 'block', marginBottom: '12px' }}>AI Insight Modules</label>
+            <label style={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-violet)', display: 'block', marginBottom: '12px' }}>CoachesEye Insight Modules</label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '24px' }}>
               {[
                 { key: 'aiPerformance', label: '✨ Performance' },

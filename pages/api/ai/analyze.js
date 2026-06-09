@@ -55,6 +55,44 @@ export default async function handler(req, res) {
         dna.block_roi_data = req.body.blockData;
       }
 
+      // Load dynamic AI brain settings from database (fallback to defaults if table not created yet)
+      let aiSettings = {
+        struggling_consistency_threshold: 60,
+        struggling_volume_threshold: 90,
+        min_wa_points_threshold: 250,
+        exempt_volume_offset: true
+      };
+      try {
+        const { data: settingsRow } = await supabase
+          .from('ai_brain_settings')
+          .select('value')
+          .eq('key', 'pathway_transition')
+          .single();
+        if (settingsRow && settingsRow.value) {
+          aiSettings = settingsRow.value;
+        }
+      } catch (e) {
+        console.warn(">>> AI ANALYZE: Using default AI settings because custom table query failed/not-created:", e.message);
+      }
+
+      // Override with squad-level configurations if configured (not null)
+      if (swimmer && swimmer.squads) {
+        if (typeof swimmer.squads.struggling_consistency_threshold === 'number' && swimmer.squads.struggling_consistency_threshold !== null) {
+          aiSettings.struggling_consistency_threshold = swimmer.squads.struggling_consistency_threshold;
+        }
+        if (typeof swimmer.squads.struggling_volume_threshold === 'number' && swimmer.squads.struggling_volume_threshold !== null) {
+          aiSettings.struggling_volume_threshold = swimmer.squads.struggling_volume_threshold;
+        }
+        if (typeof swimmer.squads.min_wa_points_threshold === 'number' && swimmer.squads.min_wa_points_threshold !== null) {
+          aiSettings.min_wa_points_threshold = swimmer.squads.min_wa_points_threshold;
+        }
+        if (typeof swimmer.squads.exempt_volume_offset === 'boolean' && swimmer.squads.exempt_volume_offset !== null) {
+          aiSettings.exempt_volume_offset = swimmer.squads.exempt_volume_offset;
+        }
+      }
+
+      dna.ai_settings = aiSettings;
+
       // 3. Call Gemini
       const analysis = await analyzeSwimmer(dna, type, instructions);
 

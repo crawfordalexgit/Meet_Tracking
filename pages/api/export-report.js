@@ -65,8 +65,35 @@ export default async function handler(req, res) {
       console.log("Warning: Loading screen didn't clear, forcing diagnostic snapshot...");
     }
 
-    // 3. Give React and Recharts 3 solid seconds to fetch DB data and animate charts
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // 3. Wait for all <img> tags to finish loading (e.g. meet photo from Supabase Storage).
+    //    A 6-second ceiling prevents this from hanging if an image errors or never arrives.
+    try {
+      await page.evaluate(() => new Promise(resolve => {
+        const imgs = Array.from(document.querySelectorAll('img'));
+        if (imgs.length === 0) return resolve();
+        const pending = imgs.filter(img => !img.complete);
+        if (pending.length === 0) return resolve();
+        let remaining = pending.length;
+        const done = () => { if (--remaining === 0) resolve(); };
+        pending.forEach(img => {
+          img.addEventListener('load', done);
+          img.addEventListener('error', done);
+        });
+        setTimeout(resolve, 6000); // hard ceiling — don't wait forever
+      }));
+    } catch (imgErr) {
+      console.log('Warning: Image wait failed, continuing:', imgErr.message);
+    }
+
+    // 4. Give React and Recharts 4 solid seconds to fetch DB data and animate charts
+    await new Promise(resolve => setTimeout(resolve, 4000));
+
+    // Ensure all fonts are fully loaded before generating PDF
+    try {
+      await page.evaluate(() => document.fonts.ready);
+    } catch (fontErr) {
+      console.log('Warning: Font load wait failed, continuing:', fontErr.message);
+    }
 
     // Generate the PDF (Puppeteer automatically applies @media print CSS!)
     const pdfBuffer = await page.pdf({

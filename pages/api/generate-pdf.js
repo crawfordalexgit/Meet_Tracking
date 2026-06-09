@@ -64,7 +64,8 @@ export default async function handler(req, res) {
             const text = document.body.innerText || '';
             return !text.includes('Loading Athlete Profile') && 
                    !text.includes('SYNTHESIZING GALA DATA') &&
-                   !text.includes('Loading Squad Analytics');
+                   !text.includes('Loading Squad Analytics') &&
+                   !text.includes('Loading Sessions...');
         }, { timeout: 15000 }).catch(() => console.log('[PDF Engine] Loading text wait timeout.'));
 
         // Wait for the main UI components to physically render
@@ -72,6 +73,13 @@ export default async function handler(req, res) {
 
         // Give Recharts 1.5 seconds to finish drawing their SVG animations
         await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // Ensure all fonts are fully loaded before generating PDF
+        try {
+            await page.evaluate(() => document.fonts.ready);
+        } catch (fontErr) {
+            console.log('Warning: Font load wait failed, continuing:', fontErr.message);
+        }
 
         // 4. Emulate Print Styles
         await page.emulateMediaType('print');

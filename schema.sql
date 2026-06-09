@@ -173,6 +173,14 @@ ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS target_sessions_per_week INTE
 ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS target_hours_per_week FLOAT DEFAULT 0;
 ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS require_weekend BOOLEAN DEFAULT false;
 ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS use_or_logic BOOLEAN DEFAULT true; -- true = Sessions OR Hours, false = Sessions AND Hours
+ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS swimmers_per_lane INTEGER DEFAULT 8;
+
+-- Add custom pathway transition targets to squads (NULL defaults to global AI settings fallback)
+ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS struggling_consistency_threshold INTEGER DEFAULT NULL;
+ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS struggling_volume_threshold INTEGER DEFAULT NULL;
+ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS min_wa_points_threshold INTEGER DEFAULT NULL;
+ALTER TABLE public.squads ADD COLUMN IF NOT EXISTS exempt_volume_offset BOOLEAN DEFAULT NULL;
+
 
 -- Create sessions table
 CREATE TABLE IF NOT EXISTS public.sessions (
@@ -336,4 +344,23 @@ USING (true);
 
 GRANT ALL ON public.issue_upvotes TO service_role;
 GRANT ALL ON public.issue_upvotes TO authenticated;
+
+-- 15. AI Brain Settings Table
+CREATE TABLE IF NOT EXISTS public.ai_brain_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key TEXT UNIQUE NOT NULL,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+ALTER TABLE public.ai_brain_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow read for all authenticated" ON public.ai_brain_settings FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow all for admins/headcoaches" ON public.ai_brain_settings FOR ALL TO authenticated USING (
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'headcoach')
+);
+GRANT ALL ON public.ai_brain_settings TO service_role;
+GRANT ALL ON public.ai_brain_settings TO authenticated;
+INSERT INTO public.ai_brain_settings (key, value)
+VALUES ('pathway_transition', '{"struggling_consistency_threshold": 60, "struggling_volume_threshold": 90, "min_wa_points_threshold": 250, "exempt_volume_offset": true}')
+ON CONFLICT (key) DO NOTHING;
+
 

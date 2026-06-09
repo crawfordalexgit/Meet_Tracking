@@ -11,6 +11,16 @@ export default function MeetReport({ session }) {
   const router = useRouter();
   const { id } = router.query;
   
+  const isPrintMode = router.query.print === 'true' || !!router.query.printToken || (typeof window !== 'undefined' && (window.location.search.includes('print=true') || window.location.search.includes('printToken=')));
+
+  const stripEmojis = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    if (isPrintMode) {
+      return text.replace(/\p{Emoji_Presentation}/gu, '').replace(/\s{2,}/g, ' ').trim();
+    }
+    return text;
+  };
+
   const [loading, setLoading] = useState(true);
   const [meet, setMeet] = useState(null);
   const [results, setResults] = useState([]);
@@ -37,6 +47,8 @@ export default function MeetReport({ session }) {
   const [showIngestion, setShowIngestion] = useState(false);
   const [scrapingProgress, setScrapingProgress] = useState(0);
   const [scrapingStatus, setScrapingStatus] = useState('');
+  const [meetPhoto, setMeetPhoto] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   
   useEffect(() => {
     if (id && session) {
@@ -49,6 +61,7 @@ export default function MeetReport({ session }) {
     try {
       const { data: meetData } = await supabase.from('meets').select('*, children:meets(id, name, pdf_text, staff_text)').eq('id', id).single();
       setMeet(meetData);
+      if (meetData?.photo_url) setMeetPhoto(meetData.photo_url);
       
       // Load existing PDF evidence and staff context
       let combinedPdf = meetData?.pdf_text || "";
@@ -341,6 +354,31 @@ export default function MeetReport({ session }) {
     setShowManualStaff(false);
   };
 
+  // ── Photo handlers ──────────────────────────────────────────────────────────
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadingPhoto(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('meetId', id);
+    try {
+      const res = await fetch('/api/upload-meet-photo', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.url) setMeetPhoto(data.url + '?t=' + Date.now()); // cache-bust on replace
+      else console.error('Photo upload failed:', data.error);
+    } catch (err) {
+      console.error('Photo upload error:', err);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const removePhoto = async () => {
+    setMeetPhoto(null);
+    await supabase.from('meets').update({ photo_url: null }).eq('id', id);
+  };
+
   const handleManualStaffChange = (e) => setStaffText(e.target.value);
   const toggleManualStaff = () => setShowManualStaff(!showManualStaff);
 
@@ -500,52 +538,57 @@ export default function MeetReport({ session }) {
         pbRate: Math.round((s.pbs / s.count) * 100),
         seasonAvg: squadBaselines[augmentedResults.find(r => (r.swimmers?.squads?.name || 'Unassigned') === name)?.swimmers?.squad_id] || 0
       })).sort((a,b) => b.pbs - a.pbs),
-      podiums: (insight?.medalists?.length > 0) ? (() => {
-        const seen = new Set();
-        const deduped = insight.medalists.filter(m => {
-          const key = `${normalizeName(m.swimmer_name)}-${normalizeEvent(m.event)}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+      // Priority 1: JS-computed counts returned from the engine — always matches AI text
+      podiums: insight?.individual_medal_counts?.total > 0
+        ? insight.individual_medal_counts
+        : (insight?.medalists?.length > 0) ? (() => {
+          // Priority 2: AI-generated medalists list (older reports)
+          const seen = new Set();
+          const deduped = insight.medalists.filter(m => {
+            const key = `${normalizeName(m.swimmer_name)}-${normalizeEvent(m.event)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
 
-        const gold = deduped.filter(m => {
-          const t = m.medal_type?.toLowerCase() || "";
-          return t.includes('gold') || t.includes('1st') || t.includes('first') || t === '1';
-        }).length;
-        const silver = deduped.filter(m => {
-          const t = m.medal_type?.toLowerCase() || "";
-          return t.includes('silver') || t.includes('2nd') || t.includes('second') || t === '2';
-        }).length;
-        const bronze = deduped.filter(m => {
-          const t = m.medal_type?.toLowerCase() || "";
-          return t.includes('bronze') || t.includes('3rd') || t.includes('third') || t === '3';
-        }).length;
+          const gold = deduped.filter(m => {
+            const t = m.medal_type?.toLowerCase() || "";
+            return t.includes('gold') || t.includes('1st') || t.includes('first') || t === '1';
+          }).length;
+          const silver = deduped.filter(m => {
+            const t = m.medal_type?.toLowerCase() || "";
+            return t.includes('silver') || t.includes('2nd') || t.includes('second') || t === '2';
+          }).length;
+          const bronze = deduped.filter(m => {
+            const t = m.medal_type?.toLowerCase() || "";
+            return t.includes('bronze') || t.includes('3rd') || t.includes('third') || t === '3';
+          }).length;
 
-        return { gold, silver, bronze, total: deduped.length };
-      })() : (augmentedResults.some(r => r.rank >= 1 && r.rank <= 3)) ? (() => {
-        // Fallback: Deduplicate by swimmer/event, prioritizing Finals
-        const podiumResults = augmentedResults.filter(r => r.rank >= 1 && r.rank <= 3);
-        const seen = new Map();
-        
-        podiumResults.forEach(r => {
-          const key = `${r.swimmer_id}-${normalizeEvent(r.event)}`;
-          const existing = seen.get(key);
-          const isFinal = r.round?.toLowerCase() === 'final';
+          return { gold, silver, bronze, total: deduped.length };
+        })() : (augmentedResults.some(r => r.rank >= 1 && r.rank <= 3)) ? (() => {
+          // Priority 3: Rank data fallback (no AI report yet)
+          const podiumResults = augmentedResults.filter(r => r.rank >= 1 && r.rank <= 3);
+          const seen = new Map();
           
-          if (!existing || isFinal) {
-            seen.set(key, r);
-          }
-        });
+          podiumResults.forEach(r => {
+            const key = `${r.swimmer_id}-${normalizeEvent(r.event)}`;
+            const existing = seen.get(key);
+            const isFinal = r.round?.toLowerCase() === 'final';
+            
+            if (!existing || isFinal) {
+              seen.set(key, r);
+            }
+          });
 
-        const deduped = Array.from(seen.values());
-        return {
-          gold: deduped.filter(r => r.rank === 1).length,
-          silver: deduped.filter(r => r.rank === 2).length,
-          bronze: deduped.filter(r => r.rank === 3).length,
-          total: deduped.length
-        };
-      })() : null
+          const deduped = Array.from(seen.values());
+          return {
+            gold: deduped.filter(r => r.rank === 1).length,
+            silver: deduped.filter(r => r.rank === 2).length,
+            bronze: deduped.filter(r => r.rank === 3).length,
+            total: deduped.length
+          };
+        })() : null,
+      relayMedals: insight?.relay_medals || []
     };
   }, [augmentedResults, pbs, meet, squadBaselines, insight]);
 
@@ -643,6 +686,266 @@ export default function MeetReport({ session }) {
         </div>
       </div>
 
+      {/* ── REPORT SETUP PANEL (top of page, always accessible) ─────────────────── */}
+      {!generatingInsight && (
+        <div id="report-setup" className="no-print mb-10">
+
+          {/* Compact strip — visible when report already exists and panel is collapsed */}
+          {insight && !showIngestion && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap',
+              padding: '0.65rem 1.25rem',
+              background: 'rgba(255,255,255,0.02)',
+              border: '1px solid rgba(255,255,255,0.06)',
+              borderRadius: '12px'
+            }}>
+              <span style={{ fontSize: '0.58rem', fontWeight: 950, color: 'var(--accent-cyan)', letterSpacing: '0.14em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                Report Data
+              </span>
+              <div style={{ flex: 1, display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: pdfText ? 'var(--accent-emerald)' : 'rgba(255,255,255,0.2)' }}>
+                  {pdfText ? '✓ Results' : '○ Results'}
+                </span>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: staffNotes.length > 0 ? 'var(--accent-emerald)' : 'rgba(255,255,255,0.2)' }}>
+                  {staffNotes.length > 0 ? `✓ Notes (${staffNotes.length})` : '○ Notes'}
+                </span>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: meetPhoto ? 'var(--accent-emerald)' : 'rgba(255,255,255,0.2)' }}>
+                  {meetPhoto ? '✓ Photo' : '○ Photo'}
+                </span>
+              </div>
+              <button
+                className="period-btn"
+                style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap' }}
+                onClick={() => setShowIngestion(true)}
+              >
+                ⚙ Manage Data
+              </button>
+            </div>
+          )}
+
+          {/* Full panel — when no report yet OR user opened it */}
+          {(!insight || showIngestion) && (
+            <div className="glass-card no-print" style={{ padding: '2rem 2.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+              <div className="flex justify-between items-start mb-6">
+                <div>
+                  <h3 style={{ fontSize: '1.5rem', fontWeight: 950, margin: 0, letterSpacing: '-0.02em' }}>Report Setup</h3>
+                  <p style={{ opacity: 0.5, fontSize: '0.8rem', margin: '4px 0 0' }}>
+                    Upload results, add a team photo, and write coach notes — then generate your AI report.
+                  </p>
+                </div>
+                <div className="flex gap-3 items-center" style={{ flexShrink: 0, marginLeft: '1.5rem' }}>
+                  {insight && (
+                    <button
+                      className="period-btn"
+                      style={{ fontSize: '0.6rem' }}
+                      onClick={() => setShowIngestion(false)}
+                    >
+                      ✕ CLOSE
+                    </button>
+                  )}
+                  <button
+                    className="btn-premium-intel"
+                    onClick={() => generateMeetInsight()}
+                    style={{ background: 'var(--accent-cyan)', color: '#000', padding: '10px 24px' }}
+                    disabled={!pdfText && !staffText && results.length === 0}
+                  >
+                    🧬 Generate Report
+                  </button>
+                </div>
+              </div>
+
+              {/* Tab Navigation */}
+              <div className="flex gap-2 mb-6 p-1 bg-white/5 rounded-xl" style={{ width: 'fit-content' }}>
+                {[
+                  { id: 'results', label: '📄 RESULTS FILE', icon: '📎' },
+                  { id: 'url',     label: '🌐 LIVE RESULTS URL', icon: '🔗' },
+                  { id: 'staff',   label: '✍️ COACH NOTES', icon: '📝' },
+                  { id: 'photo',   label: '📷 TEAM PHOTO',  icon: '📷' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveIngestionTab(tab.id)}
+                    className={`period-btn ${activeIngestionTab === tab.id ? 'active' : ''}`}
+                    style={{
+                      fontSize: '0.65rem',
+                      padding: '8px 16px',
+                      background: activeIngestionTab === tab.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+                      borderColor: activeIngestionTab === tab.id ? 'var(--accent-cyan)' : 'transparent'
+                    }}
+                  >
+                    <span style={{ marginRight: 6 }}>{tab.icon}</span>{tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab Content */}
+              <div style={{ minHeight: '160px' }}>
+
+                {/* ─ RESULTS FILE ─ */}
+                {activeIngestionTab === 'results' && (
+                  <div className="animate-fade-in">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '2rem', border: '2px dashed rgba(255,255,255,0.05)', borderRadius: '24px' }}>
+                      <div style={{ fontSize: '2.5rem', opacity: 0.2 }}>📄</div>
+                      <div style={{ textAlign: 'center' }}>
+                        <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Attach Official Results</h4>
+                        <p style={{ fontSize: '0.75rem', opacity: 0.5, marginBottom: '1.5rem' }}>Supports PDF, TXT, or MD formats from any gala results site.</p>
+                        <div className="flex items-center gap-3 justify-center">
+                          <label className="btn-premium-intel" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
+                            {parsingPdf ? 'PARSING FILE...' : (pdfText ? '✓ RESULTS ATTACHED' : 'UPLOAD FILE')}
+                            <input type="file" hidden accept=".pdf,.txt,.md" onChange={handlePdfUpload} />
+                          </label>
+                          {pdfText && (
+                            <button onClick={removePdf} className="period-btn" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }}>REMOVE</button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ─ LIVE RESULTS URL ─ */}
+                {activeIngestionTab === 'url' && (
+                  <div className="animate-fade-in">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '2rem', border: '2px dashed rgba(255,255,255,0.05)', borderRadius: '24px' }}>
+                      <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Live Results Scraper</h4>
+                      <p style={{ fontSize: '0.75rem', opacity: 0.5, marginBottom: '0.5rem' }}>Point the brain at a live results page (Counties, Regionals, etc.) to extract heats, finals, and placings.</p>
+                      <div className="flex gap-4">
+                        <input
+                          type="url"
+                          placeholder="https://www.southeastswimming.org/results/..."
+                          className="flex-1"
+                          style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', padding: '12px 20px', borderRadius: '12px', color: 'white', outline: 'none', fontSize: '0.9rem' }}
+                          value={resultsUrl}
+                          onChange={(e) => setResultsUrl(e.target.value)}
+                        />
+                        <button className="btn-premium-intel" style={{ background: 'var(--accent-cyan)', color: 'black' }} onClick={handleUrlScrape} disabled={scrapingUrl || !resultsUrl}>
+                          {scrapingUrl ? 'SCRAPING...' : 'SCRAPE LIVE DATA'}
+                        </button>
+                      </div>
+                      {scrapingUrl && (
+                        <div className="mt-4">
+                          <div className="flex justify-between items-center mb-2">
+                            <span style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase' }}>{scrapingStatus}</span>
+                            <span style={{ fontSize: '0.65rem', opacity: 0.5 }}>{scrapingProgress}%</span>
+                          </div>
+                          <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '10px', overflow: 'hidden' }}>
+                            <div style={{ width: `${scrapingProgress}%`, height: '100%', background: 'var(--accent-cyan)', boxShadow: '0 0 10px var(--accent-cyan)', transition: 'width 0.5s ease-out' }}></div>
+                          </div>
+                        </div>
+                      )}
+                      {uploadStatus === 'success' && !scrapingUrl && (
+                        <div style={{ fontSize: '0.65rem', color: 'var(--accent-emerald)', fontWeight: 900 }} className="flex items-center gap-2">
+                          <span style={{ fontSize: '1rem' }}>✓</span> RESULTS CAPTURED SUCCESSFULLY.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ─ COACH NOTES ─ */}
+                {activeIngestionTab === 'staff' && (
+                  <div className="animate-fade-in">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                      <div>
+                        <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Coach’s Log &amp; Context</h4>
+                        <p style={{ fontSize: '0.75rem', opacity: 0.5 }}>Add technical notes, squad feedback, or atmospheric details for the AI to include in the report.</p>
+                      </div>
+                      <div className="flex gap-4">
+                        <textarea
+                          className="flex-1"
+                          style={{ height: '100px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '16px', fontSize: '0.9rem', color: 'white', outline: 'none', resize: 'none' }}
+                          placeholder="Type a new note here… (e.g. 'Session 3: Kieran’s underwater transitions were elite today')"
+                          value={newNote}
+                          onChange={(e) => setNewNote(e.target.value)}
+                        />
+                        <button
+                          className="btn-premium-intel"
+                          style={{ background: 'var(--accent-emerald)', color: 'black', height: 'fit-content' }}
+                          onClick={async () => {
+                            if (!newNote.trim()) return;
+                            const updated = [{ id: Date.now(), text: newNote, date: new Date().toISOString() }, ...staffNotes];
+                            setStaffNotes(updated);
+                            setNewNote('');
+                            const { error } = await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
+                            if (!error) { setUploadStatus('success'); setTimeout(() => setUploadStatus(null), 3000); }
+                          }}
+                        >
+                          ADD NOTE
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                        {staffNotes.map(note => (
+                          <div key={note.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '1rem' }}>
+                            <div style={{ flex: 1 }}>
+                              <p style={{ fontSize: '0.9rem', lineHeight: 1.5, color: 'rgba(255,255,255,0.9)' }}>{note.text}</p>
+                              <span style={{ fontSize: '0.65rem', opacity: 0.3, marginTop: '0.5rem', display: 'block' }}>{new Date(note.date).toLocaleString()}</span>
+                            </div>
+                            <button
+                              style={{ background: 'rgba(244,63,94,0.1)', color: 'var(--accent-rose)', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '0.6rem', fontWeight: 700, cursor: 'pointer' }}
+                              onClick={async () => {
+                                const updated = staffNotes.filter(n => n.id !== note.id);
+                                setStaffNotes(updated);
+                                await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
+                              }}
+                            >DELETE</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex justify-between items-center border-t border-white/5 pt-4">
+                        <div>{uploadStatus === 'success' && <span style={{ fontSize: '0.6rem', color: 'var(--accent-emerald)', fontWeight: 900 }}>✓ SYNCED</span>}</div>
+                        <label className="period-btn" style={{ cursor: 'pointer', fontSize: '0.6rem' }}>
+                          BULK UPLOAD (.TXT)
+                          <input type="file" hidden accept=".txt,.md" onChange={handleStaffUpload} />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ─ TEAM PHOTO ─ */}
+                {activeIngestionTab === 'photo' && (
+                  <div className="animate-fade-in">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '2rem', border: '2px dashed rgba(255,255,255,0.05)', borderRadius: '24px' }}>
+                      {meetPhoto ? (
+                        <div style={{ width: '100%' }}>
+                          <img src={meetPhoto} alt="Gala photo preview" style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }} />
+                          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', justifyContent: 'center' }}>
+                            <label className="btn-premium-intel" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                              {uploadingPhoto ? 'UPLOADING...' : '📷 REPLACE PHOTO'}
+                              <input type="file" hidden accept="image/*" onChange={handlePhotoUpload} disabled={uploadingPhoto} />
+                            </label>
+                            <button onClick={removePhoto} className="period-btn" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }}>REMOVE</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: '2.5rem', opacity: 0.2 }}>📷</div>
+                          <div style={{ textAlign: 'center' }}>
+                            <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Add a Gala Photo</h4>
+                            <p style={{ fontSize: '0.75rem', opacity: 0.5, marginBottom: '1.5rem' }}>Team shots, podium moments, action shots — shown as a hero banner and included in the PDF.</p>
+                            <label className="btn-premium-intel" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', display: 'inline-block' }}>
+                              {uploadingPhoto ? 'UPLOADING...' : '📷 UPLOAD PHOTO'}
+                              <input type="file" hidden accept="image/*" onChange={handlePhotoUpload} disabled={uploadingPhoto} />
+                            </label>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+              </div>{/* end tab content */}
+
+              {uploadStatus === 'error' && (
+                <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(244,63,94,0.1)', border: '1px solid var(--accent-rose)', borderRadius: '12px', color: 'var(--accent-rose)', fontSize: '0.8rem', fontWeight: 700 }}>
+                  ⚠ ERROR: {errorMessage}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-10 print-only" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '1rem' }}>
         <div style={{ fontSize: '1.2rem', fontWeight: 950, color: 'white', letterSpacing: '0.1em' }}>TONBRIDGE SWIMMING CLUB</div>
         <div style={{ fontSize: '0.6rem', fontWeight: 950, color: 'var(--accent-cyan)', opacity: 0.8 }}>GALA PERFORMANCE SHOWCASE • {meet.name.toUpperCase()}</div>
@@ -650,6 +953,56 @@ export default function MeetReport({ session }) {
 
       <div className="section-title mb-6 print-only" style={{ fontSize: '1.2rem', color: 'white', opacity: 1 }}>Gala Achievement Summary</div>
       
+      {/* ── MEET PHOTO HERO BANNER ──────────────────────────────────────────── */}
+      {meetPhoto && (
+        <div style={{
+          position: 'relative',
+          height: '320px',
+          borderRadius: '20px',
+          overflow: 'hidden',
+          marginBottom: '2rem',
+          border: '1px solid rgba(255,255,255,0.08)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.4)'
+        }}>
+          <img
+            src={meetPhoto}
+            alt={`${meet.name} gala photo`}
+            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          />
+          {/* gradient overlay */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(to top, rgba(5,11,16,0.85) 0%, rgba(5,11,16,0.15) 55%, transparent 100%)'
+          }} />
+          {/* meet name watermark */}
+          <div style={{
+            position: 'absolute', bottom: '1.5rem', left: '2rem', right: '8rem',
+            fontSize: '0.85rem', fontWeight: 950, letterSpacing: '0.12em',
+            color: 'rgba(255,255,255,0.9)', textTransform: 'uppercase',
+            textShadow: '0 2px 12px rgba(0,0,0,0.8)'
+          }}>
+            {meet.name}
+            <span style={{ color: 'var(--accent-cyan)', margin: '0 0.5em' }}>·</span>
+            {new Date(meet.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+          {/* remove button — screen only */}
+          <button
+            onClick={removePhoto}
+            className="no-print"
+            style={{
+              position: 'absolute', top: '1rem', right: '1rem',
+              background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: 'rgba(255,255,255,0.8)', borderRadius: '8px',
+              padding: '5px 14px', fontSize: '0.58rem', fontWeight: 800,
+              cursor: 'pointer', letterSpacing: '0.08em'
+            }}
+          >
+            ✕ REMOVE PHOTO
+          </button>
+        </div>
+      )}
+
       <div style={{ 
         display: 'grid', 
         gridTemplateColumns: 'repeat(5, 1fr)', 
@@ -659,7 +1012,7 @@ export default function MeetReport({ session }) {
         {/* Card 1: Team Members */}
         <div className="glass-card" style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <div className="flex items-center gap-3">
-            <div style={{ fontSize: '1rem' }}>🏊</div>
+            {!isPrintMode && <div style={{ fontSize: '1rem' }}>🏊</div>}
             <div style={{ fontSize: '0.5rem', fontWeight: 950, opacity: 0.8, letterSpacing: '0.1em' }}>TEAM MEMBERS</div>
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 950, color: 'white' }}>{stats.uniqueSwimmers}</div>
@@ -668,7 +1021,7 @@ export default function MeetReport({ session }) {
         {/* Card 2: Total Races */}
         <div className="glass-card" style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <div className="flex items-center gap-3">
-            <div style={{ fontSize: '1rem' }}>⏱</div>
+            {!isPrintMode && <div style={{ fontSize: '1rem' }}>⏱</div>}
             <div style={{ fontSize: '0.5rem', fontWeight: 950, opacity: 0.8, letterSpacing: '0.1em' }}>TOTAL RACES</div>
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 950, color: 'white' }}>{stats.totalRaces}</div>
@@ -793,13 +1146,72 @@ export default function MeetReport({ session }) {
         {/* Card 5: Peak Performance */}
         <div className="glass-card" style={{ padding: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
           <div className="flex items-center gap-3">
-            <div style={{ fontSize: '1rem' }}>🏆</div>
+            {!isPrintMode && <div style={{ fontSize: '1rem' }}>🏆</div>}
             <div style={{ fontSize: '0.5rem', fontWeight: 950, opacity: 0.8, letterSpacing: '0.1em' }}>PEAK PERFORMANCE</div>
           </div>
           <div style={{ fontSize: '1.5rem', fontWeight: 950, color: 'white' }}>{stats.peakPts}</div>
           <div style={{ fontSize: '0.6rem', opacity: 0.5, lineHeight: 1.3 }}>WA Points achieved.</div>
         </div>
       </div>
+
+      {/* RELAY MEDALS — shown separately from individual podium medals */}
+      {stats.relayMedals.length > 0 && (
+        <div className="glass-card mb-8 no-print" style={{
+          padding: '1.5rem 2rem',
+          borderLeft: '4px solid #a78bfa',
+          background: 'rgba(139, 92, 246, 0.04)'
+        }}>
+          <div style={{ fontSize: '0.6rem', fontWeight: 950, color: '#a78bfa', letterSpacing: '0.18em', marginBottom: '1.2rem', textTransform: 'uppercase' }}>
+            🏊 RELAY PODIUMS
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.8rem' }}>
+            {stats.relayMedals.map((relay, i) => {
+              const isGold   = relay.medal_type === 'Gold';
+              const isSilver = relay.medal_type === 'Silver';
+              const medalColor  = isGold ? '#fbbf24' : isSilver ? '#e2e8f0' : '#fb923c';
+              const medalEmoji  = isGold ? '🥇' : isSilver ? '🥈' : '🥉';
+              const bgBorder    = isGold
+                ? 'rgba(251,191,36,0.25)'
+                : isSilver
+                ? 'rgba(226,232,240,0.18)'
+                : 'rgba(251,146,60,0.25)';
+              // Strip verbose boilerplate from event name
+              const cleanEvent = relay.event
+                .replace(/^Event\s+\d+\s*/i, '')
+                .replace(/\s*SC Meter|\s*LC Meter/gi, '')
+                .trim();
+              return (
+                <div key={i} style={{
+                  background: 'rgba(255,255,255,0.02)',
+                  borderRadius: '12px',
+                  padding: '1rem 1.2rem',
+                  border: `1px solid ${bgBorder}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span style={{ fontSize: '1.4rem', lineHeight: 1 }}>{medalEmoji}</span>
+                    <div>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 950, color: medalColor, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                        {relay.medal_type} · Relay {relay.relay_label}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'rgba(255,255,255,0.85)', marginTop: '2px', lineHeight: 1.3 }}>
+                        {cleanEvent}
+                      </div>
+                    </div>
+                  </div>
+                  {relay.swimmers.length > 0 && (
+                    <div style={{ fontSize: '0.68rem', opacity: 0.7, lineHeight: 1.6, paddingTop: '0.2rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      {relay.swimmers.join(' · ')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* WA POINTS LEGEND (For Parents) */}
       <div className="glass-card mb-12 no-print" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-amber)', background: 'rgba(255, 234, 0, 0.03)' }}>
@@ -875,8 +1287,8 @@ export default function MeetReport({ session }) {
                       <h3 style={{ fontSize: '2.5rem', fontWeight: 950, margin: '12px 0 0', letterSpacing: '-0.02em' }}>{meet.name} Report</h3>
                     </div>
                     <div className="flex gap-3">
-                      <button className="period-btn no-print" onClick={() => setShowIngestion(!showIngestion)} style={{ fontSize: '0.6rem', opacity: 0.5 }}>
-                        {showIngestion ? 'HIDE SOURCE DATA' : 'MANAGE SOURCE DATA'}
+                      <button className="period-btn no-print" onClick={() => { setShowIngestion(true); window.scrollTo({ top: 0, behavior: 'smooth' }); }} style={{ fontSize: '0.6rem', opacity: 0.6 }}>
+                        ⚙ Manage Data
                       </button>
                       <button className="period-btn no-print" onClick={() => generateMeetInsight()} style={{ fontSize: '0.6rem', opacity: 0.5 }}>REFRESH REPORT</button>
                     </div>
@@ -885,7 +1297,7 @@ export default function MeetReport({ session }) {
                   <div className="space-y-4">
                     {insight.summary.split('\n\n').map((para, i) => (
                       <p key={i} style={{ fontSize: '1.1rem', lineHeight: '1.8', color: 'rgba(255,255,255,0.9)', fontWeight: 500 }}>
-                        {para}
+                        {stripEmojis(para)}
                       </p>
                     ))}
                   </div>
@@ -896,7 +1308,7 @@ export default function MeetReport({ session }) {
                     <div className="md:col-span-1">
                       <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--accent-emerald)', textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.15em' }}>Success Highlights</div>
                       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                        {insight.successes?.map((s, i) => <li key={i} style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)', marginBottom: 16, lineHeight: 1.5, display: 'flex', gap: 12 }}><span style={{ color: '#10b981', marginTop: 4 }}>●</span> {s}</li>)}
+                        {insight.successes?.map((s, i) => <li key={i} style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)', marginBottom: 16, lineHeight: 1.5, display: 'flex', gap: 12 }}><span style={{ color: '#10b981', marginTop: 4 }}>●</span> {stripEmojis(s)}</li>)}
                       </ul>
                     </div>
                     
@@ -922,7 +1334,7 @@ export default function MeetReport({ session }) {
                               </div>
                             </div>
                             <p className="text-slate-300 leading-relaxed text-sm font-medium italic">
-                              "{performer.insight}"
+                              "{stripEmojis(performer.insight)}"
                             </p>
                           </div>
                         </div>
@@ -933,7 +1345,7 @@ export default function MeetReport({ session }) {
                     <div className="md:col-span-1">
                       <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--accent-amber)', textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.15em' }}>Strategic Focus</div>
                       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                        {insight.gaps?.map((g, i) => <li key={i} style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)', marginBottom: 16, lineHeight: 1.5, display: 'flex', gap: 12 }}><span style={{ color: '#f59e0b', marginTop: 4 }}>●</span> {g}</li>)}
+                        {insight.gaps?.map((g, i) => <li key={i} style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.85)', marginBottom: 16, lineHeight: 1.5, display: 'flex', gap: 12 }}><span style={{ color: '#f59e0b', marginTop: 4 }}>●</span> {stripEmojis(g)}</li>)}
                       </ul>
                     </div>
                   </div>
@@ -955,9 +1367,9 @@ export default function MeetReport({ session }) {
 
                   {insight.recruitment_shoutout && (
                     <div style={{ marginTop: '4rem', background: 'linear-gradient(135deg, rgba(6,182,212,0.1), rgba(16,185,129,0.1))', padding: '2.5rem', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.1)', textAlign: 'center', pageBreakInside: 'avoid' }}>
-                      <div style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>🏊‍♂️ JOIN THE ENGINE ROOM!</div>
+                      <div style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>{!isPrintMode && '🏊‍♂️ '}JOIN THE ENGINE ROOM!</div>
                       <div style={{ fontSize: '1.1rem', fontWeight: 500, lineHeight: 1.6, maxWidth: '800px', margin: '0 auto' }}>
-                        {insight.recruitment_shoutout}
+                        {stripEmojis(insight.recruitment_shoutout)}
                       </div>
                     </div>
                   )}
@@ -988,8 +1400,8 @@ export default function MeetReport({ session }) {
             </div>
           ) : null}
 
-          {/* Ingestion Center - Always available to refine data */}
-          {(!insight || showIngestion) && !generatingInsight && (
+          {/* Report setup panel is now at the top of the page */}
+          {false && (
             <div className="glass-card p-12 no-print" style={{ borderLeft: '4px solid var(--accent-cyan)' }}>
               <div className="flex justify-between items-center mb-8">
                 <div>
@@ -1011,7 +1423,8 @@ export default function MeetReport({ session }) {
                 {[
                   { id: 'results', label: '📄 RESULTS FILE', icon: '📎' },
                   { id: 'url', label: '🌐 LIVE RESULTS URL', icon: '🔗' },
-                  { id: 'staff', label: '✍️ COACH NOTES', icon: '📝' }
+                  { id: 'staff', label: '✍️ COACH NOTES', icon: '📝' },
+                  { id: 'photo', label: '📷 TEAM PHOTO', icon: '📷' }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -1217,6 +1630,48 @@ export default function MeetReport({ session }) {
                     </div>
                   </div>
                 )}
+
+                {/* ── TEAM PHOTO TAB ─────────────────────────────────────────── */}
+                {activeIngestionTab === 'photo' && (
+                  <div className="animate-fade-in">
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', padding: '2rem', border: '2px dashed rgba(255,255,255,0.05)', borderRadius: '24px' }}>
+                      {meetPhoto ? (
+                        <div style={{ width: '100%' }}>
+                          <img
+                            src={meetPhoto}
+                            alt="Gala photo preview"
+                            style={{ width: '100%', maxHeight: '220px', objectFit: 'cover', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.08)' }}
+                          />
+                          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', justifyContent: 'center' }}>
+                            <label className="btn-premium-intel" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer' }}>
+                              {uploadingPhoto ? 'UPLOADING...' : '📷 REPLACE PHOTO'}
+                              <input type="file" hidden accept="image/*" onChange={handlePhotoUpload} disabled={uploadingPhoto} />
+                            </label>
+                            <button onClick={removePhoto} className="period-btn" style={{ borderColor: 'var(--accent-rose)', color: 'var(--accent-rose)' }}>REMOVE</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: '2.5rem', opacity: 0.2 }}>📷</div>
+                          <div style={{ textAlign: 'center' }}>
+                            <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Add a Gala Photo</h4>
+                            <p style={{ fontSize: '0.75rem', opacity: 0.5, marginBottom: '1.5rem' }}>
+                              Team shots, podium moments, action shots — displayed as a hero banner above the stats and included in the PDF report.
+                            </p>
+                            <label className="btn-premium-intel" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.15)', cursor: 'pointer', display: 'inline-block' }}>
+                              {uploadingPhoto ? (
+                                <span>UPLOADING...</span>
+                              ) : (
+                                <span>📷 UPLOAD PHOTO</span>
+                              )}
+                              <input type="file" hidden accept="image/*" onChange={handlePhotoUpload} disabled={uploadingPhoto} />
+                            </label>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {uploadStatus === 'error' && (
@@ -1232,7 +1687,7 @@ export default function MeetReport({ session }) {
       {insight && insight.historical_comparisons && insight.historical_comparisons.length > 0 && (
         <div className="glass-card mb-12" style={{ padding: '2.5rem', background: 'rgba(6, 182, 212, 0.02)', border: '1px solid rgba(6, 182, 212, 0.15)', boxShadow: '0 8px 32px 0 rgba(0, 212, 255, 0.03)', pageBreakInside: 'avoid' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '1.5rem' }}>
-            <span style={{ fontSize: '1.2rem' }}>🧬</span>
+            {!isPrintMode && <span style={{ fontSize: '1.2rem' }}>🧬</span>}
             <div style={{ fontSize: '0.75rem', fontWeight: 950, color: 'var(--accent-cyan)', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
               Gala Progression & Historical Growth Audit (Last 2 Years)
             </div>
