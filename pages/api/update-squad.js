@@ -1,11 +1,14 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAdminAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { 
+  if (!await requireAdminAuth(req, res)) return;
+
+  const {
     squadId, isSquad, targetMeets, targetSessionsPerWeek, targetTrainingPercent, 
     targetHoursPerWeek, requireWeekend, useOrLogic,
     health_weight_reliability, health_weight_progress, health_weight_competition, health_weight_volume,
@@ -34,12 +37,11 @@ export default async function handler(req, res) {
     if (typeof health_weight_competition === 'number') updateData.health_weight_competition = health_weight_competition;
     if (typeof health_weight_volume === 'number') updateData.health_weight_volume = health_weight_volume;
     if (typeof holidayAllowance === 'number') updateData.holiday_allowance = holidayAllowance;
-    if (age_based_criteria) updateData.age_based_criteria = age_based_criteria;
-    
-    if (struggling_consistency_threshold !== undefined) updateData.struggling_consistency_threshold = struggling_consistency_threshold;
-    if (struggling_volume_threshold !== undefined) updateData.struggling_volume_threshold = struggling_volume_threshold;
-    if (min_wa_points_threshold !== undefined) updateData.min_wa_points_threshold = min_wa_points_threshold;
-    if (exempt_volume_offset !== undefined) updateData.exempt_volume_offset = exempt_volume_offset;
+    if (age_based_criteria !== null && age_based_criteria !== undefined && typeof age_based_criteria === 'object' && !Array.isArray(age_based_criteria)) updateData.age_based_criteria = age_based_criteria;
+    if (typeof struggling_consistency_threshold === 'number') updateData.struggling_consistency_threshold = struggling_consistency_threshold;
+    if (typeof struggling_volume_threshold === 'number') updateData.struggling_volume_threshold = struggling_volume_threshold;
+    if (typeof min_wa_points_threshold === 'number') updateData.min_wa_points_threshold = min_wa_points_threshold;
+    if (typeof exempt_volume_offset === 'boolean') updateData.exempt_volume_offset = exempt_volume_offset;
     if (typeof swimmersPerLane === 'number') updateData.swimmers_per_lane = swimmersPerLane;
 
     const { data, error } = await supabase

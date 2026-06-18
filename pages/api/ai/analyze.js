@@ -1,9 +1,12 @@
 import { getServiceSupabase } from '../../../lib/supabase';
 import { getSwimmerDNA, getSquadDNA } from '../../../lib/ai-context';
 import { analyzeSwimmer, analyzeSquad } from '../../../lib/ai_engine';
+import { requireAuth } from '../../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAuth(req, res)) return;
 
     const { swimmerId, squadId, type = 'general', squadName, stats, strokeData, trend, swimmers, instructions } = req.body;
 

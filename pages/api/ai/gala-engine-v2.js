@@ -1,6 +1,7 @@
 import { getServiceSupabase } from '../../../lib/supabase';
 import { analyzeMeet } from '../../../lib/ai_engine';
 import { normalizeName, normalizeEvent, timeToSeconds, getPreferredName } from '../../../lib/analytics-utils';
+import { requireAuth } from '../../../lib/api-auth';
 
 export const config = {
   api: {
@@ -12,6 +13,8 @@ export const config = {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAuth(req, res)) return;
 
   const { meet, stats, results: bodyResults, pdfText, staffText, correction } = req.body;
   console.log("**************************************************");
@@ -101,90 +104,90 @@ export default async function handler(req, res) {
       .map(idx => allLines[idx])
       .join('\n');
 
-    // 3. JS-based Podium Detection (Guaranteed Redundancy Layer)
+    // 3. HY-TEK PDF Medal Extraction — deterministic strict parser
+    // Matches: "[1-3] Lastname, Firstname  Age  Tonbridge ..." on a single line.
+    // Requires team name "Tonbridge" to appear right after the swimmer's age on the SAME line,
+    // eliminating false positives from partial substring matches (e.g. "garfield" inside "ingarfield").
     const detectedMedals = [];
     let currentEvent = 'Unknown Event';
     const { data: allSwimmers } = await supabase.from('swimmers').select('id, full_name, known_as');
-    
-    allLines.forEach((line, i) => {
-      const lower = line.toLowerCase();
-      if (/^\s*EVENT\s+\d+/i.test(line)) {
-        currentEvent = line.trim();
-      }
 
-      const hasTonbridge = /tonbridge|tsc|tonb|ton /i.test(line);
-      const podiumMatch = line.trim().match(/^([123])[\.\s]/) || 
-                          line.trim().match(/^(Place|Pos|Rank)[:\s]*([123])/i) ||
-                          lower.includes('1st') || lower.includes('2nd') || lower.includes('3rd');
-      
-      if (hasTonbridge && podiumMatch && allSwimmers) {
-        let medalType = 'Bronze';
-        if (lower.includes('1st') || lower.includes('1.') || lower.includes('place 1') || lower.includes('pos 1')) medalType = 'Gold';
-        else if (lower.includes('2nd') || lower.includes('2.') || lower.includes('place 2') || lower.includes('pos 2')) medalType = 'Silver';
-        
-        // Improved name matching: Last name must match, plus either first name or initial
-        const normalizedLine = lower.replace(/[^a-z0-9]/g, ' ');
-        const swimmerMatch = allSwimmers.find(s => {
-          // Check both full name and known as name
-          const nameOptions = [s.full_name];
-          if (s.known_as) {
-            const lastName = s.full_name.split(/[,\s]+/).filter(w => w.length > 1)[0];
-            nameOptions.push(`${s.known_as} ${lastName}`);
+    if (pdfText) {
+      allLines.forEach((line, i) => {
+        // Track event headers (strip page-continuation parens)
+        const cleanLine = line.trim().replace(/^\(/, '').replace(/\)$/, '');
+        if (/^Event\s+\d+/i.test(cleanLine)) {
+          currentEvent = cleanLine;
+          return;
+        }
+
+        // Skip lines that belong to a non-Tonbridge team
+        if (/Orpington|Ojays/i.test(line)) return;
+
+        // Extract place + swimmer name + age from result lines starting with 1, 2, or 3.
+        // Does NOT require the team name on the same line — some PDF extractors push the
+        // team name onto a separate preceding line (e.g. " Tonbridge\n1 Garfield, Edward 11 ...").
+        const placeMatch = line.match(/^\s*([123])\s+([A-Za-z][A-Za-z'\-.]+),\s+([A-Za-z][A-Za-z'\-\s]*?)\s+(\d{1,2})\s+/);
+        if (!placeMatch) return;
+
+        // Confirm Tonbridge ownership: either inline on this line, or on the line directly above
+        const hasTonbridgeInline = /\bTonbridge\b/i.test(line);
+        const prevLine = i > 0 ? allLines[i - 1] : '';
+        const hasTonbridgePrev  = /^\s*Tonbridge\s*$/i.test(prevLine);
+        if (!hasTonbridgeInline && !hasTonbridgePrev) return;
+
+        const place = parseInt(placeMatch[1]);
+        const rawLast       = placeMatch[2].trim().toLowerCase();
+        const rawFirst      = placeMatch[3].trim().toLowerCase(); // full multi-word first name
+        const rawFirstWords = rawFirst.split(/\s+/);
+        const medalType = place === 1 ? 'Gold' : place === 2 ? 'Silver' : 'Bronze';
+
+        // Word-by-word first-name match: every PDF first-name word must be a prefix of the
+        // corresponding DB first-name word. Handles "Sum Yau" vs "Sum Carson" correctly,
+        // and still tolerates HY-TEK truncation (e.g. "Jon" matching "Jonathan").
+        const swimmerMatch = allSwimmers?.find(s => {
+          const fn = (s.full_name || '').toLowerCase();
+          let dbLast, dbAllFirst;
+          if (fn.includes(',')) {
+            const [last, rest] = fn.split(',').map(p => p.trim());
+            dbLast = last;
+            dbAllFirst = rest;
+          } else {
+            const parts = fn.split(/\s+/);
+            dbLast = parts[parts.length - 1];
+            dbAllFirst = parts.slice(0, -1).join(' ');
           }
-
-          return nameOptions.some(nameStr => {
-            const names = nameStr.toLowerCase().split(/[,\s]+/).filter(w => w.length > 1);
-            if (names.length < 2) return false;
-            
-            const lastName = names[0]; 
-            const firstName = names[1];
-            
-            const hasLast = normalizedLine.includes(lastName);
-            const hasFirst = normalizedLine.includes(firstName) || normalizedLine.includes(firstName[0] + ' ');
-            
-            if (hasLast && hasFirst) return true;
-            
-            const lastName2 = names[names.length - 1];
-            const firstName2 = names[0];
-            const hasLast2 = normalizedLine.includes(lastName2);
-            const hasFirst2 = normalizedLine.includes(firstName2) || normalizedLine.includes(firstName2[0] + ' ');
-            
-            return hasLast2 && hasFirst2;
-          });
+          if (dbLast !== rawLast) return false;
+          const dbFirstWords = dbAllFirst.split(/\s+/);
+          return rawFirstWords.every((w, i) => dbFirstWords[i] && dbFirstWords[i].startsWith(w));
         });
 
-        if (swimmerMatch) {
-          detectedMedals.push({
-            swimmer_name: getPreferredName(swimmerMatch),
-            medal_type: medalType,
-            event: currentEvent,
-            evidence: line.trim()
-          });
-        }
-      }
-    });
+        detectedMedals.push({
+          swimmer_name: swimmerMatch ? getPreferredName(swimmerMatch) : `${placeMatch[3].trim()} ${placeMatch[2].trim()}`,
+          swimmer_id: swimmerMatch?.id || null,
+          medal_type: medalType,
+          event: currentEvent,
+          evidence: `HY-TEK position ${place}: ${line.trim()}`
+        });
+      });
+    }
 
-    // 3. Structured Medal Check (from results table rank data)
-    results.forEach(r => {
-      if (r.rank && r.rank >= 1 && r.rank <= 3) {
-        const medalType = r.rank === 1 ? 'Gold' : r.rank === 2 ? 'Silver' : 'Bronze';
-        // Avoid duplicate if already found in PDF
-        const alreadyFound = detectedMedals.find(m => 
-          m.swimmer_name === r.swimmers?.full_name && 
-          m.event === r.event &&
-          m.medal_type === medalType
-        );
-        
-        if (!alreadyFound) {
+    // Fallback: derive medals from results table rank when PDF parser found nothing
+    // (e.g. non-HY-TEK PDF format or no PDF uploaded)
+    if (detectedMedals.length === 0) {
+      results.forEach(r => {
+        if (r.rank && r.rank >= 1 && r.rank <= 3) {
+          const medalType = r.rank === 1 ? 'Gold' : r.rank === 2 ? 'Silver' : 'Bronze';
           detectedMedals.push({
             swimmer_name: getPreferredName(r.swimmers),
+            swimmer_id: r.swimmer_id || null,
             medal_type: medalType,
             event: r.event,
-            evidence: `Rank ${r.rank} detected in race results table.`
+            evidence: `Rank ${r.rank} from results table.`
           });
         }
-      }
-    });
+      });
+    }
 
     // === RELAY MEDAL DETECTION ===
     // Parses HY-TEK relay event blocks to find Tonbridge finishing 1st, 2nd, or 3rd.
@@ -279,6 +282,13 @@ export default async function handler(req, res) {
       }
     }
     console.log(`>>> RELAY MEDALS: ${relayMedals.length} relay team medals detected.`);
+
+    const relayMedalCounts = {
+      gold:   relayMedals.filter(m => m.medal_type === 'Gold').length,
+      silver: relayMedals.filter(m => m.medal_type === 'Silver').length,
+      bronze: relayMedals.filter(m => m.medal_type === 'Bronze').length,
+    };
+    relayMedalCounts.total = relayMedalCounts.gold + relayMedalCounts.silver + relayMedalCounts.bronze;
 
     console.log(`>>> FINAL GALA ENGINE: Captured ${detectedMedals.length} medals (Text + Structured).`);
 
@@ -435,52 +445,40 @@ export default async function handler(req, res) {
       }
     }
 
-    // Dual-Layer Validated Medal Parser
-    // Regex groups: 1=Place, 2=Lastname, 3=Firstname (Hy-Tek "Lastname, Firstname Age" format)
-    const tonbridgeMedals = { gold: 0, silver: 0, bronze: 0 };
-    const detectedMedalists = [];
+    // Derive individual medal counts from detectedMedals (PDF scan + DB rank data, already computed above).
+    // Exclude relay legs — they are tracked separately in relayMedals.
+    // De-duplicate: one medal per swimmer+event combination (prefer Final over Heat where both exist).
+    const individualMedals = detectedMedals.filter(m => !m.is_relay);
+    const dedupedMedalMap = new Map();
+    individualMedals.forEach(m => {
+      // Normalize both fields so PDF event headers and DB event strings collapse to the same key
+      const key = `${normalizeName(m.swimmer_name)}||${normalizeEvent(m.event)}`;
+      const existing = dedupedMedalMap.get(key);
+      // Prefer DB-rank evidence over PDF-scan (more authoritative); otherwise keep first found
+      const isDbRank = (m.evidence || '').toLowerCase().includes('rank');
+      if (!existing || isDbRank) {
+        dedupedMedalMap.set(key, m);
+      }
+    });
+    const dedupedMedals = Array.from(dedupedMedalMap.values());
 
-    if (pdfText) {
-      const lines = pdfText.split('\n');
-      lines.forEach(line => {
-        const match = line.match(/^\s*\*?([123])\b\s+([A-Za-z\s'-]+),\s+([^0-9]+?)(?=\s+\d)/);
-
-        if (match) {
-          const place      = parseInt(match[1], 10);
-          const lastName   = match[2].trim().toLowerCase();
-          const firstName  = match[3].trim().toLowerCase().split(' ')[0]; // first word only
-
-          // Layer 1: name appears in this meet's DB results
-          const isTonbridge = bodyResults && bodyResults.some(r => {
-            const dbName    = r.swimmers?.full_name?.toLowerCase() || '';
-            const dbKnownAs = r.swimmers?.known_as?.toLowerCase() || '';
-            const hasLast  = dbName.includes(lastName);
-            const hasFirst = dbName.includes(firstName) || dbKnownAs.includes(firstName);
-            return hasLast && hasFirst;
-          });
-
-          // Layer 2: line explicitly mentions Tonbridge
-          const hasTonbridgeString = line.toLowerCase().includes('tonbridge');
-
-          if (isTonbridge || hasTonbridgeString) {
-            const cleanName = match[3].trim() + ' ' + match[2].trim(); // Firstname Lastname
-
-            if (place === 1) {
-              tonbridgeMedals.gold += 1;
-              detectedMedalists.push({ name: cleanName, place, medal_type: 'Gold' });
-            } else if (place === 2) {
-              tonbridgeMedals.silver += 1;
-              detectedMedalists.push({ name: cleanName, place, medal_type: 'Silver' });
-            } else if (place === 3) {
-              tonbridgeMedals.bronze += 1;
-              detectedMedalists.push({ name: cleanName, place, medal_type: 'Bronze' });
-            }
-          }
-        }
-      });
-    }
+    const tonbridgeMedals = {
+      gold:   dedupedMedals.filter(m => m.medal_type === 'Gold').length,
+      silver: dedupedMedals.filter(m => m.medal_type === 'Silver').length,
+      bronze: dedupedMedals.filter(m => m.medal_type === 'Bronze').length,
+    };
     tonbridgeMedals.total = tonbridgeMedals.gold + tonbridgeMedals.silver + tonbridgeMedals.bronze;
-    console.log(`>>> MEDAL PARSER: ${tonbridgeMedals.gold}G / ${tonbridgeMedals.silver}S / ${tonbridgeMedals.bronze}B from ${detectedMedalists.length} clean Hy-Tek lines.`);
+
+    // detectedMedalists: swimmer+event list passed into AI prompt and returned to client
+    const detectedMedalists = dedupedMedals.map(m => ({
+      swimmer_name: m.swimmer_name,
+      swimmer_id: m.swimmer_id || null,
+      place: m.medal_type === 'Gold' ? 1 : m.medal_type === 'Silver' ? 2 : 3,
+      medal_type: m.medal_type,
+      event: m.event
+    }));
+
+    console.log(`>>> MEDAL COUNTER: ${tonbridgeMedals.gold}G / ${tonbridgeMedals.silver}S / ${tonbridgeMedals.bronze}B from ${dedupedMedals.length} de-duped individual medals (PDF + DB rank).`);
 
     // Prepare Meet DNA
     const dna = {
@@ -555,7 +553,9 @@ export default async function handler(req, res) {
     if (analysis) {
       analysis.historical_comparisons = comparisons;
       analysis.relay_medals = relayMedals;
+      analysis.relay_medal_counts = relayMedalCounts;
       analysis.individual_medal_counts = tonbridgeMedals;
+      analysis.detected_medalists = detectedMedalists;
     }
 
     // Save to ai_reports

@@ -51,7 +51,7 @@ export async function getServerSideProps(context) {
   const [sessionsData, exemptions, meets] = await Promise.all([
     fetchAll('sessions', '*'),
     supabase.from('club_exemptions').select('*'),
-    supabase.from('meets').select('*'),
+    supabase.from('meets').select('*').gte('date', new Date(Date.now() - 450 * 86400000).toISOString().split('T')[0]),
   ]);
 
   return { 
@@ -446,12 +446,14 @@ export default function SquadDetail({
       const browserStorage = {};
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        browserStorage[key] = localStorage.getItem(key);
+        if (key && (key.startsWith('sb-') || key === 'print-insight-cache' || key === 'print-report-config')) {
+          browserStorage[key] = localStorage.getItem(key);
+        }
       }
 
       const res = await fetch('/api/export-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           squadId: squad.id,
           squadName: squad.name,

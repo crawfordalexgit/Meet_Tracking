@@ -49,24 +49,57 @@ export default function SwimmersRegistry({ session }) {
         return all;
       };
 
-      const [swRes, results, attendance, sessions, exRes, memberships, rankRes] = await Promise.all([
+      // Parallel page fetch: fetch first page + count together, then remaining pages in parallel
+      const fetchParallel = async (table, select = '*', filter = null) => {
+        const pageSize = 1000;
+        let q0 = supabase.from(table).select(select, { count: 'exact' }).range(0, pageSize - 1);
+        if (filter) q0 = filter(q0);
+        const { data: firstPage, count } = await q0;
+        if (!firstPage || firstPage.length === 0) return [];
+        if (!count || count <= pageSize) return firstPage;
+        const remaining = await Promise.all(
+          Array.from({ length: Math.ceil((count - pageSize) / pageSize) }, (_, i) => {
+            let q = supabase.from(table).select(select).range((i + 1) * pageSize, (i + 2) * pageSize - 1);
+            if (filter) q = filter(q);
+            return q.then(r => r.data || []);
+          })
+        );
+        return [...firstPage, ...remaining.flat()];
+      };
+
+      // Use 180 days for results (reliability calc only) — peak WA comes from swimmer_pbs
+      const reliabilityWindow = new Date(new Date() - 180 * 86400000).toISOString();
+
+      const [swRes, results, attendance, sessions, exRes, memberships, pbsRes] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
-        fetchPaged('results', 'swimmer_id, wa_pts, date, meets(id,name,type)', q => q.gte('date', y1ago)),
-        fetchPaged('training_attendance', '*', q => q.gte('date', y1ago)),
+        fetchParallel('results', 'swimmer_id, date', q => q.gte('date', reliabilityWindow)),
+        fetchParallel('training_attendance', '*', q => q.gte('date', y1ago)),
         fetchPaged('sessions', '*'),
         supabase.from('club_exemptions').select('*'),
-        fetchPaged('session_memberships', '*'),
-        supabase.from('rankings').select('swimmer_id, district')
+        fetchParallel('session_memberships', '*'),
+        supabase.from('swimmer_pbs').select('swimmer_id, wa_pts'),
       ]);
 
       if (swRes.error) throw swRes.error;
 
-      const enrichedSwimmers = (swRes.data || []).map(swimmer => {
-        const swimmerResults = results.filter(r => r.swimmer_id === swimmer.id);
-        const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
+      // Pre-group by swimmer_id once — avoids O(n×m) filtering inside the map
+      const resultsBySwimmer = {};
+      (results || []).forEach(r => { (resultsBySwimmer[r.swimmer_id] ||= []).push(r); });
+      const membershipsBySwimmer = {};
+      (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
+      const exemptions = exRes.data || [];
+      // Peak WA per swimmer from pbs table (best time across all events/history)
+      const peakWABySwimmer = {};
+      (pbsRes.data || []).forEach(p => {
+        if ((p.wa_pts || 0) > (peakWABySwimmer[p.swimmer_id] || 0)) peakWABySwimmer[p.swimmer_id] = p.wa_pts;
+      });
+      const now = new Date();
+      const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
 
-        const now = new Date();
-        const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
+      const enrichedSwimmers = (swRes.data || []).map(swimmer => {
+        const swimmerResults = resultsBySwimmer[swimmer.id] || [];
+        const peakWA = peakWABySwimmer[swimmer.id] || 0;
+
         const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : (swimmer.date_of_birth ? targetYear - new Date(swimmer.date_of_birth).getFullYear() : null);
 
         const districts = [];
@@ -87,8 +120,8 @@ export default function SwimmersRegistry({ session }) {
           sessions,
           swimmerResults,
           period,
-          exRes.data || [],
-          memberships.filter(m => m.swimmer_id === swimmer.id)
+          exemptions,
+          membershipsBySwimmer[swimmer.id] || []
         );
         
         return { 

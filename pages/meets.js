@@ -17,21 +17,22 @@ export default function MeetManagement({ session }) {
   const [isConsolidateOpen, setIsConsolidateOpen] = useState(false);
 
   const [search, setSearch] = useState('');
-  const [filterTonbridge, setFilterTonbridge] = useState(true);
+  const [filterTonbridge, setFilterTonbridge] = useState(false);
 
   const fetchMeets = async (activeSearch = search, activeFilter = filterTonbridge) => {
     setLoading(true);
     try {
       let query = supabase
         .from('meets')
-        .select(activeFilter ? '*, results!inner(id)' : '*, results(id)');
+        .select('*');
       
       const searchStr = activeSearch?.trim();
       if (searchStr) {
         query = query.or(`name.ilike.%${searchStr}%,license.ilike.%${searchStr}%,course.ilike.%${searchStr}%,level.ilike.%${searchStr}%`);
       }
       
-      query = query.order('date', { ascending: false });
+      const cutoff = new Date(Date.now() - 450 * 86400000).toISOString().split('T')[0];
+      query = query.gte('date', cutoff).order('date', { ascending: false });
       
       const { data, error } = await query;
       if (error) throw error;
@@ -86,7 +87,7 @@ export default function MeetManagement({ session }) {
   const filteredMeets = useMemo(() => {
     let result = meets;
     if (filterTonbridge) {
-      result = result.filter(m => m.results && m.results.length > 0);
+      result = result.filter(m => m.pdf_text || m.pdf_url || m.name?.toLowerCase().includes('tonbridge'));
     }
     if (!search.trim()) return result;
     const query = search.toLowerCase();

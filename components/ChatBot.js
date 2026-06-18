@@ -131,9 +131,9 @@ export default function ChatBot({ clubDNA }) {
             ))}
           </div>
           <form onSubmit={handleSubmit} className="chatbot-input-area">
-            <input 
-              type="text" 
-              placeholder="Ask a question..." 
+            <input
+              type="text"
+              placeholder="Ask a question..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={loading}
@@ -142,6 +142,9 @@ export default function ChatBot({ clubDNA }) {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
             </button>
           </form>
+          <p style={{ margin: '0', padding: '0.5rem 1.2rem 0.75rem', fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)', fontStyle: 'italic', lineHeight: 1.4 }}>
+            <em>Note: The Assistant's performance analysis is strictly algorithmic and does not constitute medical or definitive coaching directives.</em>
+          </p>
         </div>
       )}
 

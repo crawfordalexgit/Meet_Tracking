@@ -1,15 +1,32 @@
 import puppeteerCore from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
+import { requireAuth } from '../../lib/api-auth';
+
+const SAFE_PATH_RE = /^\/[a-zA-Z0-9\-_/[\]?=&.+,% ]*$/;
+const ALLOWED_CLIENT_AUTH_KEYS = /^(sb-[a-zA-Z0-9\-]+-auth-token|print-insight-cache|print-report-config)$/;
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
+    if (!await requireAuth(req, res)) return;
+
     const { targetPath, clientAuth } = req.body;
 
     if (!targetPath) {
         return res.status(400).json({ error: 'Missing targetPath parameter' });
+    }
+
+    let decodedPath;
+    try {
+        decodedPath = decodeURIComponent(targetPath);
+    } catch {
+        return res.status(400).json({ error: 'Invalid targetPath encoding' });
+    }
+
+    if (!SAFE_PATH_RE.test(decodedPath) || decodedPath.includes('..') || decodedPath.includes('://')) {
+        return res.status(400).json({ error: 'Invalid targetPath' });
     }
 
     let browser = null;
@@ -42,13 +59,19 @@ export default async function handler(req, res) {
 
         const page = await browser.newPage();
 
-        // CRITICAL FIX: Inject the active auth token into Puppeteer's localStorage so it passes RLS
-        if (clientAuth) {
-            await page.evaluateOnNewDocument((authData) => {
-                for (const key in authData) {
-                    localStorage.setItem(key, authData[key]);
-                }
-            }, clientAuth);
+        // Inject auth tokens into Puppeteer's localStorage so pages pass RLS
+        if (clientAuth && typeof clientAuth === 'object') {
+            const safeAuth = {};
+            for (const key of Object.keys(clientAuth)) {
+                if (ALLOWED_CLIENT_AUTH_KEYS.test(key)) safeAuth[key] = clientAuth[key];
+            }
+            if (Object.keys(safeAuth).length > 0) {
+                await page.evaluateOnNewDocument((authData) => {
+                    for (const key in authData) {
+                        localStorage.setItem(key, authData[key]);
+                    }
+                }, safeAuth);
+            }
         }
 
         // 2. Navigate (with dev HMR safety)

@@ -1,9 +1,12 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAdminAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAdminAuth(req, res)) return;
 
   const { coachId } = req.body;
   
@@ -13,7 +16,12 @@ export default async function handler(req, res) {
 
   try {
     const supabase = getServiceSupabase();
-    
+
+    const { data: targetProfile } = await supabase.from('profiles').select('role').eq('id', coachId).single();
+    if (!targetProfile || targetProfile.role !== 'coach') {
+      return res.status(403).json({ error: 'Cannot delete this user' });
+    }
+
     // Detach coach from any AI feedback records to prevent foreign key constraint violations
     // (The schema.sql defines this without ON DELETE CASCADE or SET NULL)
     const { error: detachError } = await supabase

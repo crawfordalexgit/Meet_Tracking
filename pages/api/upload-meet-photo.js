@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAuth } from '../../lib/api-auth';
 
 export const config = {
   api: {
@@ -7,8 +8,13 @@ export const config = {
   },
 };
 
+const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAuth(req, res)) return;
 
   try {
     // Resolve formidable across v2/v3
@@ -27,10 +33,18 @@ export default async function handler(req, res) {
     if (!file) return res.status(400).json({ error: 'No file provided' });
     if (!meetId) return res.status(400).json({ error: 'No meetId provided' });
 
-    // Validate it's an image
-    const mimeType = file.mimetype || 'image/jpeg';
-    if (!mimeType.startsWith('image/')) {
-      return res.status(400).json({ error: 'Only image files are supported' });
+    if (!UUID_RE.test(meetId)) {
+      return res.status(400).json({ error: 'Invalid meetId' });
+    }
+
+    const mimeType = file.mimetype || '';
+    const fileExt = (file.originalFilename?.split('.').pop() || '').toLowerCase();
+
+    if (!mimeType.startsWith('image/') || mimeType === 'image/svg+xml') {
+      return res.status(400).json({ error: 'Only raster image files are supported' });
+    }
+    if (!ALLOWED_EXTENSIONS.has(fileExt)) {
+      return res.status(400).json({ error: 'File extension not allowed' });
     }
 
     const supabase = getServiceSupabase();
@@ -40,7 +54,6 @@ export default async function handler(req, res) {
 
     // Read file buffer and build storage path
     const fileBuffer = fs.readFileSync(file.filepath);
-    const fileExt = (file.originalFilename?.split('.').pop() || 'jpg').toLowerCase();
     const storagePath = `${meetId}/gala-photo.${fileExt}`;
 
     // Upload (upsert so re-uploads replace the previous photo)

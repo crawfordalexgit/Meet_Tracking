@@ -17,12 +17,13 @@ You will receive a "Meet DNA" object containing:
 - Meet Metadata (Name, Date, License, Course)
 - Aggregate Stats (Unique Swimmers, Total Races, PB Count, PB Rate, Avg WA Points)
 - Detailed Results (Swimmer Name, Squad, Event, Time, WA Points, PB Status)
-- **Detected Medals**: A list of podium finishes already identified by the engine. You MUST report these.
+- **Detected Medals**: A list of individual podium finishes already identified by the engine. You MUST report these.
+- **Relay Medals** (`relay_medals` array): Podium finishes by Tonbridge relay teams. Each entry has `event`, `medal_type`, `relay_label` (A/B/C), and `swimmers` (array of names). If this array is non-empty, you MUST write about the relay team(s) in the report.
 - **PDF Evidence (Optional)**: Extracted text from official gala results for additional context.
 - **historical_comparisons**: An array containing comparative statistics for this same meet from the last 2 years (e.g. 2024, 2023). Contains fields: `name`, `date`, `total_swimmers`, `total_races`, `medal_counts` (gold/silver/bronze/total), `pb_pct`, `avg_wa_pts`.
 
 ## Balanced Analysis Mandate
-- **DOUBLE-SOURCE VALIDATION**: You must treat the `PRIMARY RESULTS` (Database) and `OFFICIAL RANKINGS EVIDENCE` (PDF) as **equal partners**.
+- **SINGLE SOURCE OF TRUTH — MEDALS**: The `detected_medalists` array computed by the backend engine is the ONLY authoritative source for medal winners. The `pdf_evidence` is provided for narrative context ONLY — you MUST NOT use it to identify additional medalists or override the list.
 - **MEDAL PRECISION (HIGHEST PRIORITY)**: You MUST report the medals identified by the engine. 
     - **EXCLUSIVE SOURCE OF TRUTH**: Use the `medal_counts` object in your data as your ONLY source for the totals in your summary.
     - **EXCLUSIVE MEDALISTS LIST**: Use the `detected_medalists` array provided in the data to list the specific names. Cross-reference their names with the database records to find their events.
@@ -31,8 +32,13 @@ You will receive a "Meet DNA" object containing:
     - [MANDATORY]: Your narrative MUST align perfectly with the numerical stats provided in [DNA.stats]. If the stats say there are 6 PBs, your summary must reflect that. Do not hallucinate different totals.
     - [MANDATORY]: The first paragraph must name the meet: [DNA.metadata.name].
     - [MANDATORY]: Celebrate ALL Medalists and Finalists.
-    - **MANDATORY**: List the names and events of ALL medalists in the `successes` section.
+    - **MANDATORY**: In `successes`, give one summary line with the medal totals, then name only Gold medalists and medal+PB doubles. Silver/Bronze detail lives in the results table — do not repeat it all here.
     - **INFOGRAPHIC DATA BINDING (CRITICAL)**: The frontend podium infographic reads from the `medal_counts` object in your JSON output. You MUST copy the exact integer values from the provided backend data directly into your final JSON response object. The numerical values in your text summary and your `medal_counts` JSON object MUST match perfectly (e.g., if you write "7 Golds" in the text, your JSON must output `"gold": 7`).
+    - **MANDATORY QA CHECK (CHAIN OF THOUGHT)**: Before writing the report, you MUST explicitly tally the medals you are about to list in the narrative. Your internal count MUST perfectly match the `medal_counts` provided in the DNA. If it does not match, you must re-evaluate the raw results and PDF evidence to correct your list before generating the final JSON.
+- **RELAY MEDALS (MANDATORY IF PRESENT)**: If `relay_medals` contains any entries, you MUST:
+    - Name the relay event and medal type in Paragraph 2 of the summary (elite achievements paragraph).
+    - List each relay medal in the `successes` section, naming the team members (from `relay_medals[].swimmers`) and the event.
+    - Note that relay medals are SEPARATE from the individual `medal_counts` — do NOT add relay medals to the individual gold/silver/bronze totals when referencing `medal_counts`.
 - **Targeted Athlete Recognition (EXCELLENCE FOCUS)**: 
     - **PB CELEBRATION (HIGH PRIORITY)**: Every result with `is_pb: true` is a major achievement. You MUST highlight the most significant PBs (e.g. large time drops or multiple PBs by one swimmer) in the `successes` and `standout_performers` sections.
     - **Pathway Benchmarking**: You are provided with a `benchmarks` array containing "National Top 40", "Regional Top 30", and "County Top 10" target times.
@@ -40,19 +46,7 @@ You will receive a "Meet DNA" object containing:
     - If a swimmer's time is FASTER than a benchmark, celebrate it as a major ranking achievement!
     - Example: "Arlo's new PB in the 100m Breaststroke is fast enough for a Top 40 National ranking!"
 - **Synthesized Storytelling**: If a swimmer has `is_pb: true` AND a medal, this is the "Ultimate Performance" and must be your top highlight.
-- **Data Pattern Recognition (PDF)**:
-    - **EVENT CONTEXT**: Look for lines like "Event 204 Boys 100m Free" above the results. You MUST associate subsequent result lines with this event until the next "Event" header appears.
-    - Look for lines starting with a number (1., 2., 3., or just 1, 2, 3) followed by a Name and then 'Tonbridge' or 'TSC'. 
-    - Also look for 'Place: 1', 'Pos: 1', or 'Rank: 1' markers.
-    - Example: `1. Zachary White 16 Tonbridge 33.29` -> **GOLD MEDAL / 1st PLACE**
-    - Example: `2. Eloise Lonergan 10 Tonbridge 37.91` -> **SILVER MEDAL / 2nd PLACE**
-    - Example: `3. Rory Campbell-White 15 Tonbridge 32.04` -> **BRONZE MEDAL / 3rd PLACE**
-    - **CRITICAL**: Sometimes the '1.' is at the end of the previous line or the very start of the next. Scan the immediate context.
-    - **END-OF-LINE PLACINGS**: In some PDFs, the placing is the very last number on the line, and the line starts with the club name and swimmer age.
-    - Example: `Tonbridge Swimming Club 12 Kulik, Ivan 1:14.12 1:16.46 1` -> **GOLD MEDAL / 1st PLACE** (The '1' at the absolute end of the line is the place).
-    - Example: `Tonbridge Swimming Club 10 Owen, Elliot 1:34.52 1:40.03 2` -> **SILVER MEDAL / 2nd PLACE** (The '2' at the absolute end of the line is the place).
-    - **CRITICAL**: Do NOT confuse the swimmer's age (e.g., 9, 10, 11, 12, 13) immediately following the club name with their placing. ALWAYS look to the final number on the row for the true rank if the line starts with a club name.
-    - If a swimmer has a database result AND a medal in the PDF, combine these (e.g., 'A personal best time that earned them a Silver medal!').
+- **PDF Evidence — Context Only**: The `pdf_evidence` is provided so you can understand the narrative of the meet (number of competitors, event names, etc.). You MUST NOT attempt to identify medal winners from the PDF. Medal detection is handled by the backend engine before this prompt runs. Trust `detected_medalists` completely.
 - **Moments of Brilliance (QUALITY OVER QUANTITY)**: 
     - **NO MAN LEFT BEHIND IS CANCELLED**: We no longer aim to list every single swimmer. This report should focus on **MOMENTS OF BRILLIANCE**. 
     - Only include swimmers in the `standout_performers` section if they achieved at least ONE of the following:
@@ -71,13 +65,7 @@ You will receive a "Meet DNA" object containing:
     - If `staff_context` contains SCALE DATA (e.g. number of clubs, total swimmers in region, entry counts), you MUST use these specific numbers to provide perspective.
     - Example: "In a massive field of 38,000 regional swimmers, making a final is an elite achievement..."
     - Treat these notes as the "Lead Story" for the report.
-- **Podium Identification & Medal Precision**: [CRITICAL] You must be meticulous with the "Place" column in results PDFs.
-   - **ANTI-HALLUCINATION MEDAL RULES (CRITICAL)**:
-     - You must NEVER award a medal based on a squashed or fused number string (e.g., '1:40.033').
-     - You must NEVER confuse a swimmer's age (e.g., '13 Year Olds') or the meet level (e.g., 'L3 Meet') for a placing.
-     - ONLY award a Gold, Silver, or Bronze medal if the placing is cleanly separated at the absolute start of the line (e.g., '1 Owen, Elliot' or '3 Boeve, Ethan').
-     - If there is ANY ambiguity in the text, DO NOT award a medal. Default to praising their Personal Bests (PBs) from the database instead.
-     - NEVER award "Bronze" to everyone. Medals are rare.
+- **Medal Attribution — ABSOLUTE RULE**: You MUST ONLY list swimmers who appear in `detected_medalists`. Do NOT add any swimmer to the medal list based on the PDF, your training data, or any other source. If a swimmer is not in `detected_medalists`, they did not medal — do not mention them in a medal context regardless of what you see in `pdf_evidence`. The engine is authoritative; you are not.
 - **WA POINTS EXPLANATION (MANDATORY)**: Since this report is for parents, you MUST include a brief explanation of what "World Aquatics (WA) Points" represent.
 - **NAME VARIATIONS (CRITICAL)**: Names in PDFs often appear as "Day, William" or "DAY William", but our records use "William Day". You MUST match these intelligently.
 - **PREFERRED NAMES (MANDATORY)**: You MUST ALWAYS use the swimmer's preferred name provided in the DNA (e.g. "James Wong" instead of "Leong Chiu Wong"). Never use just a first name or just a last name in your narrative summaries.
@@ -87,9 +75,16 @@ Return a strictly valid JSON object with the following structure:
 
 ```json
 {
+  "_qa_audit": {
+    "target_gold": "<Insert gold count from DNA.stats>",
+    "target_silver": "<Insert silver count from DNA.stats>",
+    "target_bronze": "<Insert bronze count from DNA.stats>",
+    "listed_medals_verification": "<List exactly which swimmers make up the count to prove it matches the targets>"
+  },
   "summary": "MANDATORY: 4 substantial, narrative paragraphs. SEPARATE EACH PARAGRAPH WITH TWO NEWLINES (\\n\\n). Paragraph 1: Atmosphere/Club presence AND SCALE/CONTEXT (use the regional statistics from staff_context to set the stage). Paragraph 2: Elite achievements (Medals/Finals). Paragraph 3: Development & Resilience (PBs/Near Misses) AND a detailed Year-over-Year Comparative Growth check (using the `historical_comparisons` array, describe how this year's squad presence, medal count, and average World Aquatics points compare directly to the same gala over the last 2 years, demonstrating if the club is in growth, stability, or decline). Paragraph 4: Strategic takeaway and warm thanks to staff/helpers. Integrate specific names and stats directly into the narrative. Be descriptive and celebratory.",
   "successes": [
-    "MANDATORY: List all medalists (Gold/Silver/Bronze) with their events.",
+    "MANDATORY: One summary line for individual medals — e.g. '13 Golds, 11 Silvers, 13 Bronzes (37 individual medals)'. Then name ONLY Gold medalists and any swimmer who won a medal AND set a PB in the same event. Do NOT list every single Silver or Bronze winner here — the table already shows them.",
+    "MANDATORY: If 'relay_medals' is non-empty, list each relay team medal here with just the event and medal type (e.g., 'GOLD — Mixed 4x100m Freestyle Relay'). Do NOT list the individual swimmer names here — the relay podium section on the frontend already displays them.",
     "MANDATORY: List all Finalists with their events.",
     "MANDATORY: If 'bubble_analysis' contains data, YOU MUST include it here (e.g., 'Kieran Crawford narrowly missed the 50m Breaststroke final by just 0.12s!').",
     "List of other significant PBs or achievements."

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'next/router';
@@ -63,6 +63,7 @@ export default function Settings({ session, scmApiKey }) {
   const [gapStatus, setGapStatus] = useState(null);
   const [isReconcilingPbs, setIsReconcilingPbs] = useState(false);
   const [pbSyncStatus, setPbSyncStatus] = useState(null);
+  const [masterSyncState, setMasterSyncState] = useState({ active: false, step: 0, message: '' });
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('coach');
@@ -84,6 +85,8 @@ export default function Settings({ session, scmApiKey }) {
   // Timetable
   const [timetableSessions, setTimetableSessions] = useState([]);
   const [editingSession, setEditingSession] = useState(null); // { id, name, day_of_week, start_time, end_time, location, lanes_allocated, is_active }
+  const [sharedSessionsConfig, setSharedSessionsConfig] = useState({});
+  const [editingSessionSplits, setEditingSessionSplits] = useState({});
   const [timetableStatus, setTimetableStatus] = useState(null);
   const [showAddSession, setShowAddSession] = useState(false);
   const [newSession, setNewSession] = useState({ name: '', day_of_week: 'Monday', start_time: '', end_time: '', location: '', lanes_allocated: 6 });
@@ -97,6 +100,23 @@ export default function Settings({ session, scmApiKey }) {
     }
     checkAdmin();
   }, [session, router]);
+
+  const handleMasterSync = async () => {
+    setMasterSyncState({ active: true, step: 1, message: 'Phase 1: Syncing SCM Baseline...' });
+    try {
+      await fetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
+
+      setMasterSyncState({ active: true, step: 2, message: 'Phase 2: Syncing Training Attendance...' });
+      await fetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
+
+      setMasterSyncState({ active: false, step: 3, message: 'Daily Master Sync Complete! System is up to date.' });
+      loadData();
+      setTimeout(() => setMasterSyncState({ active: false, step: 0, message: '' }), 5000);
+    } catch (error) {
+      console.error(error);
+      setMasterSyncState({ active: false, step: 0, message: `Error: ${error.message}` });
+    }
+  };
 
   const handleSyncAttendance = async () => {
     setAttendanceSyncStatus({ type: 'info', text: 'Syncing Training Attendance...' });
@@ -203,7 +223,7 @@ export default function Settings({ session, scmApiKey }) {
       supabase.from('profiles').select('*').order('email'),
       supabase.from('squads').select('*').order('name'),
       supabase.from('coach_squads').select('*'),
-      supabase.from('meets').select('*').order('date', { ascending: false }),
+      supabase.from('meets').select('*').gte('date', new Date(Date.now() - 450 * 86400000).toISOString().split('T')[0]).order('date', { ascending: false }),
       supabase.from('swimmers').select('*, squads(name)').order('full_name'),
       supabase.from('club_exemptions').select('*').order('start_date', { ascending: false }),
       supabase.from('sessions').select('*').order('day_of_week').order('start_time')
@@ -215,7 +235,17 @@ export default function Settings({ session, scmApiKey }) {
     if (meetsRes.data) setMeets(meetsRes.data);
     if (swimmersRes.data) setSwimmers(swimmersRes.data);
     if (exemptRes.data) setClubExemptions(exemptRes.data);
-    if (sessionsRes.data) setTimetableSessions(sessionsRes.data);
+    if (sessionsRes.data) {
+      const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const normalized = sessionsRes.data.map(s => {
+        if (!s.day_of_week) {
+          const match = DAY_NAMES.find(d => s.name?.toLowerCase().includes(d.toLowerCase()));
+          if (match) return { ...s, day_of_week: match };
+        }
+        return s;
+      });
+      setTimetableSessions(normalized);
+    }
 
     // Fetch custom AI settings from database
     try {
@@ -229,6 +259,20 @@ export default function Settings({ session, scmApiKey }) {
       }
     } catch (e) {
       console.warn("No custom AI settings found in DB, using defaults.");
+    }
+
+    // Fetch shared sessions config from database
+    try {
+      const { data: sharedRow } = await supabase
+        .from('ai_brain_settings')
+        .select('value')
+        .eq('key', 'shared_sessions_config')
+        .single();
+      if (sharedRow && sharedRow.value) {
+        setSharedSessionsConfig(sharedRow.value);
+      }
+    } catch (e) {
+      console.warn("No shared sessions config found in DB.");
     }
   };
 
@@ -258,16 +302,59 @@ export default function Settings({ session, scmApiKey }) {
   // ─── Timetable CRUD ───────────────────────────────────────────────────────
   const DAY_ORDER = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 
+  const startEditingSession = (sess) => {
+    setEditingSession({
+      id: sess.id,
+      name: sess.name,
+      day_of_week: sess.day_of_week,
+      start_time: sess.start_time || '',
+      end_time: sess.end_time || '',
+      location: sess.location || '',
+      lanes_allocated: sess.lanes_allocated,
+      is_active: !!sess.is_active,
+      scm_guid: sess.scm_guid
+    });
+    const existingSplits = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name] || {};
+    setEditingSessionSplits(existingSplits);
+  };
+
   const saveSession = async () => {
     if (!editingSession) return;
     setTimetableStatus({ type: 'info', text: 'Saving...' });
-    const { id, ...fields } = editingSession;
+    const { id, scm_guid, ...fields } = editingSession;
     const { error } = await supabase.from('sessions').update(fields).eq('id', id);
     if (error) {
       setTimetableStatus({ type: 'error', text: error.message });
     } else {
+      // Update shared sessions config
+      const updatedConfig = { ...sharedSessionsConfig };
+      const hasSplits = Object.values(editingSessionSplits).some(val => val > 0);
+      
+      if (hasSplits) {
+        updatedConfig[id] = editingSessionSplits;
+      } else {
+        delete updatedConfig[id];
+        if (scm_guid) delete updatedConfig[scm_guid];
+        delete updatedConfig[editingSession.name];
+      }
+
+      const { error: settingsError } = await supabase
+        .from('ai_brain_settings')
+        .upsert({
+          key: 'shared_sessions_config',
+          value: updatedConfig,
+          updated_at: new Date().toISOString()
+        });
+
+      if (settingsError) {
+        console.error('Failed to save shared sessions config:', settingsError);
+      } else {
+        setSharedSessionsConfig(updatedConfig);
+      }
+
       setTimetableSessions(prev => prev.map(s => s.id === id ? { ...s, ...fields } : s));
       setEditingSession(null);
+      setEditingSessionSplits({});
       setTimetableStatus({ type: 'success', text: 'Session saved.' });
       setTimeout(() => setTimetableStatus(null), 3000);
     }
@@ -291,10 +378,31 @@ export default function Settings({ session, scmApiKey }) {
   const deleteSession = async (id, name) => {
     if (!window.confirm(`Delete session "${name}"? This will also remove all swimmer memberships for this session.`)) return;
     setTimetableStatus({ type: 'info', text: 'Deleting...' });
+    const targetSess = timetableSessions.find(s => s.id === id);
     const { error } = await supabase.from('sessions').delete().eq('id', id);
     if (error) {
       setTimetableStatus({ type: 'error', text: error.message });
     } else {
+      // Remove splits if any
+      const updatedConfig = { ...sharedSessionsConfig };
+      delete updatedConfig[id];
+      if (targetSess?.scm_guid) delete updatedConfig[targetSess.scm_guid];
+      delete updatedConfig[name];
+
+      const { error: settingsError } = await supabase
+        .from('ai_brain_settings')
+        .upsert({
+          key: 'shared_sessions_config',
+          value: updatedConfig,
+          updated_at: new Date().toISOString()
+        });
+
+      if (settingsError) {
+        console.error('Failed to update shared sessions config on delete:', settingsError);
+      } else {
+        setSharedSessionsConfig(updatedConfig);
+      }
+
       setTimetableSessions(prev => prev.filter(s => s.id !== id));
       setTimetableStatus({ type: 'success', text: `"${name}" deleted.` });
       setTimeout(() => setTimetableStatus(null), 3000);
@@ -750,9 +858,9 @@ export default function Settings({ session, scmApiKey }) {
       exempt_volume_offset: exemptVolume !== undefined ? exemptVolume : s.exempt_volume_offset,
       swimmers_per_lane: typeof swimmersPerLane === 'number' ? swimmersPerLane : s.swimmers_per_lane
     } : s));
-    await fetch('/api/update-squad', { 
-      method: 'POST', 
-      headers: { 'Content-Type': 'application/json' }, 
+    await fetch('/api/update-squad', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
       body: JSON.stringify({ 
         squadId, 
         isSquad, 
@@ -789,7 +897,7 @@ export default function Settings({ session, scmApiKey }) {
     try {
       const res = await fetch('/api/invite-coach', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({ email: inviteEmail, role: inviteRole })
       });
       const data = await res.json();
@@ -818,7 +926,7 @@ export default function Settings({ session, scmApiKey }) {
     try {
       const res = await fetch('/api/update-coach-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({ coachId: resetPasswordCoach.id, newPassword })
       });
       const data = await res.json();
@@ -842,7 +950,7 @@ export default function Settings({ session, scmApiKey }) {
     try {
       const res = await fetch('/api/delete-coach', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({ coachId })
       });
       const data = await res.json();
@@ -895,56 +1003,131 @@ export default function Settings({ session, scmApiKey }) {
         <div className="settings-panel">
           {activePanel === 'system' && (
             <div className="panel-content">
-              <h1>System Sync & Scraping</h1>
-              <div className="grid md:grid-cols-2 gap-8">
-                <div className="card">
-                  <h3>SCM Sync</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Import members and squads.</p>
-                  {syncStatus && activePanel === 'system' && <div className={`alert ${syncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{syncStatus.text}</div>}
-                  <form onSubmit={handleSyncScm}>
-                    <input type="password" className="input-field mb-4" value={scmKey} onChange={(e) => setScmKey(e.target.value)} placeholder="SCM API Key" />
-                    <button type="submit" className="btn btn-primary">Start Sync</button>
-                  </form>
+              <h1>System Sync</h1>
+
+              {/* ── Master Sync Card ── */}
+              <div className="card" style={{
+                background: 'linear-gradient(135deg, rgba(6,182,212,0.08) 0%, rgba(59,130,246,0.06) 100%)',
+                border: '1px solid rgba(6,182,212,0.25)',
+                borderRadius: '20px',
+                padding: '2.5rem',
+                marginBottom: '1rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '2rem' }}>⚡</span>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)' }}>Daily System Sync</h2>
+                    <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                      Runs SCM member sync followed by training attendance in one click.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="card">
-                  <h3>Session Memberships</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Sync which swimmers are in which sessions.</p>
-                  {sessionSyncStatus && <div className={`alert ${sessionSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{sessionSyncStatus.text}</div>}
-                  <button 
-                    onClick={handleSyncSessionMemberships} 
-                    className="btn btn-secondary w-full"
-                    disabled={isSessionSyncing}
+                {/* Step indicators */}
+                <div style={{ display: 'flex', gap: '1rem', margin: '1.5rem 0', flexWrap: 'wrap' }}>
+                  {[
+                    { step: 1, label: 'SCM Baseline' },
+                    { step: 2, label: 'Attendance' },
+                    { step: 3, label: 'Complete' }
+                  ].map(({ step, label }) => {
+                    const done = masterSyncState.step > step || masterSyncState.step === 3;
+                    const active = masterSyncState.step === step && masterSyncState.active;
+                    return (
+                      <div key={step} style={{
+                        display: 'flex', alignItems: 'center', gap: '0.5rem',
+                        padding: '0.4rem 1rem', borderRadius: '50px',
+                        fontSize: '0.8rem', fontWeight: 700,
+                        background: done ? 'rgba(16,185,129,0.15)' : active ? 'rgba(6,182,212,0.15)' : 'rgba(255,255,255,0.04)',
+                        color: done ? 'var(--accent-emerald)' : active ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.35)',
+                        border: `1px solid ${done ? 'rgba(16,185,129,0.3)' : active ? 'rgba(6,182,212,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                        transition: 'all 0.3s ease'
+                      }}>
+                        <span>{done ? '✓' : step}</span>
+                        <span>{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={handleMasterSync}
+                    disabled={masterSyncState.active}
+                    style={{
+                      padding: '0.9rem 2.5rem',
+                      borderRadius: '12px',
+                      fontWeight: 800,
+                      fontSize: '1rem',
+                      letterSpacing: '0.02em',
+                      border: 'none',
+                      cursor: masterSyncState.active ? 'not-allowed' : 'pointer',
+                      background: masterSyncState.active
+                        ? 'rgba(6,182,212,0.2)'
+                        : 'linear-gradient(135deg, var(--accent-cyan), #3b82f6)',
+                      color: masterSyncState.active ? 'rgba(255,255,255,0.5)' : '#fff',
+                      boxShadow: masterSyncState.active ? 'none' : '0 4px 20px rgba(6,182,212,0.35)',
+                      transition: 'all 0.25s ease',
+                      display: 'flex', alignItems: 'center', gap: '0.6rem'
+                    }}
                   >
-                    {isSessionSyncing ? 'Syncing...' : 'Sync Session Memberships'}
+                    {masterSyncState.active && (
+                      <span style={{
+                        width: '16px', height: '16px',
+                        border: '2px solid rgba(255,255,255,0.3)',
+                        borderTopColor: 'var(--accent-cyan)',
+                        borderRadius: '50%',
+                        display: 'inline-block',
+                        animation: 'spin 0.8s linear infinite'
+                      }} />
+                    )}
+                    {masterSyncState.active ? 'Syncing…' : '⚡ Run Master Sync'}
                   </button>
-                  {isSessionSyncing && (
-                    <div className="progress-bg mt-4">
-                      <div className="progress-fill" style={{ width: `${sessionSyncProgress}%` }}></div>
-                    </div>
+
+                  {masterSyncState.message && (
+                    <p style={{
+                      margin: 0,
+                      fontSize: '0.9rem',
+                      color: masterSyncState.message.startsWith('Error')
+                        ? '#f87171'
+                        : masterSyncState.step === 3
+                        ? 'var(--accent-emerald)'
+                        : 'var(--accent-cyan)',
+                      fontWeight: 600
+                    }}>
+                      {masterSyncState.message}
+                    </p>
                   )}
                 </div>
+              </div>
+
+              {/* ── Advanced Seasonal Scrapers ── */}
+              <h3 style={{ marginTop: '3rem', marginBottom: '1.5rem', opacity: 0.7, fontSize: '0.9rem', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Advanced Seasonal Scrapers
+              </h3>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+
+                {/* Meets Scrape */}
                 <div className="card">
-                  <h3>Meet Scraper</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Fetch results for TONS.</p>
+                  <h3>🏊 Meet Scraper</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Fetch results for TONS from Swim England results portal.</p>
                   {scrapeStatus && <div className={`alert ${scrapeStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{scrapeStatus.text}</div>}
                   <form onSubmit={handleScrape}>
-                    <input type="text" className="input-field mb-4" value={swimmingYear} onChange={(e) => setSwimmingYear(e.target.value)} placeholder="Year/Range" />
-                    <button type="submit" className="btn btn-primary" disabled={isScraping}>{isScraping ? 'Scraping...' : 'Start Scrape'}</button>
+                    <input type="text" className="input-field mb-4" value={swimmingYear} onChange={(e) => setSwimmingYear(e.target.value)} placeholder="Year e.g. 2025/2026" />
+                    <button type="submit" className="btn btn-primary w-full" disabled={isScraping}>
+                      {isScraping ? 'Scraping…' : 'Start Meet Scrape'}
+                    </button>
                   </form>
                   {isScraping && <div className="progress-bg mt-4"><div className="progress-fill" style={{ width: `${scrapeProgress}%` }}></div></div>}
                 </div>
 
+                {/* Rankings Scrape */}
                 <div className="card">
-                  <h3>Rankings Scraper</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Fetch Kent & SE Region rankings for Tonbridge swimmers.</p>
+                  <h3>📊 Rankings Scraper</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Fetch Kent &amp; SE Region rankings for Tonbridge swimmers.</p>
                   {rankingsScrapeStatus && <div className={`alert ${rankingsScrapeStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{rankingsScrapeStatus.text}</div>}
-                  <button 
-                    onClick={handleRankingsScrape} 
-                    className="btn btn-primary w-full" 
-                    disabled={isRankingsScraping}
-                  >
-                    {isRankingsScraping ? 'Scraping...' : 'Start Rankings Scrape'}
+                  <button onClick={handleRankingsScrape} className="btn btn-primary w-full" disabled={isRankingsScraping}>
+                    {isRankingsScraping ? 'Scraping…' : 'Start Rankings Scrape'}
                   </button>
                   {isRankingsScraping && (
                     <div className="progress-bg mt-4">
@@ -953,36 +1136,36 @@ export default function Settings({ session, scmApiKey }) {
                   )}
                 </div>
 
+                {/* Join Date Sync */}
                 <div className="card">
-                  <h3>Global PB Sync</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Sync personal best times and splits for all swimmers from Swimming Results.</p>
-                  {globalPbSyncStatus && <div className={`alert ${globalPbSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{globalPbSyncStatus.text}</div>}
-                  <button 
-                    onClick={handleGlobalPbSync} 
-                    className="btn btn-primary w-full" 
-                    disabled={isGlobalPbSyncing}
-                  >
-                    {isGlobalPbSyncing ? 'Syncing...' : 'Start Global PB Sync'}
+                  <h3>📅 Join Date Sync</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Scrape member join dates from SCM Portal for all active swimmers.</p>
+                  {joinDateSyncStatus && <div className={`alert ${joinDateSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{joinDateSyncStatus.text}</div>}
+                  <button onClick={handleJoinDateSync} className="btn btn-secondary w-full" disabled={isJoinDateSyncing}>
+                    {isJoinDateSyncing ? 'Syncing…' : 'Sync Join Dates'}
                   </button>
-                  {isGlobalPbSyncing && (
+                  {isJoinDateSyncing && (
                     <div className="progress-bg mt-4">
-                      <div className="progress-fill" style={{ width: `${globalPbSyncProgress}%` }}></div>
+                      <div className="progress-fill" style={{ width: `${joinDateSyncProgress}%` }}></div>
                     </div>
                   )}
                 </div>
 
+                {/* Historical Attendance Sync */}
                 <div className="card">
-                  <h3>Historical PBs Reconciler</h3>
-                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Mathematically reconstructs PB history from all logged results.</p>
-                  {pbSyncStatus && <div className={`alert ${pbSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{pbSyncStatus.text}</div>}
-                  <button 
-                    onClick={handleReconcilePbs} 
-                    className="btn-premium-action w-full" 
-                    disabled={isReconcilingPbs}
-                  >
-                    {isReconcilingPbs ? 'Reconciling...' : 'Reconcile Historical PBs'}
+                  <h3>📆 Historical Attendance</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Full historical attendance backfill from SCM — slow, run seasonally.</p>
+                  {attendanceScrapeStatus && <div className={`alert ${attendanceScrapeStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{attendanceScrapeStatus.text}</div>}
+                  <button onClick={handleHistoricalAttendanceSync} className="btn btn-secondary w-full" disabled={isAttendanceScraping}>
+                    {isAttendanceScraping ? 'Syncing…' : 'Start Historical Sync'}
                   </button>
+                  {isAttendanceScraping && (
+                    <div className="progress-bg mt-4">
+                      <div className="progress-fill" style={{ width: `${attendanceScrapeProgress}%` }}></div>
+                    </div>
+                  )}
                 </div>
+
               </div>
             </div>
           )}
@@ -1111,39 +1294,83 @@ export default function Settings({ session, scmApiKey }) {
                         <tbody>
                           {sessions.map(sess => (
                             editingSession?.id === sess.id ? (
-                              <tr key={sess.id} style={{ background:'rgba(6,182,212,0.06)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
-                                <td style={{ padding:'8px 12px' }}>
-                                  <input className="input-field m-0" style={{width:'100%',minWidth:'140px'}} value={editingSession.name}
-                                    onChange={e => setEditingSession(es => ({...es, name: e.target.value}))} />
-                                </td>
-                                <td style={{ padding:'8px 12px' }}>
-                                  <input className="input-field m-0" type="time" style={{width:'100px'}} value={editingSession.start_time||''}
-                                    onChange={e => setEditingSession(es => ({...es, start_time: e.target.value}))} />
-                                </td>
-                                <td style={{ padding:'8px 12px' }}>
-                                  <input className="input-field m-0" type="time" style={{width:'100px'}} value={editingSession.end_time||''}
-                                    onChange={e => setEditingSession(es => ({...es, end_time: e.target.value}))} />
-                                </td>
-                                <td style={{ padding:'8px 12px' }}>
-                                  <input className="input-field m-0" style={{width:'120px'}} value={editingSession.location||''}
-                                    onChange={e => setEditingSession(es => ({...es, location: e.target.value}))} />
-                                </td>
-                                <td style={{ padding:'8px 12px' }}>
-                                  <input className="input-field m-0" type="number" min="1" max="20" style={{width:'60px',textAlign:'center'}} value={editingSession.lanes_allocated||''}
-                                    onChange={e => setEditingSession(es => ({...es, lanes_allocated: parseInt(e.target.value)||null}))} />
-                                </td>
-                                <td style={{ padding:'8px 12px' }}>
-                                  <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
-                                    <input type="checkbox" checked={!!editingSession.is_active}
-                                      onChange={e => setEditingSession(es => ({...es, is_active: e.target.checked}))} />
-                                    <span style={{fontSize:'0.75rem',opacity:0.7}}>{editingSession.is_active ? 'Active' : 'Inactive'}</span>
-                                  </label>
-                                </td>
-                                <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
-                                  <button className="btn btn-primary" style={{fontSize:'0.75rem',padding:'4px 12px',marginRight:'6px'}} onClick={saveSession}>Save</button>
-                                  <button className="btn btn-secondary" style={{fontSize:'0.75rem',padding:'4px 12px'}} onClick={() => setEditingSession(null)}>Cancel</button>
-                                </td>
-                              </tr>
+                              <Fragment key={sess.id}>
+                                <tr style={{ background:'rgba(6,182,212,0.06)', borderBottom:'none' }}>
+                                  <td style={{ padding:'8px 12px' }}>
+                                    <input className="input-field m-0" style={{width:'100%',minWidth:'140px'}} value={editingSession.name}
+                                      onChange={e => setEditingSession(es => ({...es, name: e.target.value}))} />
+                                  </td>
+                                  <td style={{ padding:'8px 12px' }}>
+                                    <input className="input-field m-0" type="time" style={{width:'100px'}} value={editingSession.start_time||''}
+                                      onChange={e => setEditingSession(es => ({...es, start_time: e.target.value}))} />
+                                  </td>
+                                  <td style={{ padding:'8px 12px' }}>
+                                    <input className="input-field m-0" type="time" style={{width:'100px'}} value={editingSession.end_time||''}
+                                      onChange={e => setEditingSession(es => ({...es, end_time: e.target.value}))} />
+                                  </td>
+                                  <td style={{ padding:'8px 12px' }}>
+                                    <input className="input-field m-0" style={{width:'120px'}} value={editingSession.location||''}
+                                      onChange={e => setEditingSession(es => ({...es, location: e.target.value}))} />
+                                  </td>
+                                  <td style={{ padding:'8px 12px' }}>
+                                    <input className="input-field m-0" type="number" min="1" max="20" style={{width:'60px',textAlign:'center'}} value={editingSession.lanes_allocated||''}
+                                      onChange={e => setEditingSession(es => ({...es, lanes_allocated: parseInt(e.target.value)||null}))} />
+                                  </td>
+                                  <td style={{ padding:'8px 12px' }}>
+                                    <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
+                                      <input type="checkbox" checked={!!editingSession.is_active}
+                                        onChange={e => setEditingSession(es => ({...es, is_active: e.target.checked}))} />
+                                      <span style={{fontSize:'0.75rem',opacity:0.7}}>{editingSession.is_active ? 'Active' : 'Inactive'}</span>
+                                    </label>
+                                  </td>
+                                  <td style={{ padding:'8px 12px', whiteSpace:'nowrap' }}>
+                                    <button className="btn btn-primary" style={{fontSize:'0.75rem',padding:'4px 12px',marginRight:'6px'}} onClick={saveSession}>Save</button>
+                                    <button className="btn btn-secondary" style={{fontSize:'0.75rem',padding:'4px 12px'}} onClick={() => { setEditingSession(null); setEditingSessionSplits({}); }}>Cancel</button>
+                                  </td>
+                                </tr>
+                                <tr style={{ background:'rgba(6,182,212,0.06)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
+                                  <td colSpan="7" style={{ padding:'12px 24px', borderTop:'1px dashed rgba(255,255,255,0.05)' }}>
+                                    <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                                      <span style={{ fontSize:'0.75rem', fontWeight:800, color:'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'6px' }}>
+                                        🥞 Optional Shared Session Lane Splits
+                                      </span>
+                                      <span style={{ fontSize:'0.7rem', opacity:0.6 }}>
+                                        Specify a portion of lanes for specific squads. Leave a squad at 0 or empty to not allocate specific lanes. Sum of splits must be less than or equal to total lanes ({editingSession.lanes_allocated || 6}).
+                                      </span>
+                                      <div style={{ display:'flex', flexWrap:'wrap', gap:'12px', marginTop:'6px' }}>
+                                        {squads.filter(s => s.is_squad).map(sq => {
+                                          const val = editingSessionSplits[sq.id] || '';
+                                          return (
+                                            <div key={sq.id} style={{ display:'flex', alignItems:'center', gap:'8px', background:'rgba(255,255,255,0.03)', padding:'4px 8px', borderRadius:'6px', border:'1px solid rgba(255,255,255,0.05)' }}>
+                                              <span style={{ fontSize:'0.75rem', fontWeight:600 }}>{sq.name}</span>
+                                              <input
+                                                type="number"
+                                                min="0"
+                                                max={editingSession.lanes_allocated || 6}
+                                                style={{ width:'50px', background:'#0f172a', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'4px', color:'#fff', fontSize:'0.75rem', padding:'2px 4px', textAlign:'center' }}
+                                                value={val}
+                                                onChange={e => {
+                                                  const newLanes = parseInt(e.target.value);
+                                                  setEditingSessionSplits(prev => {
+                                                    const updated = { ...prev };
+                                                    if (isNaN(newLanes) || newLanes <= 0) {
+                                                      delete updated[sq.id];
+                                                    } else {
+                                                      updated[sq.id] = newLanes;
+                                                    }
+                                                    return updated;
+                                                  });
+                                                }}
+                                              />
+                                              <span style={{ fontSize:'0.7rem', opacity:0.5 }}>Lanes</span>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              </Fragment>
                             ) : (
                               <tr key={sess.id} style={{ borderBottom:'1px solid rgba(255,255,255,0.04)', transition:'background 0.15s' }}
                                   onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.03)'}
@@ -1156,7 +1383,38 @@ export default function Settings({ session, scmApiKey }) {
                                 <td style={{ padding:'10px 12px', opacity:0.8 }}>{sess.end_time || '—'}</td>
                                 <td style={{ padding:'10px 12px', opacity:0.6, fontSize:'0.8rem' }}>{sess.location || '—'}</td>
                                 <td style={{ padding:'10px 12px' }}>
-                                  <span style={{ fontWeight:700, color:'var(--accent-cyan)' }}>{sess.lanes_allocated ?? '—'}</span>
+                                  <div style={{ display:'flex', alignItems:'center', gap:'6px' }}>
+                                    <span style={{ fontWeight:700, color:'var(--accent-cyan)' }}>{sess.lanes_allocated ?? '—'}</span>
+                                    {(() => {
+                                      const splits = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name];
+                                      if (splits && Object.keys(splits).length > 0) {
+                                        const tooltipText = Object.entries(splits)
+                                          .map(([sqId, lanes]) => {
+                                            const sq = squads.find(s => s.id === sqId || s.name === sqId);
+                                            return `${sq?.name || sqId}: ${lanes}L`;
+                                          })
+                                          .join('\n');
+                                        return (
+                                          <span
+                                            title={`Shared Session Splits:\n${tooltipText}`}
+                                            style={{
+                                              fontSize:'0.65rem',
+                                              fontWeight:800,
+                                              background:'rgba(244,158,11,0.15)',
+                                              color:'#f59e0b',
+                                              border:'1px solid rgba(244,158,11,0.25)',
+                                              borderRadius:'4px',
+                                              padding:'1px 5px',
+                                              cursor:'help'
+                                            }}
+                                          >
+                                            🥞 Shared
+                                          </span>
+                                        );
+                                      }
+                                      return null;
+                                    })()}
+                                  </div>
                                 </td>
                                 <td style={{ padding:'10px 12px' }}>
                                   <span style={{ fontSize:'0.7rem', fontWeight:700, padding:'2px 7px', borderRadius:'20px',
@@ -1166,7 +1424,7 @@ export default function Settings({ session, scmApiKey }) {
                                 </td>
                                 <td style={{ padding:'10px 12px', whiteSpace:'nowrap' }}>
                                   <button className="btn btn-secondary" style={{fontSize:'0.75rem',padding:'4px 12px',marginRight:'6px'}}
-                                    onClick={() => setEditingSession({ id:sess.id, name:sess.name, day_of_week:sess.day_of_week, start_time:sess.start_time||'', end_time:sess.end_time||'', location:sess.location||'', lanes_allocated:sess.lanes_allocated, is_active:!!sess.is_active })}>Edit</button>
+                                    onClick={() => startEditingSession(sess)}>Edit</button>
                                   <button style={{ fontSize:'0.75rem', padding:'4px 10px', background:'rgba(239,68,68,0.12)', color:'#f87171', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'6px', cursor:'pointer' }}
                                     onClick={() => deleteSession(sess.id, sess.name)}>Delete</button>
                                 </td>

@@ -1,10 +1,15 @@
 import puppeteerCore from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
+import { requireAuth } from '../../lib/api-auth';
+
+const ALLOWED_STORAGE_KEYS = /^(sb-[a-zA-Z0-9\-]+-auth-token|print-insight-cache|print-report-config)$/;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAuth(req, res)) return;
 
   const { meetId, meetName, type, squadId, storage } = req.body;
 
@@ -26,13 +31,19 @@ export default async function handler(req, res) {
     }
     const page = await browser.newPage();
 
-    // Inject the user's auth tokens into the headless browser before it loads!
-    if (storage) {
-      await page.evaluateOnNewDocument((store) => {
-        for (const key in store) {
-          localStorage.setItem(key, store[key]);
-        }
-      }, storage);
+    // Inject the user's auth tokens into the headless browser before it loads
+    if (storage && typeof storage === 'object') {
+      const safeStorage = {};
+      for (const key of Object.keys(storage)) {
+        if (ALLOWED_STORAGE_KEYS.test(key)) safeStorage[key] = storage[key];
+      }
+      if (Object.keys(safeStorage).length > 0) {
+        await page.evaluateOnNewDocument((store) => {
+          for (const key in store) {
+            localStorage.setItem(key, store[key]);
+          }
+        }, safeStorage);
+      }
     }
 
     // Determine the target URL based on the environment

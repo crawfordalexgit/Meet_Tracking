@@ -3,12 +3,13 @@ import Head from 'next/head';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { getSessionDuration, calculateReliability, isShutdownDate, isGalaDate, getWeekKey } from '../lib/analytics-utils';
-import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
+import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useRouter } from 'next/router';
 import CapacityReportModal from '../components/CapacityReportModal';
 
 export default function CapacityDashboard({ session }) {
   const router = useRouter();
+  const [isClient, setIsClient] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
   const [memberships, setMemberships] = useState([]);
@@ -19,6 +20,7 @@ export default function CapacityDashboard({ session }) {
   const [swimmers, setSwimmers] = useState([]);
   const [dbSquads, setDbSquads] = useState([]);
   const [graphSession, setGraphSession] = useState(null);
+  const [selectedAttendanceDate, setSelectedAttendanceDate] = useState(null);
   const [periodDays, setPeriodDays] = useState(30);
   const [simAdjustments, setSimAdjustments] = useState({});
   const [globalSquadFilter, setGlobalSquadFilter] = useState('All');
@@ -31,6 +33,31 @@ export default function CapacityDashboard({ session }) {
     audience: 'Coach',
     printTheme: 'dark'
   });
+  const [sharedSessionsConfig, setSharedSessionsConfig] = useState({});
+
+  const getSessionLanesForSquad = (session, squadId) => {
+    if (!session || !squadId) return session?.lanes_allocated || 6;
+    const config = sharedSessionsConfig?.[session.id] || sharedSessionsConfig?.[session.scm_guid] || sharedSessionsConfig?.[session.name];
+    if (config && Object.keys(config).length > 0) {
+      return config[squadId] !== undefined ? config[squadId] : 0;
+    }
+    return session.lanes_allocated || 6;
+  };
+  
+  const timeToMinutes = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
+  const sessionsOverlap = (s1, s2) => {
+    if (s1.day_of_week?.toLowerCase() !== s2.day_of_week?.toLowerCase()) return false;
+    const start1 = timeToMinutes(s1.start_time);
+    const end1 = timeToMinutes(s1.end_time || s1.start_time);
+    const start2 = timeToMinutes(s2.start_time);
+    const end2 = timeToMinutes(s2.end_time || s2.start_time);
+    return start1 < end2 && start2 < end1;
+  };
 
   const [modellingSquadId, setModellingSquadId] = useState('');
   const [modelerAttendance, setModelerAttendance] = useState([]);
@@ -43,11 +70,14 @@ export default function CapacityDashboard({ session }) {
   const [galaResults, setGalaResults] = useState([]);
   const [forceWeekendSession, setForceWeekendSession] = useState(false);
   const [goodAttendanceThreshold, setGoodAttendanceThreshold] = useState(70);
+  const [showCapacityDetails, setShowCapacityDetails] = useState(false);
 
-  // Target squad object selected in the modeler
+  // Target squad object selected in the modeler; defaults to first squad if none selected
   const targetModellingSquad = useMemo(() => {
-    return dbSquads.find(s => s.id === modellingSquadId) || null;
+    return dbSquads.find(s => s.id === modellingSquadId) || dbSquads.filter(s => s.is_squad)[0] || null;
   }, [dbSquads, modellingSquadId]);
+
+  useEffect(() => { setIsClient(true); }, []);
 
   useEffect(() => {
     // If loading from query parameters for pdf rebalance, do not apply default resets
@@ -122,7 +152,8 @@ export default function CapacityDashboard({ session }) {
       let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
       if (filter) q = filter(q);
       const { data: d, error } = await q;
-      if (error || !d) break;
+      if (error) { console.warn(`[capacity] fetchPaged error on ${table}:`, error.message); break; }
+      if (!d) break;
       all = [...all, ...d];
       if (d.length < 1000) more = false;
       page++;
@@ -133,7 +164,7 @@ export default function CapacityDashboard({ session }) {
   const fetchData = async () => {
     setLoading(true);
     const startDate = new Date(Date.now() - periodDays * 86400000).toISOString();
-    const [sessRes, allMemberships, allAttendance, swimRes, squadsRes, allModelerAttendance, exemptionsRes, resultsRes] = await Promise.all([
+    const [sessRes, allMemberships, allAttendance, swimRes, squadsRes, allModelerAttendance, exemptionsRes, resultsRes, settingsRes] = await Promise.all([
       supabase.from('sessions').select('*').order('day_of_week').order('start_time'),
       fetchPaged('session_memberships', 'session_id, swimmer_id'),
       fetchPaged('training_attendance', 'session_id, swimmer_id, date', q => q.eq('status', 'present').gte('date', startDate)),
@@ -141,9 +172,11 @@ export default function CapacityDashboard({ session }) {
       supabase.from('squads').select('id, name, swimmers_per_lane, target_sessions_per_week, target_hours_per_week, require_weekend, is_squad'),
       fetchPaged('training_attendance', 'session_id, swimmer_id, date, status', q => q.gte('date', startDate)),
       supabase.from('club_exemptions').select('*'),
-      fetchPaged('results', 'swimmer_id, date, meet_id, meets(date, end_date, name, type)', q => q.gte('date', startDate.substring(0, 10)))
+      fetchPaged('results', 'swimmer_id, date, meet_id, meets(date, end_date, name, type)', q => q.gte('date', startDate.substring(0, 10))),
+      supabase.from('ai_brain_settings').select('*')
     ]);
 
+    if (sessRes.error) console.warn('[capacity] sessions error:', sessRes.error.message);
     if (sessRes.data) setSessions(sessRes.data);
     if (allMemberships) setMemberships(allMemberships);
     if (allAttendance) setAttendance(allAttendance);
@@ -161,6 +194,10 @@ export default function CapacityDashboard({ session }) {
     if (allModelerAttendance) setModelerAttendance(allModelerAttendance);
     if (exemptionsRes.data) setClubExemptions(exemptionsRes.data);
     if (resultsRes) setGalaResults(resultsRes);
+    if (settingsRes && settingsRes.data) {
+      const row = settingsRes.data.find(r => r.key === 'shared_sessions_config');
+      if (row && row.value) setSharedSessionsConfig(row.value);
+    }
     setLoading(false);
   };
 
@@ -174,6 +211,20 @@ export default function CapacityDashboard({ session }) {
   const getDayOrder = (day) => {
     const days = { 'monday': 1, 'tuesday': 2, 'wednesday': 3, 'thursday': 4, 'friday': 5, 'saturday': 6, 'sunday': 7 };
     return days[day?.toLowerCase()] || 99;
+  };
+
+  const DAY_NAMES_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const extractDay = (sess) => {
+    const dw = sess?.day_of_week;
+    if (dw) {
+      const match = DAY_NAMES_FULL.find(d => d.toLowerCase() === dw.toLowerCase());
+      if (match) return match;
+    }
+    if (sess?.name) {
+      const match = DAY_NAMES_FULL.find(d => sess.name.toLowerCase().includes(d.toLowerCase()));
+      if (match) return match;
+    }
+    return dw || '';
   };
 
   const getSwimmersPerLaneForSession = (sessName) => {
@@ -193,7 +244,11 @@ export default function CapacityDashboard({ session }) {
     return 8;
   };
 
-  const sortedSessions = [...sessions].sort((a, b) => getDayOrder(a.day_of_week) - getDayOrder(b.day_of_week));
+  const normalizedSessions = useMemo(() =>
+    sessions.map(s => ({ ...s, day_of_week: extractDay(s) }))
+  , [sessions]);
+
+  const sortedSessions = [...normalizedSessions].sort((a, b) => getDayOrder(a.day_of_week) - getDayOrder(b.day_of_week));
   const squadsList = [...new Set(swimmers.map(s => s.squads?.name).filter(Boolean))].sort();
 
   // Ghost Allocations: memberships with zero 'present' attendance records in the current period
@@ -251,7 +306,7 @@ export default function CapacityDashboard({ session }) {
 
       const res = await fetch('/api/generate-pdf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           targetPath: `/capacity?tab=ghosts&periodDays=${periodDays}&squadFilter=${squadFilterStr}&includeYield=${config.includeYield}&includeTable=${config.includeTable}&audience=${config.audience}&printTheme=${config.printTheme}`,
           clientAuth
@@ -306,7 +361,7 @@ export default function CapacityDashboard({ session }) {
 
       const res = await fetch('/api/generate-pdf', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           targetPath,
           clientAuth
@@ -578,7 +633,7 @@ export default function CapacityDashboard({ session }) {
     const squadNameLower = targetModellingSquad.name.toLowerCase();
     const squadKey = targetModellingSquad.name.split(' ')[0].toLowerCase();
 
-    const devSessionsList = sessions.filter(s => {
+    const devSessionsList = normalizedSessions.filter(s => {
       const nameLower = s.name.toLowerCase();
       if (nameLower.includes(squadNameLower)) return true;
       if (squadKey.length > 2 && nameLower.includes(squadKey)) return true;
@@ -614,8 +669,10 @@ export default function CapacityDashboard({ session }) {
         targetSwimmersIds.has(m.swimmer_id)
       ).length;
 
-      const otherSquadMembersCount = currentCount - targetSquadCurrentMembersInSession;
-      const cap = (s.lanes_allocated || 6) * (targetModellingSquad.swimmers_per_lane || 8);
+      const isShared = sharedSessionsConfig?.[s.id] !== undefined || sharedSessionsConfig?.[s.scm_guid] !== undefined;
+      const squadLanes = getSessionLanesForSquad(s, targetModellingSquad.id);
+      const cap = squadLanes * (targetModellingSquad.swimmers_per_lane || 8);
+      const otherSquadMembersCount = isShared ? 0 : (currentCount - targetSquadCurrentMembersInSession);
       
       const remainingCapForTargetSquad = Math.max(0, cap - otherSquadMembersCount);
       const category = currentCount >= cap ? 'Hot' : 'Cold';
@@ -629,7 +686,68 @@ export default function CapacityDashboard({ session }) {
         category
       };
     });
-  }, [sessions, memberships, targetModellingSquad, swimmers]);
+  }, [normalizedSessions, memberships, targetModellingSquad, swimmers]);
+
+  const squadSwimmers = useMemo(() => {
+    if (!targetModellingSquad) return [];
+    return swimmers.filter(sw => sw.squads?.id === targetModellingSquad.id);
+  }, [targetModellingSquad, swimmers]);
+
+  const squadCapacityMetrics = useMemo(() => {
+    if (!targetModellingSquad || squadModellingSessions.length === 0) return null;
+    const maxPerLane = targetModellingSquad.max_swimmers_per_lane || targetModellingSquad.swimmers_per_lane || 5;
+    const targetSessions = targetModellingSquad.target_sessions_per_week || 1;
+    const totalWeeklySlots = squadModellingSessions.reduce((sum, s) => {
+      const lanes = getSessionLanesForSquad(s, targetModellingSquad.id);
+      return sum + lanes * maxPerLane;
+    }, 0);
+    const totalPoolHours = squadModellingSessions.reduce((sum, s) => sum + getSessionDuration(s), 0);
+    const maxSquadSize = Math.floor(totalWeeklySlots / targetSessions);
+    const currentSquadSize = squadSwimmers.length;
+    return {
+      maxSquadSize,
+      totalPoolHours: Math.round(totalPoolHours * 10) / 10,
+      totalWeeklySlots,
+      totalSlots: totalWeeklySlots,
+      currentSquadSize,
+      isOverCapacity: currentSquadSize > maxSquadSize
+    };
+  }, [targetModellingSquad, squadModellingSessions, squadSwimmers, sharedSessionsConfig]);
+
+  const allSquadsMetrics = useMemo(() => {
+    return dbSquads.filter(sq => sq.is_squad).map(sq => {
+      const squadNameLower = sq.name.toLowerCase();
+      const squadKey = sq.name.split(' ')[0].toLowerCase();
+      const sqSessions = normalizedSessions.filter(s => {
+        const n = s.name.toLowerCase();
+        if (n.includes(squadNameLower)) return true;
+        if (squadKey.length > 2 && n.includes(squadKey)) return true;
+        if (squadNameLower === 'age development' && n.includes('nar+ & invited others')) return true;
+        return false;
+      });
+      const sqSwimmerCount = swimmers.filter(sw => sw.squads?.id === sq.id).length;
+      const maxPerLane = sq.max_swimmers_per_lane || sq.swimmers_per_lane || 5;
+      const targetSess = sq.target_sessions_per_week || 1;
+      const totalWeeklySlots = sqSessions.reduce((sum, s) => {
+        const lanes = getSessionLanesForSquad(s, sq.id);
+        return sum + lanes * maxPerLane;
+      }, 0);
+      const totalPoolHours = Math.round(sqSessions.reduce((sum, s) => sum + getSessionDuration(s), 0) * 10) / 10;
+      const maxSquadSize = Math.floor(totalWeeklySlots / targetSess);
+      const pct = maxSquadSize > 0 ? Math.round((sqSwimmerCount / maxSquadSize) * 100) : 0;
+      return {
+        id: sq.id,
+        name: sq.name,
+        currentSquadSize: sqSwimmerCount,
+        maxSquadSize,
+        totalPoolHours,
+        totalWeeklySlots,
+        sessionCount: sqSessions.length,
+        pct,
+        isOverCapacity: sqSwimmerCount > maxSquadSize && maxSquadSize > 0
+      };
+    });
+  }, [dbSquads, normalizedSessions, swimmers, sharedSessionsConfig]);
 
   const currentAvailablePlaces = useMemo(() => {
     if (!targetModellingSquad || squadModellingSessions.length === 0) return 0;
@@ -881,19 +999,47 @@ export default function CapacityDashboard({ session }) {
       return filters.some(f => sess.name.toLowerCase().includes(f.trim().toLowerCase()));
     });
 
+    const filters = globalSquadFilter.split(',').map(f => f.trim().toLowerCase());
+    const matchingSquads = dbSquads.filter(s => s.name && filters.includes(s.name.toLowerCase()));
+
     let overCapacityCount = 0;
     let underUtilizedCount = 0;
     let totalDensitySum = 0;
     let sessionsWithDensity = 0;
 
     const sessionsData = filtered.map(sess => {
-      const activeSwimmers = memberships.filter(m => m.session_id === sess.id || m.session_id === sess.scm_guid).length;
-      const lanes = sess.lanes_allocated || 6;
+      const activeSwimmers = memberships.filter(m => {
+        const isSessionMatch = m.session_id === sess.id || m.session_id === sess.scm_guid;
+        if (!isSessionMatch) return false;
+        if (globalSquadFilter !== 'All' && matchingSquads.length > 0) {
+          const sw = swimmers.find(s => s.id === m.swimmer_id);
+          return sw && matchingSquads.some(sq => sq.id === (sw.squads?.id || sw.squad_id));
+        }
+        return true;
+      }).length;
+
+      let lanes = sess.lanes_allocated || 6;
+      if (globalSquadFilter !== 'All' && matchingSquads.length > 0) {
+        const config = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name];
+        if (config && Object.keys(config).length > 0) {
+          lanes = matchingSquads.reduce((sum, sq) => sum + (config[sq.id] !== undefined ? config[sq.id] : 0), 0);
+        }
+      }
+
       const maxCapacity = lanes * getSwimmersPerLaneForSession(sess.name);
 
       const rosterDensity = maxCapacity > 0 ? Math.round((activeSwimmers / maxCapacity) * 100) : 0;
 
-      const sessionAtt = attendance.filter(a => a.session_id === sess.id || a.session_id === sess.scm_guid);
+      const sessionAtt = attendance.filter(a => {
+        const isSessionMatch = a.session_id === sess.id || a.session_id === sess.scm_guid;
+        if (!isSessionMatch) return false;
+        if (globalSquadFilter !== 'All' && matchingSquads.length > 0) {
+          const sw = swimmers.find(s => s.id === a.swimmer_id);
+          return sw && matchingSquads.some(sq => sq.id === (sw.squads?.id || sw.squad_id));
+        }
+        return true;
+      });
+
       const dates = [...new Set(sessionAtt.map(a => a.date))];
       let peakAtt = 0;
       let totalAtt = 0;
@@ -940,6 +1086,7 @@ export default function CapacityDashboard({ session }) {
 
       return {
         ...sess,
+        lanes_allocated: lanes,
         activeSwimmers,
         maxCapacity,
         rosterDensity,
@@ -964,7 +1111,7 @@ export default function CapacityDashboard({ session }) {
       averageClubOccupancy,
       totalSessions: filtered.length
     };
-  }, [sortedSessions, memberships, attendance, globalSquadFilter, dbSquads]);
+  }, [sortedSessions, memberships, attendance, globalSquadFilter, dbSquads, sharedSessionsConfig]);
 
   const weeklyChartData = useMemo(() => {
     const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -1003,6 +1150,207 @@ export default function CapacityDashboard({ session }) {
     }
     return heatmapStats.sessionsData;
   }, [heatmapStats.sessionsData, cardFilter]);
+
+  const dataHealthIssues = useMemo(() => {
+    if (loading || sessions.length === 0) return [];
+    
+    const issues = [];
+    const sessionMap = new Map();
+    sessions.forEach(s => sessionMap.set(s.id, s));
+
+    const swimmerMap = new Map();
+    swimmers.forEach(s => swimmerMap.set(s.id, s));
+
+    // Helper to filter by global squad
+    const matchesSquadFilter = (swSquadName, sessName) => {
+      if (globalSquadFilter === 'All') return true;
+      const filterLower = globalSquadFilter.toLowerCase();
+      if (swSquadName && swSquadName.toLowerCase() === filterLower) return true;
+      if (sessName && sessName.toLowerCase().includes(filterLower)) return true;
+      return false;
+    };
+
+    // 1. Day of Week Mismatch
+    attendance.forEach(att => {
+      const sess = sessionMap.get(att.session_id);
+      if (!sess) return;
+      
+      const sessionDay = sess.day_of_week;
+      if (!sessionDay) return;
+      
+      const dateParts = att.date.split('-');
+      if (dateParts.length !== 3) return;
+      const utcDate = new Date(Date.UTC(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2])));
+      const attDayOfWeek = utcDate.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' });
+
+      if (sessionDay.toLowerCase() !== attDayOfWeek.toLowerCase()) {
+        const sw = swimmerMap.get(att.swimmer_id);
+        const swSquadName = sw?.squads?.name;
+        
+        if (!matchesSquadFilter(swSquadName, sess.name)) return;
+
+        issues.push({
+          id: `day_${att.date}_${att.swimmer_id}_${att.session_id}`,
+          type: 'day_mismatch',
+          severity: 'warning',
+          title: 'Day-of-Week Mismatch',
+          description: `Swimmer recorded present on ${new Date(att.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} (${attDayOfWeek}) for a session scheduled on ${sessionDay}.`,
+          date: att.date,
+          sessionName: sess.name,
+          sessionId: sess.id,
+          swimmerName: sw ? sw.full_name : 'Unknown Swimmer',
+          swimmerId: att.swimmer_id,
+          squadName: swSquadName || 'Unknown Squad'
+        });
+      }
+    });
+
+    // 2. Attendance on Shutdown Dates
+    attendance.forEach(att => {
+      const sess = sessionMap.get(att.session_id);
+      const sw = swimmerMap.get(att.swimmer_id);
+      const squadId = sw?.squads?.id || sw?.squad_id;
+      const swSquadName = sw?.squads?.name;
+
+      if (!matchesSquadFilter(swSquadName, sess?.name)) return;
+
+      const isExempt = isShutdownDate(att.date, clubExemptions, squadId);
+      if (isExempt) {
+        const matchedExemption = clubExemptions.find(ex => {
+          if (ex.squad_id && ex.squad_id !== squadId) return false;
+          return att.date >= ex.start_date && att.date <= ex.end_date;
+        });
+
+        issues.push({
+          id: `shutdown_${att.date}_${att.swimmer_id}_${att.session_id}`,
+          type: 'shutdown_attendance',
+          severity: 'error',
+          title: 'Attendance on Shutdown Date',
+          description: `Attendance recorded on ${new Date(att.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })} which is marked as a shutdown/holiday (${matchedExemption?.name || 'Club Exemption'}).`,
+          date: att.date,
+          sessionName: sess ? sess.name : 'Unknown Session',
+          sessionId: att.session_id,
+          swimmerName: sw ? sw.full_name : 'Unknown Swimmer',
+          swimmerId: att.swimmer_id,
+          squadName: swSquadName || 'Unknown Squad'
+        });
+      }
+    });
+
+    // 3. Double/Overlapping Attendance
+    const attByDateSwimmer = new Map();
+    attendance.forEach(att => {
+      const key = `${att.date}_${att.swimmer_id}`;
+      if (!attByDateSwimmer.has(key)) {
+        attByDateSwimmer.set(key, []);
+      }
+      attByDateSwimmer.get(key).push(att);
+    });
+
+    for (const [key, atts] of attByDateSwimmer.entries()) {
+      if (atts.length < 2) continue;
+      
+      const swimmerId = atts[0].swimmer_id;
+      const dateStr = atts[0].date;
+      const sw = swimmerMap.get(swimmerId);
+      const swSquadName = sw?.squads?.name;
+      
+      for (let i = 0; i < atts.length; i++) {
+        for (let j = i + 1; j < atts.length; j++) {
+          const s1 = sessionMap.get(atts[i].session_id);
+          const s2 = sessionMap.get(atts[j].session_id);
+          if (!s1 || !s2) continue;
+
+          if (!matchesSquadFilter(swSquadName, s1.name) && !matchesSquadFilter(swSquadName, s2.name)) continue;
+          
+          if (sessionsOverlap(s1, s2)) {
+            issues.push({
+              id: `overlap_${dateStr}_${swimmerId}_${s1.id}_${s2.id}`,
+              type: 'overlapping_attendance',
+              severity: 'warning',
+              title: 'Overlapping Session Attendance',
+              description: `Swimmer recorded present in overlapping sessions on ${new Date(dateStr).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}: "${s1.name}" (${s1.start_time}-${s1.end_time || '?'}) and "${s2.name}" (${s2.start_time}-${s2.end_time || '?'}).`,
+              date: dateStr,
+              sessionName: `${s1.name} & ${s2.name}`,
+              swimmerName: sw ? sw.full_name : 'Unknown Swimmer',
+              swimmerId,
+              squadName: swSquadName || 'Unknown Squad'
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Duplicate Attendance Entries
+    const attDuplicateKey = new Map();
+    attendance.forEach(att => {
+      const key = `${att.date}_${att.swimmer_id}_${att.session_id}`;
+      attDuplicateKey.set(key, (attDuplicateKey.get(key) || 0) + 1);
+    });
+
+    for (const [key, count] of attDuplicateKey.entries()) {
+      if (count > 1) {
+        const [date, swimmerId, sessionId] = key.split('_');
+        const sess = sessionMap.get(sessionId);
+        const sw = swimmerMap.get(swimmerId);
+        const swSquadName = sw?.squads?.name;
+
+        if (!matchesSquadFilter(swSquadName, sess?.name)) continue;
+
+        issues.push({
+          id: `duplicate_${date}_${swimmerId}_${sessionId}`,
+          type: 'duplicate_attendance',
+          severity: 'error',
+          title: 'Duplicate Attendance Entry',
+          description: `Swimmer has ${count} duplicate attendance entries for "${sess ? sess.name : 'Unknown Session'}" on ${new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+          date,
+          sessionName: sess ? sess.name : 'Unknown Session',
+          swimmerName: sw ? sw.full_name : 'Unknown Swimmer',
+          swimmerId,
+          squadName: swSquadName || 'Unknown Squad'
+        });
+      }
+    }
+
+    // 5. Excessive Occupancy (> 150%)
+    heatmapStats.sessionsData.forEach(sess => {
+      if (!matchesSquadFilter(null, sess.name)) return;
+
+      if (sess.maxCapacity > 0 && sess.actualDensity > 150) {
+        issues.push({
+          id: `occupancy_${sess.id}`,
+          type: 'excessive_occupancy',
+          severity: 'warning',
+          title: 'Excessive Actual Turnout',
+          description: `Average actual attendance (${sess.avgAtt} swimmers) exceeds physical capacity limit of ${sess.maxCapacity} (${sess.actualDensity}% density).`,
+          sessionName: sess.name,
+          sessionId: sess.id,
+          squadName: 'N/A'
+        });
+      }
+    });
+
+    // 6. Abnormal Session Duration
+    sessions.forEach(sess => {
+      if (!matchesSquadFilter(null, sess.name)) return;
+
+      const duration = getSessionDuration(sess);
+      if (duration === 0 || duration > 4) {
+        issues.push({
+          id: `duration_${sess.id}`,
+          type: 'abnormal_duration',
+          severity: 'warning',
+          title: 'Abnormal Session Duration',
+          description: `Session duration is calculated as ${duration} hours (${sess.start_time || '?'} to ${sess.end_time || '?'}).`,
+          sessionName: sess.name,
+          sessionId: sess.id,
+          squadName: 'N/A'
+        });
+      }
+    });
+
+    return issues;
+  }, [loading, sessions, attendance, swimmers, clubExemptions, heatmapStats, globalSquadFilter]);
 
   const simulateYieldInModeler = () => {
     const newAdjustments = {};
@@ -1235,19 +1583,46 @@ export default function CapacityDashboard({ session }) {
               >
                 ⚖️ Squad Modelling
               </button>
+              <button
+                onClick={() => setActiveTab('dataHealth')}
+                style={activeTab === 'dataHealth'
+                  ? { background: 'linear-gradient(180deg, rgba(80,150,255,0.3) 0%, rgba(20,50,255,0.1) 100%)', border: '1px solid rgba(100,200,255,0.6)', borderRadius: '50px', color: '#ffffff', textShadow: '0 0 5px rgba(255,255,255,0.5)', boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 8px rgba(0,150,255,0.8), 0 0 15px rgba(0,150,255,0.6)', padding: '10px 24px', fontSize: '13px', fontWeight: '700', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '10px', backdropFilter: 'blur(12px)', cursor: 'pointer' }
+                  : { background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', color: 'rgba(255,255,255,0.8)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.3)', padding: '10px 24px', fontSize: '13px', fontWeight: '600', textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '10px', backdropFilter: 'blur(12px)', cursor: 'pointer' }}
+              >
+                🩺 Data Health Audit
+                {isClient && dataHealthIssues.length > 0 && (
+                  <span style={{ 
+                    background: 'var(--accent-rose)', 
+                    color: '#fff', 
+                    borderRadius: '50%', 
+                    padding: '2px 6px', 
+                    fontSize: '9px', 
+                    fontWeight: 900, 
+                    marginLeft: '8px',
+                    boxShadow: '0 0 8px var(--accent-rose)'
+                  }}>
+                    {dataHealthIssues.length}
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* GLOBAL SQUAD FILTER BAR */}
             <div className="no-print" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '24px' }}>
               <button onClick={() => setGlobalSquadFilter('All')} style={globalSquadFilter === 'All' ? { background: 'linear-gradient(180deg, rgba(80,150,255,0.3) 0%, rgba(20,50,255,0.1) 100%)', border: '1px solid rgba(100,200,255,0.6)', borderRadius: '50px', color: '#ffffff', textShadow: '0 0 5px rgba(255,255,255,0.5)', boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 8px rgba(0,150,255,0.8), 0 0 10px rgba(0,150,255,0.6)', padding: '8px 20px', fontSize: '12px', fontWeight: '700', textTransform: 'capitalize', backdropFilter: 'blur(12px)', flexShrink: 0, cursor: 'pointer' } : { background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', color: 'rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.3)', padding: '8px 20px', fontSize: '12px', fontWeight: '600', textTransform: 'capitalize', backdropFilter: 'blur(12px)', flexShrink: 0, cursor: 'pointer' }}>All Squads</button>
               {squadsList.map(sq => (
-                <button key={sq} onClick={() => setGlobalSquadFilter(sq)} style={globalSquadFilter === sq ? { background: 'linear-gradient(180deg, rgba(80,150,255,0.3) 0%, rgba(20,50,255,0.1) 100%)', border: '1px solid rgba(100,200,255,0.6)', borderRadius: '50px', color: '#ffffff', textShadow: '0 0 5px rgba(255,255,255,0.5)', boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 8px rgba(0,150,255,0.8), 0 0 10px rgba(0,150,255,0.6)', padding: '8px 20px', fontSize: '12px', fontWeight: '700', textTransform: 'capitalize', backdropFilter: 'blur(12px)', flexShrink: 0, cursor: 'pointer' } : { background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', color: 'rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.3)', padding: '8px 20px', fontSize: '12px', fontWeight: '600', textTransform: 'capitalize', backdropFilter: 'blur(12px)', flexShrink: 0, cursor: 'pointer' }}>{sq}</button>
+                <button key={sq} onClick={() => {
+                  setGlobalSquadFilter(sq);
+                  const match = dbSquads.find(s => s.name === sq);
+                  if (match) setModellingSquadId(match.id);
+                }} style={globalSquadFilter === sq ? { background: 'linear-gradient(180deg, rgba(80,150,255,0.3) 0%, rgba(20,50,255,0.1) 100%)', border: '1px solid rgba(100,200,255,0.6)', borderRadius: '50px', color: '#ffffff', textShadow: '0 0 5px rgba(255,255,255,0.5)', boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.6), inset 0 -3px 8px rgba(0,150,255,0.8), 0 0 10px rgba(0,150,255,0.6)', padding: '8px 20px', fontSize: '12px', fontWeight: '700', textTransform: 'capitalize', backdropFilter: 'blur(12px)', flexShrink: 0, cursor: 'pointer' } : { background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '50px', color: 'rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px 2px rgba(255,255,255,0.3)', padding: '8px 20px', fontSize: '12px', fontWeight: '600', textTransform: 'capitalize', backdropFilter: 'blur(12px)', flexShrink: 0, cursor: 'pointer' }}>{sq}</button>
               ))}
             </div>
 
             {activeTab === 'heatmap' ? (
               <div className="flex flex-col gap-8">
-                {/* 1. Su                 <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
+                {/* 1. Summary Cards */}
+                <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
                   <div
                     onClick={() => handleCardClick('all')}
                     className="glass-card flex flex-col justify-between hover-glow"
@@ -1331,6 +1706,77 @@ export default function CapacityDashboard({ session }) {
                     </div>
                   </div>
                 </div>
+
+                {/* Squad Capacity KPI Header */}
+                {globalSquadFilter === 'All' ? (
+                  allSquadsMetrics.length > 0 && (
+                    <div className="glass-card" style={{ padding: '1.25rem 1.5rem' }}>
+                      <div className="section-title">All Squads — Capacity Overview</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
+                        {allSquadsMetrics.map(sq => {
+                          const barColor = sq.isOverCapacity ? 'var(--accent-rose)' : sq.pct >= 85 ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-emerald)';
+                          return (
+                            <div
+                              key={sq.id}
+                              className="glass-card cursor-pointer hover:border-cyan-500/50 transition-all"
+                              style={{ padding: '0.75rem 0.85rem', borderTop: `3px solid ${barColor}`, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}
+                              onClick={() => {
+                                setGlobalSquadFilter(sq.name);
+                                setModellingSquadId(sq.id);
+                              }}
+                              title="Click to drill down into this squad"
+                            >
+                              <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: barColor }}>{sq.name}</span>
+                              <div className="flex items-baseline gap-1.5">
+                                <span className="text-xl font-black" style={{ color: barColor }}>{sq.currentSquadSize}</span>
+                                <span className="text-xs text-white/40 font-bold">/ {sq.maxSquadSize}</span>
+                              </div>
+                              {/* capacity bar */}
+                              <div style={{ height: '3px', borderRadius: '1.5px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                                <div style={{ height: '100%', width: `${Math.min(sq.pct, 100)}%`, background: barColor, borderRadius: '1.5px', transition: 'width 0.4s' }} />
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.58rem', color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>
+                                <span>{sq.pct}% full</span>
+                                <span>{sq.totalPoolHours}h · {sq.sessionCount}s</span>
+                              </div>
+                              {sq.isOverCapacity && <span style={{ fontSize: '0.55rem', color: 'var(--accent-rose)', fontWeight: 700 }}>⚠ OVER CAPACITY</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  squadCapacityMetrics && (
+                    <div className="glass-card cursor-pointer hover:border-cyan-500/50 transition-all" style={{ padding: '1.5rem 2rem' }} onClick={() => setShowCapacityDetails(true)}>
+                      <div className="section-title">{targetModellingSquad?.name || 'Squad'} Capacity Model</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginTop: '1rem' }}>
+                        <div className="glass-card" style={{ padding: '1.5rem', borderTop: `4px solid ${squadCapacityMetrics.isOverCapacity ? 'var(--accent-rose)' : 'var(--accent-emerald)'}` }}>
+                          <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Squad Size</span>
+                          <div className="flex items-baseline gap-2 mt-2">
+                            <h2 className="text-3xl font-black" style={{ color: squadCapacityMetrics.isOverCapacity ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
+                              {squadCapacityMetrics.currentSquadSize}
+                            </h2>
+                            <span className="text-sm text-white/40 font-bold">/ {squadCapacityMetrics.maxSquadSize} max</span>
+                          </div>
+                          <p className="text-xs mt-3" style={{ color: squadCapacityMetrics.isOverCapacity ? 'rgba(244,63,94,0.8)' : 'rgba(255,255,255,0.4)' }}>
+                            {squadCapacityMetrics.isOverCapacity ? '⚠️ Over max capacity' : 'Within capacity'}
+                          </p>
+                        </div>
+                        <div className="glass-card" style={{ padding: '1.5rem', borderTop: '4px solid var(--accent-cyan)' }}>
+                          <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Total Pool Hours</span>
+                          <h2 className="text-3xl font-black mt-2 text-cyan-400">{squadCapacityMetrics.totalPoolHours}h</h2>
+                          <p className="text-xs text-white/40 mt-3">Per week across {squadModellingSessions.length} sessions</p>
+                        </div>
+                        <div className="glass-card" style={{ padding: '1.5rem', borderTop: '4px solid #a855f7' }}>
+                          <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Total Weekly Slots</span>
+                          <h2 className="text-3xl font-black mt-2 text-purple-400">{squadCapacityMetrics.totalWeeklySlots}</h2>
+                          <p className="text-xs text-white/40 mt-3">Capacity positions available</p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                )}
 
                 {/* 2. Visual Week-at-a-Glance Heatmap Grid */}
                 <div className="glass-card" style={{ padding: '2rem' }}>
@@ -1419,7 +1865,7 @@ export default function CapacityDashboard({ session }) {
                                     return (
                                       <div
                                         key={sess.id}
-                                        onClick={() => setGraphSession({ sess, sessionAtt: sess.sessionAtt, maxCapacity: sess.maxCapacity })}
+                                        onClick={() => { setGraphSession({ sess, sessionAtt: sess.sessionAtt, maxCapacity: sess.maxCapacity }); setSelectedAttendanceDate(null); }}
                                         className="group relative cursor-pointer rounded-lg p-2.5 transition-all duration-200 border text-left flex flex-col justify-between"
                                         style={{
                                           background: 'rgba(255,255,255,0.02)',
@@ -1450,22 +1896,30 @@ export default function CapacityDashboard({ session }) {
                     </div>
                   ) : (
                     <div style={{ height: '380px', width: '100%', marginTop: '1rem' }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart
-                          data={weeklyChartData}
-                          margin={{ top: 20, right: 10, left: -10, bottom: 5 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                          <XAxis dataKey="day" stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
-                          <YAxis stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
-                          <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(0, 212, 255, 0.2)', borderRadius: '12px', color: '#fff', fontSize: '0.8rem' }} />
-                          <Legend wrapperStyle={{ fontSize: '0.75rem', fontWeight: 700, opacity: 0.8 }} formatter={(value) => <span style={{ color: '#e2e8f0', marginRight: '10px' }}>{value}</span>} />
-                          <Bar dataKey="Physical Capacity" fill="rgba(245, 158, 11, 0.15)" stroke="#f59e0b" strokeWidth={1.5} radius={[4, 4, 0, 0]} name="Swimmers Capacity (Pool Limits)" />
-                          <Bar dataKey="Enrolled Roster" fill="rgba(99, 102, 241, 0.5)" stroke="rgba(99, 102, 241, 0.8)" radius={[4, 4, 0, 0]} name="Scheduled Swimmers (Roster)" />
-                          <Bar dataKey="Actual Attendance" fill="var(--accent-cyan)" radius={[4, 4, 0, 0]} name="Actual Attendance (Average)" />
-                          <Line type="monotone" dataKey="Peak Attendance" stroke="#fb7185" strokeWidth={3} dot={{ fill: '#fb7185', r: 4 }} activeDot={{ r: 6 }} name="Peak Attendance (Combined Max)" />
-                        </ComposedChart>
-                      </ResponsiveContainer>
+                      {isClient && (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart
+                            data={weeklyChartData}
+                            margin={{ top: 20, right: 10, left: -10, bottom: 5 }}
+                            onClick={(state) => {
+                              if (state && state.activeTooltipIndex !== undefined) {
+                                setHeatmapViewMode('grid');
+                              }
+                            }}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                            <XAxis dataKey="day" stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
+                            <Tooltip cursor={{ fill: 'rgba(255,255,255,0.02)' }} contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(0, 212, 255, 0.2)', borderRadius: '12px', color: '#fff', fontSize: '0.8rem' }} />
+                            <Legend wrapperStyle={{ fontSize: '0.75rem', fontWeight: 700, opacity: 0.8 }} formatter={(value) => <span style={{ color: '#e2e8f0', marginRight: '10px' }}>{value}</span>} />
+                            <Bar dataKey="Physical Capacity" fill="rgba(245, 158, 11, 0.15)" stroke="#f59e0b" strokeWidth={1.5} radius={[4, 4, 0, 0]} name="Swimmers Capacity (Pool Limits)" />
+                            <Bar dataKey="Enrolled Roster" fill="rgba(99, 102, 241, 0.5)" stroke="rgba(99, 102, 241, 0.8)" radius={[4, 4, 0, 0]} name="Scheduled Swimmers (Roster)" />
+                            <Bar dataKey="Actual Attendance" fill="var(--accent-cyan)" radius={[4, 4, 0, 0]} name="Actual Attendance (Average)" />
+                            <Line type="monotone" dataKey="Peak Attendance" stroke="#fb7185" strokeWidth={3} dot={{ fill: '#fb7185', r: 4 }} activeDot={{ r: 6 }} name="Peak Attendance (Combined Max)" />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1522,7 +1976,13 @@ export default function CapacityDashboard({ session }) {
                       const sessionAtt = sess.sessionAtt;
 
                       return (
-                        <div key={sess.id} className="glass-card flex items-center justify-between" style={{ borderLeft: `4px solid ${statusColor}`, padding: '1.5rem 2rem' }}>
+                        <div 
+                          key={sess.id} 
+                          onClick={() => { setGraphSession({ sess, sessionAtt, maxCapacity }); setSelectedAttendanceDate(null); }}
+                          className="glass-card flex items-center justify-between hover:border-cyan-400/50 transition-all duration-200" 
+                          style={{ borderLeft: `4px solid ${statusColor}`, padding: '1.5rem 2rem', cursor: 'pointer' }}
+                          title="Click to view week-by-week attendance graph"
+                        >
                           <div style={{ flex: 1 }}>
                             <div className="text-xs font-bold uppercase tracking-widest text-white/50 mb-1">{sess.day_of_week} • {sess.start_time} - {sess.end_time}</div>
                             <h3 className="text-xl font-black uppercase text-white">{sess.name}</h3>
@@ -1530,18 +1990,28 @@ export default function CapacityDashboard({ session }) {
 
                           <div className="flex items-center gap-12">
                             <div className="flex flex-col items-center">
-                              <span className="text-[10px] font-bold uppercase text-white/50 mb-2">Lanes Allocated</span>
-                              <select
-                                value={lanes}
-                                onChange={(e) => updateLanes(sess.id, parseInt(e.target.value))}
-                                disabled={updating === sess.id}
-                                className="border border-white/10 rounded-lg px-4 py-2 text-white font-bold outline-none focus:border-cyan-400"
-                                style={{ background: '#0f172a', color: '#fff' }}
-                              >
-                                {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
-                                  <option key={num} value={num} style={{ background: '#0f172a', color: '#fff' }}>{num} Lanes</option>
-                                ))}
-                              </select>
+                              {(() => {
+                                const isShared = sharedSessionsConfig?.[sess.id] !== undefined || sharedSessionsConfig?.[sess.scm_guid] !== undefined || sharedSessionsConfig?.[sess.name] !== undefined;
+                                return (
+                                  <>
+                                    <span className="text-[10px] font-bold uppercase text-white/50 mb-2 flex items-center gap-1">
+                                      Lanes Allocated {isShared && <span title="Shared session: lane allocation is split by rules in Settings" style={{ color: 'var(--accent-cyan)', fontSize: '10px' }}>🥞 Shared</span>}
+                                    </span>
+                                    <select
+                                      value={lanes}
+                                      onChange={(e) => updateLanes(sess.id, parseInt(e.target.value))}
+                                      onClick={(e) => e.stopPropagation()}
+                                      disabled={updating === sess.id || isShared}
+                                      className="border border-white/10 rounded-lg px-4 py-2 text-white font-bold outline-none focus:border-cyan-400"
+                                      style={{ background: '#0f172a', color: '#fff', cursor: isShared ? 'not-allowed' : 'default', opacity: isShared ? 0.7 : 1 }}
+                                    >
+                                      {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                                        <option key={num} value={num} style={{ background: '#0f172a', color: '#fff' }}>{num} Lanes</option>
+                                      ))}
+                                    </select>
+                                  </>
+                                );
+                              })()}
                             </div>
 
                             <div className="flex flex-col items-center">
@@ -1551,7 +2021,7 @@ export default function CapacityDashboard({ session }) {
 
                             <div
                               className="flex flex-col items-center cursor-pointer hover-glow transition-all"
-                              onClick={() => setGraphSession({ sess, sessionAtt, maxCapacity })}
+                              onClick={() => { setGraphSession({ sess, sessionAtt, maxCapacity }); setSelectedAttendanceDate(null); }}
                               style={{ background: 'rgba(6, 182, 212, 0.05)', padding: '8px 16px', borderRadius: '12px', border: '1px solid rgba(6, 182, 212, 0.1)' }}
                               title="Click to view week-by-week attendance graph"
                             >
@@ -1595,8 +2065,17 @@ export default function CapacityDashboard({ session }) {
                   const availableSessions = sortedSessions.filter(sess => {
                     if (!sess.name.toLowerCase().includes(squadKey)) return false;
                     if (myMemberships.some(m => m.session_id === sess.id || m.session_id === sess.scm_guid)) return false;
-                    const active = memberships.filter(m => m.session_id === sess.id || m.session_id === sess.scm_guid).length;
-                    const maxCap = (sess.lanes_allocated || 6) * getSwimmersPerLaneForSession(sess.name);
+                    const lanes = getSessionLanesForSquad(sess, swimmer.squads?.id);
+                    const maxCap = lanes * getSwimmersPerLaneForSession(sess.name);
+                    const active = memberships.filter(m => {
+                      if (m.session_id !== sess.id && m.session_id !== sess.scm_guid) return false;
+                      const config = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name];
+                      if (config && Object.keys(config).length > 0) {
+                        const sSwimmer = swimmers.find(sw => sw.id === m.swimmer_id);
+                        return (sSwimmer?.squads?.id || sSwimmer?.squad_id) === swimmer.squads?.id;
+                      }
+                      return true;
+                    }).length;
                     return (maxCap - active) > 0;
                   });
 
@@ -1619,8 +2098,18 @@ export default function CapacityDashboard({ session }) {
                           ) : (
                             <div className="flex flex-col gap-2">
                               {availableSessions.map(s => {
-                                const active = memberships.filter(m => m.session_id === s.id || m.session_id === s.scm_guid).length;
-                                const spaces = ((s.lanes_allocated || 6) * getSwimmersPerLaneForSession(s.name)) - active;
+                                const lanes = getSessionLanesForSquad(s, swimmer.squads?.id);
+                                const maxCap = lanes * getSwimmersPerLaneForSession(s.name);
+                                const active = memberships.filter(m => {
+                                  if (m.session_id !== s.id && m.session_id !== s.scm_guid) return false;
+                                  const config = sharedSessionsConfig?.[s.id] || sharedSessionsConfig?.[s.scm_guid] || sharedSessionsConfig?.[s.name];
+                                  if (config && Object.keys(config).length > 0) {
+                                    const sSwimmer = swimmers.find(sw => sw.id === m.swimmer_id);
+                                    return (sSwimmer?.squads?.id || sSwimmer?.squad_id) === swimmer.squads?.id;
+                                  }
+                                  return true;
+                                }).length;
+                                const spaces = maxCap - active;
                                 return (
                                   <div key={s.id} className="flex justify-between items-center text-sm border-b border-white/5 pb-2 last:border-0 last:pb-0">
                                     <div>
@@ -1709,8 +2198,44 @@ export default function CapacityDashboard({ session }) {
                       const squadKey = squadName.toLowerCase();
                       const yieldCoeff = squadYields[squadName] || 1;
                       const isSharedSquad = squadKey.includes('bronze') || squadKey.includes('silver');
+                      const sqObj = dbSquads.find(s => s.name === squadName);
 
-                      let testSessions = sessionSimCapacities.map(sess => ({ ...sess }));
+                      let testSessions = sessionSimCapacities.map(sess => {
+                        const sqLanes = getSessionLanesForSquad(sess, sqObj?.id);
+                        const physicalCap = sqLanes * getSwimmersPerLaneForSession(sess.name);
+
+                        const config = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name];
+                        if (config && Object.keys(config).length > 0) {
+                          const activeRoster = memberships.filter(m => {
+                            if (m.session_id !== sess.id && m.session_id !== sess.scm_guid) return false;
+                            const memberSwimmer = swimmers.find(sw => sw.id === m.swimmer_id);
+                            return (memberSwimmer?.squads?.id || memberSwimmer?.squad_id) === sqObj?.id;
+                          }).length;
+                          const sessionAtt = attendance.filter(a => {
+                            if (a.session_id !== sess.id && a.session_id !== sess.scm_guid) return false;
+                            const memberSwimmer = swimmers.find(sw => sw.id === a.swimmer_id);
+                            return (memberSwimmer?.squads?.id || memberSwimmer?.squad_id) === sqObj?.id;
+                          });
+                          const dates = [...new Set(sessionAtt.map(a => a.date))];
+                          let totalAtt = 0;
+                          dates.forEach(d => { totalAtt += sessionAtt.filter(a => a.date === d).length; });
+                          const avgOccupied = dates.length > 0 ? (totalAtt / dates.length) : activeRoster;
+
+                          return {
+                            ...sess,
+                            currentRoster: activeRoster,
+                            simRoster: activeRoster,
+                            physicalCap,
+                            openPhysicalSpaces: Math.max(0, physicalCap - avgOccupied),
+                          };
+                        } else {
+                          return {
+                            ...sess,
+                            physicalCap
+                          };
+                        }
+                      });
+
                       let testSquadSessions = testSessions.filter(sess => {
                         const sName = sess.name.toLowerCase();
                         if (isSharedSquad) return sName.includes('bronze') || sName.includes('silver');
@@ -1754,10 +2279,46 @@ export default function CapacityDashboard({ session }) {
                       // 3. Enforce Strict Lane Isolation Rules
                       const isSharedSquad = squadKey.includes('bronze') || squadKey.includes('silver');
 
+                      const sqObj = dbSquads.find(s => s.name === squadName);
+
                       let squadSessions = sessionSimCapacities.filter(sess => {
                         const sName = sess.name.toLowerCase();
                         if (isSharedSquad) return sName.includes('bronze') || sName.includes('silver');
                         return sName.includes(squadKey);
+                      }).map(sess => {
+                        const sqLanes = getSessionLanesForSquad(sess, sqObj?.id);
+                        const physicalCap = sqLanes * getSwimmersPerLaneForSession(sess.name);
+
+                        const config = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name];
+                        if (config && Object.keys(config).length > 0) {
+                          const activeRoster = memberships.filter(m => {
+                            if (m.session_id !== sess.id && m.session_id !== sess.scm_guid) return false;
+                            const memberSwimmer = swimmers.find(sw => sw.id === m.swimmer_id);
+                            return (memberSwimmer?.squads?.id || memberSwimmer?.squad_id) === sqObj?.id;
+                          }).length;
+                          const sessionAtt = attendance.filter(a => {
+                            if (a.session_id !== sess.id && a.session_id !== sess.scm_guid) return false;
+                            const memberSwimmer = swimmers.find(sw => sw.id === a.swimmer_id);
+                            return (memberSwimmer?.squads?.id || memberSwimmer?.squad_id) === sqObj?.id;
+                          });
+                          const dates = [...new Set(sessionAtt.map(a => a.date))];
+                          let totalAtt = 0;
+                          dates.forEach(d => { totalAtt += sessionAtt.filter(a => a.date === d).length; });
+                          const avgOccupied = dates.length > 0 ? (totalAtt / dates.length) : activeRoster;
+
+                          return {
+                            ...sess,
+                            currentRoster: activeRoster,
+                            simRoster: activeRoster,
+                            physicalCap,
+                            openPhysicalSpaces: Math.max(0, physicalCap - avgOccupied),
+                          };
+                        } else {
+                          return {
+                            ...sess,
+                            physicalCap
+                          };
+                        }
                       });
 
                       // 4. Pack Swimmers using Fractional Yield Math with 175% Hard Limit
@@ -2506,6 +3067,7 @@ export default function CapacityDashboard({ session }) {
                   <div className="glass-card mb-8" style={{ padding: '1.5rem', background: 'rgba(15,23,42,0.3)' }}>
                     <h4 className="text-sm font-bold uppercase tracking-wider text-white/70 mb-4">Session Popularity & Capacity Limits</h4>
                     <div style={{ height: '320px', width: '100%' }}>
+                      {isClient && (
                       <ResponsiveContainer width="100%" height="100%">
                         <ComposedChart
                           data={squadModellingSessions.map(s => {
@@ -2526,7 +3088,7 @@ export default function CapacityDashboard({ session }) {
                             }, 0) : currentPredictedAttendance;
 
                             return {
-                              name: `${compactName} (${s.lanes_allocated || 6}L)`,
+                              name: `${compactName} (${getSessionLanesForSquad(s, targetModellingSquad?.id)}L)`,
                               'Current Capacity': s.currentCount,
                               'Proposed Capacity': proposedCount,
                               'Dynamic Limit': s.cap,
@@ -2548,6 +3110,7 @@ export default function CapacityDashboard({ session }) {
                           <Line type="monotone" dataKey="Expected Attendance" stroke="#10b981" strokeWidth={2} strokeDasharray="5 5" dot={{ fill: '#10b981', r: 3 }} activeDot={{ r: 5 }} name="Expected Turnout (Predicted)" isAnimationActive={!isExporting} />
                         </ComposedChart>
                       </ResponsiveContainer>
+                      )}
                     </div>
 
                     {/* Squad capacity stats under the chart */}
@@ -2603,7 +3166,7 @@ export default function CapacityDashboard({ session }) {
                             const proposedCount = proposedOccupancies[s.id] !== undefined ? proposedOccupancies[s.id] : s.currentCount;
                             const compactName = s.name.replace('AGE DEVELOPMENT ', '').replace('GOLD DEVELOPMENT ', '').replace('TECHNICAL DEVELOPMENT ', '').replace(' pm', '').replace(' am', '').replace(' MORNING', '');
                             const swimmersPerLane = targetModellingSquad.swimmers_per_lane || 8;
-                            const lanes = s.lanes_allocated || 6;
+                            const lanes = getSessionLanesForSquad(s, targetModellingSquad?.id);
                             
                             // Calculate predicted turnouts
                             const currentMembersInSession = memberships.filter(m => m.session_id === s.id || m.session_id === s.scm_guid);
@@ -3068,41 +3631,415 @@ export default function CapacityDashboard({ session }) {
                   </table>
                 )}
               </div>
+            ) : activeTab === 'dataHealth' ? (
+              <div className="glass-card animate-fade-in" style={{ padding: '2.5rem' }}>
+                <div className="print-only" style={{ display: 'none', textAlign: 'center', marginBottom: '2rem', paddingBottom: '1rem', borderBottom: '2px solid #000' }}>
+                  <h1 style={{ fontSize: '24px', fontWeight: '900', letterSpacing: '0.1em', margin: '0 0 8px 0' }}>COACHESEYE STRATEGIC INTELLIGENCE</h1>
+                  <h2 style={{ fontSize: '16px', fontWeight: '600', opacity: 0.8, margin: 0 }}>Data Health & Integrity Audit Report</h2>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div>
+                    <div className="section-title">Database Integrity</div>
+                    <h3 className="text-3xl font-black uppercase mb-2">Data Health Audit</h3>
+                    <p className="text-white/50 text-sm max-w-2xl" style={{ margin: 0 }}>
+                      Cross-references attendance registers, timetable configurations, and squad calendars to identify scheduling mismatches, duplicate records, or double-attendance conflicts.
+                    </p>
+                  </div>
+                  
+                  <div className="flex items-center gap-4 no-print" style={{ marginLeft: 'auto', alignSelf: 'center' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', color: 'rgba(255,255,255,0.4)', letterSpacing: '0.05em' }}>Filter Squads</label>
+                      <select
+                        value={globalSquadFilter}
+                        onChange={(e) => setGlobalSquadFilter(e.target.value)}
+                        className="border border-white/10 rounded-lg px-4 py-2 text-white font-bold outline-none focus:border-cyan-400"
+                        style={{ background: '#0f172a', color: '#fff', fontSize: '0.75rem', height: '38px', minWidth: '150px' }}
+                      >
+                        <option value="All">All Squads</option>
+                        {squadsList.map(sq => (
+                          <option key={sq} value={sq} style={{ background: '#0f172a', color: '#fff' }}>{sq}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scorecards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '16px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Audit Issues</span>
+                    <div style={{ fontSize: '2.2rem', fontWeight: 900, color: dataHealthIssues.length > 0 ? 'var(--accent-amber)' : 'var(--accent-emerald)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {dataHealthIssues.length > 0 ? '⚠️' : '✅'} {dataHealthIssues.length}
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)' }}>Total active flags in horizon</span>
+                  </div>
+
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '16px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Severe Errors</span>
+                    <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-rose)' }}>
+                      🚨 {dataHealthIssues.filter(i => i.severity === 'error').length}
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)' }}>Duplicate or holiday training entries</span>
+                  </div>
+
+                  <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '16px', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <span style={{ fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Data Warnings</span>
+                    <div style={{ fontSize: '2.2rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>
+                      🔔 {dataHealthIssues.filter(i => i.severity === 'warning').length}
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)' }}>Day-of-week & overlap alerts</span>
+                  </div>
+                </div>
+
+                {dataHealthIssues.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifycontent: 'center', padding: '5rem 2rem', gap: '1rem', background: 'rgba(16,185,129,0.04)', border: '1px solid rgba(16,185,129,0.15)', borderRadius: '16px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '3.5rem' }}>🎉</div>
+                    <h4 style={{ fontWeight: 900, fontSize: '1.25rem', color: 'var(--accent-emerald)', textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>Database is 100% Healthy</h4>
+                    <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.85rem', maxWidth: '500px', margin: 0 }}>
+                      No attendance date conflicts, overlapping sessions, holiday/shutdown training records, or duplicate registers were detected for the selected filters.
+                    </p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    {/* Diagnostic Summary Guideline */}
+                    <div style={{ background: 'rgba(6,182,212,0.05)', border: '1px solid rgba(6,182,212,0.15)', padding: '1rem 1.25rem', borderRadius: '12px', display: 'flex', gap: '12px', alignItems: 'flex-start' }} className="no-print">
+                      <span style={{ fontSize: '1.25rem', lineHeight: '1' }}>💡</span>
+                      <p style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.7)', margin: 0, lineHeight: '1.5' }}>
+                        <strong>Coaches Recommendation:</strong> Timezone shifts or day-of-week mismatches occur when registers are synced with local clocks set incorrectly or manually backdated. Double-check the attendance dates in SCM / Settings and ensure your device clock matches UTC/GMT.
+                      </p>
+                    </div>
+
+                    {/* Collapsible Accordion sections for each issue type */}
+                    {[
+                      {
+                        type: 'day_mismatch',
+                        icon: '📅',
+                        title: 'Day-of-Week Mismatches',
+                        badgeColor: 'var(--accent-cyan)',
+                        items: dataHealthIssues.filter(i => i.type === 'day_mismatch')
+                      },
+                      {
+                        type: 'overlapping_attendance',
+                        icon: '👥',
+                        title: 'Double / Overlapping Session Attendance',
+                        badgeColor: 'var(--accent-amber)',
+                        items: dataHealthIssues.filter(i => i.type === 'overlapping_attendance')
+                      },
+                      {
+                        type: 'shutdown_attendance',
+                        icon: '🛑',
+                        title: 'Attendance on Shutdown / Holiday Dates',
+                        badgeColor: 'var(--accent-rose)',
+                        items: dataHealthIssues.filter(i => i.type === 'shutdown_attendance')
+                      },
+                      {
+                        type: 'duplicate_attendance',
+                        icon: '👥',
+                        title: 'Duplicate Swimmer Attendance Entries',
+                        badgeColor: 'var(--accent-rose)',
+                        items: dataHealthIssues.filter(i => i.type === 'duplicate_attendance')
+                      },
+                      {
+                        type: 'excessive_occupancy',
+                        icon: '📈',
+                        title: 'Excessive Turnout (> 150% Physical Limits)',
+                        badgeColor: 'var(--accent-amber)',
+                        items: dataHealthIssues.filter(i => i.type === 'excessive_occupancy')
+                      },
+                      {
+                        type: 'abnormal_duration',
+                        icon: '🕒',
+                        title: 'Abnormal Session Configurations (Duration Error)',
+                        badgeColor: 'var(--accent-cyan)',
+                        items: dataHealthIssues.filter(i => i.type === 'abnormal_duration')
+                      }
+                    ].map(sec => {
+                      if (sec.items.length === 0) return null;
+                      return (
+                        <div key={sec.type} className="glass-card" style={{ border: '1px solid var(--glass-border)', borderRadius: '16px', overflow: 'hidden', background: 'rgba(255, 255, 255, 0.01)' }}>
+                          <details open={sec.items.length > 0} style={{ width: '100%' }}>
+                            <summary className="cursor-pointer" style={{ 
+                              padding: '1.25rem 1.5rem', 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              fontWeight: 900, 
+                              fontSize: '0.9rem', 
+                              textTransform: 'uppercase', 
+                              letterSpacing: '0.05em', 
+                              listStyle: 'none',
+                              color: 'var(--text-primary)',
+                              userSelect: 'none'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span>{sec.icon}</span>
+                                <span>{sec.title}</span>
+                                <span style={{ 
+                                  background: sec.badgeColor, 
+                                  color: '#000', 
+                                  borderRadius: '20px', 
+                                  padding: '2px 8px', 
+                                  fontSize: '0.65rem', 
+                                  fontWeight: 900, 
+                                  marginLeft: '8px' 
+                                }}>
+                                  {sec.items.length} {sec.items.length === 1 ? 'flag' : 'flags'}
+                                </span>
+                              </div>
+                              <span style={{ fontSize: '0.8rem', opacity: 0.5 }}>▼</span>
+                            </summary>
+                            <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', borderTop: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.1)' }}>
+                              <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
+                                <table className="stats-table-glass w-full" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                  <thead>
+                                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', width: '120px' }}>Date</th>
+                                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', width: '160px' }}>Swimmer</th>
+                                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', width: '120px' }}>Squad</th>
+                                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>Session / Description</th>
+                                      <th style={{ textAlign: 'center', padding: '10px 16px', fontSize: '0.65rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', width: '100px' }}>Severity</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {sec.items.map((item) => (
+                                      <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                        <td style={{ padding: '12px 16px', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                          {item.date ? new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : 'N/A'}
+                                        </td>
+                                        <td style={{ padding: '12px 16px', fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                          {item.swimmerName}
+                                        </td>
+                                        <td style={{ padding: '12px 16px', fontSize: '0.7rem', fontWeight: 700 }}>
+                                          <span style={{
+                                            background: 'rgba(6,182,212,0.08)',
+                                            border: '1px solid rgba(6,182,212,0.2)',
+                                            color: 'var(--accent-cyan)',
+                                            padding: '2px 8px',
+                                            borderRadius: '4px',
+                                            fontSize: '0.65rem'
+                                          }}>
+                                            {item.squadName}
+                                          </span>
+                                        </td>
+                                        <td style={{ padding: '12px 16px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                          <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>{item.sessionName}</div>
+                                          <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)', marginTop: '4px' }}>{item.description}</div>
+                                        </td>
+                                        <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                                          <span style={{
+                                            background: item.severity === 'error' ? 'rgba(244,63,94,0.12)' : 'rgba(245,158,11,0.12)',
+                                            border: item.severity === 'error' ? '1px solid rgba(244,63,94,0.3)' : '1px solid rgba(245,158,11,0.3)',
+                                            color: item.severity === 'error' ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                                            borderRadius: '6px',
+                                            padding: '3px 8px',
+                                            fontSize: '0.65rem',
+                                            fontWeight: 900,
+                                            textTransform: 'uppercase'
+                                          }}>
+                                            {item.severity}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </details>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             ) : null}
           </>
         )}
       </div>
-        {graphSession && (
-          <div className="modal-overlay no-print" onClick={() => setGraphSession(null)} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(5px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div className="glass-card animate-scale-in" style={{ width: '100%', maxWidth: '700px', padding: '2.5rem' }} onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <div className="text-xs font-bold text-cyan-400 tracking-widest uppercase mb-1">{graphSession.sess.day_of_week} • {graphSession.sess.start_time}</div>
-                  <h2 className="text-2xl font-black uppercase text-white">{graphSession.sess.name}</h2>
-                  <div className="text-sm text-white/50 mt-1">{periodDays}-Day Attendance Verification</div>
-                </div>
-                <button onClick={() => setGraphSession(null)} className="text-white/40 hover:text-white text-2xl font-bold">✕</button>
-              </div>
+        {graphSession && (() => {
+          const sess = graphSession.sess || {};
+          const attendanceList = graphSession.sessionAtt || [];
+          const maxCapacity = graphSession.maxCapacity || 0;
 
-              <div style={{ height: '300px', width: '100%', marginTop: '2rem' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={[...new Set(graphSession.sessionAtt.map(a => a.date))].sort().map(d => ({
-                      date: new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
-                      count: graphSession.sessionAtt.filter(a => a.date === d).length
-                    }))}
-                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                  >
-                    <XAxis dataKey="date" stroke="rgba(255,255,255,0.3)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} tickLine={false} axisLine={false} domain={[0, graphSession.maxCapacity > 0 ? Math.max(graphSession.maxCapacity, 10) : 'auto']} />
-                    <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: '1px solid rgba(0, 212, 255, 0.3)', borderRadius: '12px', color: '#fff', fontWeight: 'bold' }} />
-                    <Bar dataKey="count" fill="var(--accent-cyan)" radius={[1]} name="Swimmers Present" />
-                  </BarChart>
-                </ResponsiveContainer>
+          return (
+            <div className="modal-overlay no-print" onClick={() => { setGraphSession(null); setSelectedAttendanceDate(null); }} style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(5px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div className="glass-card animate-scale-in" style={{ width: '100%', maxWidth: '700px', padding: '2.5rem' }} onClick={e => e.stopPropagation()}>
+                {!selectedAttendanceDate ? (
+                  <>
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <div className="text-xs font-bold text-cyan-400 tracking-widest uppercase mb-1">{sess.day_of_week || 'Session'} • {sess.start_time || ''}</div>
+                        <h2 className="text-2xl font-black uppercase" style={{ color: 'var(--text-primary)' }}>{sess.name || 'Session Details'}</h2>
+                        <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{periodDays}-Day Attendance Verification</div>
+                      </div>
+                      <button onClick={() => { setGraphSession(null); setSelectedAttendanceDate(null); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }} className="hover:text-cyan-400 text-2xl font-bold">✕</button>
+                    </div>
+
+                    <div style={{ height: '300px', width: '100%', marginTop: '2rem' }}>
+                      {isClient && (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={[...new Set(attendanceList.map(a => a.date))].sort().map(d => ({
+                              date: new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
+                              count: attendanceList.filter(a => a.date === d).length,
+                              rawDate: d
+                            }))}
+                            margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                          >
+                            <XAxis dataKey="date" stroke="rgba(255,255,255,0.3)" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} tickLine={false} axisLine={false} domain={[0, maxCapacity > 0 ? Math.max(maxCapacity, 10) : 'auto']} />
+                            <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ background: 'var(--bg-deep)', border: '1px solid var(--glass-border)', borderRadius: '12px', color: 'var(--text-primary)', fontWeight: 'bold' }} />
+                            <Bar 
+                              dataKey="count" 
+                              fill="var(--accent-cyan)" 
+                              radius={[1]} 
+                              name="Swimmers Present" 
+                              cursor="pointer"
+                              onClick={(entry) => {
+                                const rawDate = entry?.payload?.rawDate || entry?.rawDate;
+                                if (rawDate) {
+                                  setSelectedAttendanceDate(rawDate);
+                                }
+                              }}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+
+                    <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--glass-border)', paddingTop: '1.5rem' }}>
+                      <h3 className="text-sm font-bold uppercase mb-3 flex items-center gap-2" style={{ color: 'var(--text-primary)', opacity: 0.8 }}>
+                        📅 Previous Weeks History <span className="text-xs font-normal normal-case" style={{ color: 'var(--text-secondary)' }}>(Click a week to view attendance details)</span>
+                      </h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[160px] overflow-y-auto custom-scrollbar pr-1">
+                        {[...new Set(attendanceList.map(a => a.date))].sort().reverse().map(d => {
+                          const count = attendanceList.filter(a => a.date === d).length;
+                          const formattedDate = new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                          return (
+                            <button
+                              key={d}
+                              onClick={() => setSelectedAttendanceDate(d)}
+                              className="flex justify-between items-center transition-all rounded-lg p-2 text-left cursor-pointer"
+                              style={{
+                                background: 'rgba(var(--accent-cyan-rgb), 0.03)',
+                                border: '1px solid var(--glass-border)'
+                              }}
+                            >
+                              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-primary)' }}>{formattedDate}</div>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{count} present</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-start mb-6">
+                      <div>
+                        <button 
+                          onClick={() => setSelectedAttendanceDate(null)} 
+                          className="text-xs font-bold text-cyan-400 hover:underline uppercase mb-1 flex items-center gap-1 cursor-pointer bg-transparent border-0 p-0"
+                        >
+                          ← Back to Chart
+                        </button>
+                        <h2 className="text-2xl font-black uppercase" style={{ color: 'var(--text-primary)' }}>
+                          {new Date(selectedAttendanceDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </h2>
+                        <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{sess.name || ''} • {sess.day_of_week || ''} ({sess.start_time || ''})</div>
+                      </div>
+                      <button onClick={() => { setGraphSession(null); setSelectedAttendanceDate(null); }} style={{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }} className="hover:text-cyan-400 text-2xl font-bold">✕</button>
+                    </div>
+
+                    {(() => {
+                      const presentRecords = attendanceList.filter(a => a.date === selectedAttendanceDate);
+                      const presentSwimmerIds = new Set(presentRecords.map(a => a.swimmer_id));
+
+                      const presentSwimmers = presentRecords.map(a => {
+                        const sw = swimmers.find(s => s.id === a.swimmer_id);
+                        const isScheduled = memberships.some(m => m.swimmer_id === a.swimmer_id && (m.session_id === sess.id || m.session_id === sess.scm_guid));
+                        return {
+                          id: a.swimmer_id,
+                          name: sw ? sw.full_name : 'Unknown Swimmer',
+                          squad: sw?.squads?.name || 'Unknown Squad',
+                          isScheduled
+                        };
+                      }).sort((a, b) => a.name.localeCompare(b.name));
+
+                      const absentSwimmers = swimmers.filter(sw => {
+                        const isScheduled = memberships.some(m => m.swimmer_id === sw.id && (m.session_id === sess.id || m.session_id === sess.scm_guid));
+                        if (!isScheduled) return false;
+                        if (globalSquadFilter !== 'All') {
+                          if (sw.squads?.name !== globalSquadFilter) return false;
+                        }
+                        return !presentSwimmerIds.has(sw.id);
+                      }).map(sw => ({
+                        id: sw.id,
+                        name: sw.full_name,
+                        squad: sw.squads?.name || 'Unknown Squad'
+                      })).sort((a, b) => a.name.localeCompare(b.name));
+
+                      return (
+                        <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                          <div>
+                            <h3 className="text-xs font-bold uppercase mb-2 tracking-wider flex justify-between items-center" style={{ color: 'var(--accent-emerald)' }}>
+                              <span>Present Swimmers ({presentSwimmers.length})</span>
+                              {globalSquadFilter !== 'All' && <span className="opacity-55 font-normal text-[10px] normal-case" style={{ color: 'var(--text-secondary)' }}>Filtered by {globalSquadFilter}</span>}
+                            </h3>
+                            <div className="custom-scrollbar pr-1" style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: '10px', background: 'rgba(var(--accent-cyan-rgb), 0.01)' }}>
+                              {presentSwimmers.length === 0 ? (
+                                <div className="p-4 text-center text-xs" style={{ color: 'var(--text-dim)' }}>No attendance recorded for this date.</div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  {presentSwimmers.map((ps, idx) => (
+                                    <div key={ps.id} className="flex justify-between items-center p-3" style={{ borderBottom: idx < presentSwimmers.length - 1 ? '1px solid var(--glass-border)' : 'none' }}>
+                                      <div>
+                                        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)' }}>{ps.name}</div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{ps.squad}</div>
+                                      </div>
+                                      {!ps.isScheduled && (
+                                        <span style={{ fontSize: '0.6rem', fontWeight: 900, background: 'rgba(244,63,94,0.15)', color: 'var(--accent-rose)', padding: '2px 8px', borderRadius: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                          ⚠️ Unscheduled
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <h3 className="text-xs font-bold uppercase mb-2 tracking-wider flex justify-between items-center" style={{ color: 'var(--accent-amber)' }}>
+                              <span>Absent (Scheduled) ({absentSwimmers.length})</span>
+                            </h3>
+                            <div className="custom-scrollbar pr-1" style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: '10px', background: 'rgba(var(--accent-cyan-rgb), 0.01)' }}>
+                              {absentSwimmers.length === 0 ? (
+                                <div className="p-4 text-center text-xs" style={{ color: 'var(--text-dim)' }}>No scheduled swimmers absent on this date.</div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                  {absentSwimmers.map((as, idx) => (
+                                    <div key={as.id} className="flex justify-between items-center p-3" style={{ borderBottom: idx < absentSwimmers.length - 1 ? '1px solid var(--glass-border)' : 'none' }}>
+                                      <div>
+                                        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-primary)', opacity: 0.8 }}>{as.name}</div>
+                                        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{as.squad}</div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </>
+                )}
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
         <CapacityReportModal
           isOpen={isReportModalOpen}
           onClose={() => setIsReportModalOpen(false)}
@@ -3110,6 +4047,59 @@ export default function CapacityDashboard({ session }) {
           squadsList={squadsList}
           loading={isExporting}
         />
+
+        {/* Capacity Breakdown Modal */}
+        {showCapacityDetails && squadCapacityMetrics && (() => {
+            const activeSquad = targetModellingSquad;
+            const squadSessions = squadModellingSessions;
+            return (
+                <div className="modal-overlay" onClick={() => setShowCapacityDetails(false)} style={{ zIndex: 1000, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div className="glass-card animate-scale-in" style={{ width: '100%', maxWidth: '600px', padding: '2rem', maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 style={{ fontSize: '1.5rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '-0.02em', margin: 0 }}>Capacity Breakdown</h2>
+                            <button onClick={() => setShowCapacityDetails(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: '1.5rem', cursor: 'pointer' }}>✕</button>
+                        </div>
+
+                        <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+                            <div className="section-title" style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Squad Variables</div>
+                            <div className="flex justify-between mt-2">
+                                <div style={{ fontSize: '0.9rem' }}>Max Swimmers Per Lane: <strong style={{ color: 'white' }}>{activeSquad?.max_swimmers_per_lane || activeSquad?.swimmers_per_lane || 5}</strong></div>
+                                <div style={{ fontSize: '0.9rem' }}>Target Sessions/Week: <strong style={{ color: 'white' }}>{activeSquad?.target_sessions_per_week || 1}</strong></div>
+                            </div>
+                        </div>
+
+                        <div className="section-title" style={{ fontSize: '0.7rem', marginBottom: '1rem' }}>Session Slot Allocation</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '2rem' }}>
+                            {squadSessions.map(session => {
+                                const lanes = getSessionLanesForSquad(session, activeSquad?.id);
+                                const maxPerLane = activeSquad?.max_swimmers_per_lane || activeSquad?.swimmers_per_lane || 5;
+                                const slots = lanes * maxPerLane;
+                                return (
+                                    <div key={session.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <div>
+                                            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{session.name}</div>
+                                            <div style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '4px' }}>{session.day_of_week} | {session.start_time} - {session.end_time}</div>
+                                        </div>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div style={{ fontWeight: 900, color: 'var(--accent-cyan)', fontSize: '1.1rem' }}>{slots} Slots</div>
+                                            <div style={{ fontSize: '0.7rem', opacity: 0.5 }}>{lanes} lanes × {maxPerLane} swimmers</div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            {(!squadSessions || squadSessions.length === 0) && (
+                                <div style={{ textAlign: 'center', opacity: 0.5, padding: '1rem' }}>No sessions assigned to this squad.</div>
+                            )}
+                        </div>
+
+                        <div style={{ background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.2)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontWeight: 700 }}>Total Weekly Slots: <span style={{ color: 'var(--accent-cyan)' }}>{squadCapacityMetrics.totalSlots}</span></div>
+                            <div style={{ fontWeight: 700 }}>Max Squad Size: <span style={{ color: 'var(--accent-amber)' }}>{squadCapacityMetrics.maxSquadSize}</span> athletes</div>
+                        </div>
+                    </div>
+                </div>
+            );
+        })()}
     </Layout>
   );
 }

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { supabase } from '../lib/supabase';
 
 export default function ReadinessBreakdownCard({ swimmer, healthData, squad }) {
   const [loading, setLoading] = useState(false);
@@ -9,9 +10,10 @@ export default function ReadinessBreakdownCard({ swimmer, healthData, squad }) {
     setLoading(true);
     setError(null);
     try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authSession?.access_token}` },
         body: JSON.stringify({
           swimmerId: swimmer.id,
           type: 'readiness',

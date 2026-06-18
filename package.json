@@ -1,6 +1,6 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.104",
+  "version": "1.0.148",
   "description": "",
   "scripts": {
     "dev": "next dev",
@@ -17,6 +17,7 @@
     "@supabase/supabase-js": "^2.105.4",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
+    "dompurify": "^3.4.8",
     "dotenv": "^17.4.2",
     "formidable": "^3.5.4",
     "next": "^16.2.6",

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import DOMPurify from 'dompurify';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import PremiumOrb from '../../components/PremiumOrb';
@@ -164,6 +165,8 @@ export default function SwimmerDetail({ session }) {
     }
     return text;
   };
+
+  const sanitizeHtml = (html) => typeof window === 'undefined' ? '' : DOMPurify.sanitize(html);
 
   const [loading, setLoading] = useState(true);
 
@@ -441,10 +444,6 @@ const [decayDistance, setDecayDistance] = useState('100');
       const { data: swData } = await supabase.from('swimmers').select('*, squads(*)').eq('id', id).single();
       if (!swData) return;
 
-      // CRITICAL FIX: Download custom club exemptions so the math engine can see Primary Schools Gala and Shutdowns
-      const { data: exData } = await supabase.from('club_exemptions').select('*');
-      setExemptions(exData || []);
-
       const fetchPaged = async (table, select = '*', filter = null) => {
         let all = []; let page = 0; let more = true;
         while (more && page < 20) {
@@ -459,22 +458,29 @@ const [decayDistance, setDecayDistance] = useState('100');
         return all;
       };
 
-      const [resData, attData, sessData, insData, exemptData, memRes, aiReportsRes] = await Promise.all([
-        fetchPaged('results', '*, meets(*)', q => q.eq('swimmer_id', id)),
-        fetchPaged('training_attendance', '*', q => q.eq('swimmer_id', id)),
-        fetchPaged('sessions', '*'),
-        supabase.from('swimmer_insights').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }),
-        supabase.from('club_exemptions').select('*'),
-        fetch(`/api/memberships?swimmerId=${id}`).then(r => r.json()),
-        supabase.from('ai_reports').select('*').eq('swimmer_id', id).order('created_at', { ascending: false })
+      const t0 = performance.now();
+      const [resData, attData, sessData, insData, exemptData, memRes, aiReportsRes, meetsRaw, pbsData] = await Promise.all([
+        fetchPaged('results', '*', q => q.eq('swimmer_id', id)).then(d => { console.log(`results: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        fetchPaged('training_attendance', '*', q => q.eq('swimmer_id', id)).then(d => { console.log(`attendance: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        fetchPaged('sessions', '*').then(d => { console.log(`sessions: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        supabase.from('swimmer_insights').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }).then(d => { console.log(`insights: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        supabase.from('club_exemptions').select('*').then(d => { console.log(`exemptions: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        fetch(`/api/memberships?swimmerId=${id}`).then(r => r.json()).then(d => { console.log(`memberships: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        supabase.from('ai_reports').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }).then(d => { console.log(`ai_reports: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        supabase.from('meets').select('id, name, date').order('date', { ascending: false }).limit(500).then(d => { console.log(`meets: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        supabase.from('swimmer_pbs').select('*').eq('swimmer_id', id).then(d => { console.log(`pbs: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
       ]);
-      
-      const { data: pbsData } = await supabase.from('swimmer_pbs').select('*').eq('swimmer_id', id);
+
+      // Enrich results with meet data client-side (avoids expensive per-row join)
+      const meetsById = Object.fromEntries((meetsRaw.data || []).map(m => [m.id, m]));
+      const enrichedResults = (resData || [])
+        .map(r => ({ ...r, meets: meetsById[r.meet_id] || null }))
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
 
       setSwimmer(swData);
       setSquad(swData.squads);
-      setResults((resData || []).sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0)));
-      setPbs(pbsData || []);
+      setResults(enrichedResults);
+      setPbs(pbsData.data || []);
       setAttendance(attData || []);
       setSessions(sessData || []);
       setInsights(insData.data || []);
@@ -1514,12 +1520,14 @@ const [decayDistance, setDecayDistance] = useState('100');
                                   <div 
                                       className="swot-quadrant-text print-text-dim"
                                       style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.4' }} 
-                                      dangerouslySetInnerHTML={{ 
-                                          __html: stripEmojis(item.data || 'No data generated.')
-                                              .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
-                                              .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
-                                              .replace(/^<br\/>/, '')
-                                      }} 
+                                      dangerouslySetInnerHTML={{
+                                          __html: sanitizeHtml(
+                                              stripEmojis(item.data || 'No data generated.')
+                                                  .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
+                                                  .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
+                                                  .replace(/^<br\/>/, '')
+                                          )
+                                      }}
                                   />
                               </div>
                           ))}
@@ -3484,7 +3492,8 @@ const [decayDistance, setDecayDistance] = useState('100');
       {activeTab === 'workload' && (
         <div className={`no-print ${!reportConfig.sections.attendance ? 'hide-in-report' : ''} animate-fade-in`}>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
-          <div className="lg:col-span-2 glass-card" style={{ padding: '2.5rem', minHeight: '400px' }}>
+          <div className="lg:col-span-2 flex flex-col gap-8">
+            <div className="glass-card" style={{ padding: '2.5rem', minHeight: '400px' }}>
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
                   <div className="flex justify-between items-end mb-6">
@@ -3622,10 +3631,13 @@ const [decayDistance, setDecayDistance] = useState('100');
                 </ResponsiveContainer>
                 )}
              </div>
-              <div style={{ marginTop: '2rem', overflowX: 'auto', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.05)', maxHeight: '400px', overflowY: 'auto' }} className="custom-scrollbar">
-                  <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                      Weekly Workload Details
-                  </h4>
+            </div>
+
+            <div className="glass-card" style={{ padding: '2rem' }}>
+              <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  Weekly Workload Details
+              </h4>
+              <div style={{ overflowX: 'auto', maxHeight: '400px', overflowY: 'auto' }} className="custom-scrollbar">
                   <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
                       <thead style={{ position: 'sticky', top: '-1.5rem', background: 'var(--bg-dark)', zIndex: 10, boxShadow: '0 4px 6px -4px rgba(0,0,0,0.5)' }}>
                           <tr>
@@ -3697,10 +3709,13 @@ const [decayDistance, setDecayDistance] = useState('100');
                       </tfoot>
                   </table>
               </div>
-              <div style={{ marginTop: '2rem', overflowX: 'auto', background: 'rgba(255, 255, 255, 0.02)', borderRadius: '12px', padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.05)', maxHeight: '300px', overflowY: 'auto' }} className="custom-scrollbar">
-                  <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-amber)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                      System Exemptions & Holidays Applied
-                  </h4>
+            </div>
+
+            <div className="glass-card" style={{ padding: '2rem' }}>
+              <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-amber)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                  System Exemptions & Holidays Applied
+              </h4>
+              <div style={{ overflowX: 'auto', maxHeight: '300px', overflowY: 'auto' }} className="custom-scrollbar">
                   <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
                       <thead style={{ position: 'sticky', top: '-1.5rem', background: 'var(--bg-dark)', zIndex: 10, boxShadow: '0 4px 6px -4px rgba(0,0,0,0.5)' }}>
                           <tr>
@@ -3731,14 +3746,14 @@ const [decayDistance, setDecayDistance] = useState('100');
                       </tbody>
                   </table>
               </div>
+            </div>
 
-
-          </div>
-          <div className="lg:col-span-2 glass-card mt-6" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
-            <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: WORKLOAD</h4>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-  Consistent workload is the primary driver of aerobic adaptation. This section tracks volume compliance against the athlete's specific squad targets and LTAD stage. <strong>If an athlete joins a squad mid-season, the system automatically truncates the timeline and prorates their target hours to ensure fair compliance grading.</strong>
-</p>
+            <div className="glass-card" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
+              <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: WORKLOAD</h4>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
+                Consistent workload is the primary driver of aerobic adaptation. This section tracks volume compliance against the athlete's specific squad targets and LTAD stage. <strong>If an athlete joins a squad mid-season, the system automatically truncates the timeline and prorates their target hours to ensure fair compliance grading.</strong>
+              </p>
+            </div>
           </div>
           <div className="lg:col-span-1 flex flex-col gap-6 no-print">
             <AiInsightCard 

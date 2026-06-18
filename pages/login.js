@@ -204,6 +204,12 @@ export default function Login({ session }) {
         <div style={{ marginTop: '2.5rem', opacity: 0.3, fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Authorized Personnel Only
         </div>
+
+        <div style={{ marginTop: '2.5rem', paddingTop: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.1)', textAlign: 'center' }}>
+          <p style={{ fontSize: '0.7rem', opacity: 0.5, maxWidth: '350px', margin: '0 auto', lineHeight: '1.5' }}>
+            By signing in, you acknowledge that data and automated insights provided by the CoachesEye platform are for analytical guidance and modeling purposes only. They do not replace professional medical advice or direct poolside coaching assessments.
+          </p>
+        </div>
       </div>
     </div>
   );

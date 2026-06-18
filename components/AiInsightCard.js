@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import DOMPurify from 'dompurify';
+
+const sanitizeHtml = (html) => typeof window === 'undefined' ? '' : DOMPurify.sanitize(html);
 
 export default function AiInsightCard({ 
   swimmerId, 
@@ -396,12 +399,12 @@ export default function AiInsightCard({
                             <div 
                                 className="swot-quadrant-text text-[0.8rem]"
                                 style={{ color: 'rgba(255,255,255,0.85)', lineHeight: '1.6' }} 
-                                dangerouslySetInnerHTML={{ 
-                                    __html: (item.data || 'No data generated.')
+                                dangerouslySetInnerHTML={{
+                                    __html: sanitizeHtml((item.data || 'No data generated.')
                                         .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
                                         .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
-                                        .replace(/^<br\/>/, '')
-                                }} 
+                                        .replace(/^<br\/>/, ''))
+                                }}
                             />
                         </div>
                     ))}
@@ -528,15 +531,12 @@ export default function AiInsightCard({
                             <div 
                                 className="swot-quadrant-text"
                                 style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.85)', lineHeight: '1.7' }} 
-                                dangerouslySetInnerHTML={{ 
-                                    __html: (item.data || 'No data generated.')
-                                        // Replace **Text** with White Bold Text
+                                dangerouslySetInnerHTML={{
+                                    __html: sanitizeHtml((item.data || 'No data generated.')
                                         .replace(/\*\*(.*?)\*\*/g, '<strong style="color: white; font-weight: 800;">$1</strong>')
-                                        // Replace * with clean bullet points and line breaks
                                         .replace(/(?:\r\n|\r|\n)?\*\s+/g, '<br/><span style="opacity: 0.5; margin-right: 6px;">•</span>')
-                                        // Clean up any leading breaks
-                                        .replace(/^<br\/>/, '')
-                                }} 
+                                        .replace(/^<br\/>/, ''))
+                                }}
                             />
                         </div>
                     ))}

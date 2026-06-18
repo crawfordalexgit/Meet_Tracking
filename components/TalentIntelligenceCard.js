@@ -42,11 +42,12 @@ export default function TalentIntelligenceCard({ squadId, squadName, stats, stro
     setLoading(true);
     setError(null);
     try {
+      const { data: { session: authSession } } = await supabase.auth.getSession();
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          squadId: squadId, 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authSession?.access_token}` },
+        body: JSON.stringify({
+          squadId: squadId,
           type: 'talent',
           squadName,
           stats,

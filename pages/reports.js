@@ -168,7 +168,7 @@ export default function ReportsCenter({ session }) {
 
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify(payload)
       });
 
@@ -191,7 +191,7 @@ export default function ReportsCenter({ session }) {
       const activeSquad = squads.find(s => s.id === squadId);
       const res = await fetch('/api/export-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           squadId,
           squadName: activeSquad?.name,

@@ -91,7 +91,7 @@ function TrafficLightBadge({ rank, maxAccepted }) {
 
 // ─── CoachesEye AI Card ──────────────────────────────────────────────────────
 
-function PathwayAiCard({ swimmer, age, gapData, rankings, course }) {
+function PathwayAiCard({ swimmer, age, gapData, rankings, course, session }) {
   const [loading, setLoading]   = useState(false);
   const [insight, setInsight]   = useState(null);
   const [error, setError]       = useState(null);
@@ -139,7 +139,7 @@ function PathwayAiCard({ swimmer, age, gapData, rankings, course }) {
     try {
       const res = await fetch('/api/ai/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           swimmerId: swimmer.id,
           type: 'pathway',
@@ -362,11 +362,11 @@ function QtTable({ results, age, currentAge, gender, course, rankings, level }) 
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
-export default function PredictorPage() {
+export default function PredictorPage({ session: propSession }) {
   const router = useRouter();
   const { level: queryLevel } = router.query;
 
-  const [session, setSession]       = useState(null);
+  const [session, setSession]       = useState(propSession || null);
   const [swimmers, setSwimmers]     = useState([]);
   const [allResults, setAllResults] = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -378,13 +378,21 @@ export default function PredictorPage() {
   console.log("🚨 CANARY LOG: PredictorPage Rendered! Selected ID:", selectedId);
   console.log("🚨 CURRENT RANKINGS IN STATE:", rankings?.length);
 
+  // Sync prop session to state session if propSession is loaded after initial render
+  useEffect(() => {
+    if (propSession) {
+      setSession(propSession);
+    }
+  }, [propSession]);
+
   // Auth guard
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) { router.push('/login'); return; }
-      setSession(session);
+    if (propSession) return;
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      if (!currentSession) { router.push('/login'); return; }
+      setSession(currentSession);
     });
-  }, [router]);
+  }, [router, propSession]);
 
   // Fetch swimmers + results
   useEffect(() => {
@@ -562,7 +570,7 @@ export default function PredictorPage() {
           </div>
 
           {/* AI Card */}
-          <PathwayAiCard swimmer={swimmer} age={age} gapData={gapData} rankings={rankings} course={course} />
+          <PathwayAiCard swimmer={swimmer} age={age} gapData={gapData} rankings={rankings} course={course} session={session} />
 
           {/* QT Table */}
           <div className="glass-card" style={{ padding: '2.5rem' }}>

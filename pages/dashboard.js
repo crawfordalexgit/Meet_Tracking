@@ -64,6 +64,8 @@ export default function Dashboard({ session }) {
   const [drilldownSearch, setDrilldownSearch] = useState('');
   const [showAIAudit, setShowAIAudit] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [masterSyncState, setMasterSyncState] = useState({ active: false, message: '' });
+  const [seSyncState, setSeSyncState] = useState({ active: false, message: '' });
   
   const PERIOD_OPTIONS = [
     { label: '30 Days', days: 30 },
@@ -101,30 +103,72 @@ export default function Dashboard({ session }) {
     return all;
   };
 
+  const handleMasterSync = async () => {
+    setMasterSyncState({ active: true, message: 'Phase 1: Syncing SCM Baseline...' });
+    try {
+      await fetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+
+      setMasterSyncState({ active: true, message: 'Phase 2: Syncing Attendance...' });
+      await fetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+
+      setMasterSyncState({ active: false, message: 'Daily Master Sync Complete!' });
+      fetchAll();
+      setTimeout(() => setMasterSyncState({ active: false, message: '' }), 5000);
+    } catch (error) {
+      setMasterSyncState({ active: false, message: `Error: ${error.message}` });
+    }
+  };
+
+  const handleSwimEnglandSync = async () => {
+    setSeSyncState({ active: true, message: 'Phase 1: Scraping Official Meets...' });
+    try {
+      await fetch('/api/scrape-meets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ swimmingYear: '2025/2026' }) });
+
+      setSeSyncState({ active: true, message: 'Phase 2: Scraping PBs & Rankings...' });
+      await fetch('/api/scrape-rankings', { method: 'POST' });
+
+      setSeSyncState({ active: false, message: 'Swim England Update Complete!' });
+      fetchAll();
+      setTimeout(() => setSeSyncState({ active: false, message: '' }), 5000);
+    } catch (error) {
+      setSeSyncState({ active: false, message: `Error: ${error.message}` });
+    }
+  };
+
   const fetchAll = async () => {
     setLoading(true);
     try {
       const now = new Date();
       const y1ago = new Date(now - 450 * 86400000).toISOString().split('T')[0];
+      // Fetch latest rankings snapshot date first to avoid loading all history
+      const { data: latestSnap } = await supabase.from('rankings').select('snapshot_date').order('snapshot_date', { ascending: false }).limit(1).maybeSingle();
+      const latestSnapDate = latestSnap?.snapshot_date;
+
       const [swimmers, squads, results, attendance, sessions, meets, pbs, exemptions, rankings] = await Promise.all([
         fetchPaged('swimmers', '*, squads(id,name,target_meets,target_sessions_per_week,target_training_percent,target_hours_per_week,require_weekend,use_or_logic)', q => q.order('full_name')),
         fetchPaged('squads', '*', q => q.eq('is_squad', true).order('name')),
-        fetchPaged('results', 'id, swimmer_id, wa_pts, is_pb, date, meet_id, event, course, time, meets(name, license)', q => q.gte('date', y1ago).order('date', { ascending: false })),
+        fetchPaged('results', 'id, swimmer_id, wa_pts, is_pb, date, meet_id, event, course, time', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('training_attendance', 'id, swimmer_id, session_id, date, status', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('sessions', '*', q => q.order('id')),
-        fetchPaged('meets', '*', q => q.order('date', { ascending: false })),
+        fetchPaged('meets', '*', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('swimmer_pbs', 'swimmer_id,date', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('club_exemptions', '*'),
-        fetchPaged('rankings', 'id, swimmer_id, district, rank, stroke, snapshot_date', q => q.order('snapshot_date', { ascending: false }))
+        latestSnapDate
+          ? fetchPaged('rankings', 'id, swimmer_id, district, rank, stroke, snapshot_date', q => q.eq('snapshot_date', latestSnapDate))
+          : Promise.resolve([]),
       ]);
       
+      // Enrich results with meet data (avoids slow DB join)
+      const meetsById = Object.fromEntries((meets || []).map(m => [m.id, m]));
+      const enrichedResults = (results || []).map(r => ({ ...r, meets: meetsById[r.meet_id] || null }));
+
       // Fetch memberships separately so they don't block
       fetch('/api/memberships')
         .then(r => r.ok ? r.json() : [])
         .then(memberships => setData(prev => ({ ...prev, memberships })))
         .catch(() => {});
 
-      setData({ swimmers, squads, results, attendance, sessions, meets, pbs: pbs || [], exemptions, rankings: rankings || [], memberships: [] });
+      setData({ swimmers, squads, results: enrichedResults, attendance, sessions, meets, pbs: pbs || [], exemptions, rankings: rankings || [], memberships: [] });
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -945,6 +989,54 @@ export default function Dashboard({ session }) {
 
       {activeTab === 'dashboard' ? (
         <>
+          {/* System Operations Banner */}
+          <div className="flex gap-4 mb-8 no-print" style={{ flexWrap: 'wrap' }}>
+            <button
+              onClick={handleMasterSync}
+              disabled={masterSyncState.active}
+              className="btn-premium-intel"
+              style={{
+                display: 'flex', gap: '8px', alignItems: 'center',
+                background: masterSyncState.active ? 'rgba(0, 212, 255, 0.2)' : '',
+                opacity: masterSyncState.active ? 0.75 : 1,
+                cursor: masterSyncState.active ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {masterSyncState.active && (
+                <span style={{
+                  width: '12px', height: '12px', display: 'inline-block',
+                  border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'var(--accent-cyan)',
+                  borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0
+                }} />
+              )}
+              <span>⚡</span>
+              {masterSyncState.active ? masterSyncState.message : 'Run Daily Master Sync'}
+            </button>
+
+            <button
+              onClick={handleSwimEnglandSync}
+              disabled={seSyncState.active}
+              className="btn-premium-intel"
+              style={{
+                display: 'flex', gap: '8px', alignItems: 'center',
+                borderColor: 'var(--accent-amber)', color: 'var(--accent-amber)',
+                background: seSyncState.active ? 'rgba(251, 191, 36, 0.2)' : '',
+                opacity: seSyncState.active ? 0.75 : 1,
+                cursor: seSyncState.active ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {seSyncState.active && (
+                <span style={{
+                  width: '12px', height: '12px', display: 'inline-block',
+                  border: '2px solid rgba(251,191,36,0.3)', borderTopColor: 'var(--accent-amber)',
+                  borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0
+                }} />
+              )}
+              <span>🏆</span>
+              {seSyncState.active ? seSyncState.message : 'Update Swim England Rankings'}
+            </button>
+          </div>
+
           <div className="flex gap-6 mb-12 w-full overflow-x-auto no-scrollbar" style={{ flexWrap: 'nowrap', justifyContent: 'center', alignItems: 'center' }}>
             <div style={{ cursor: 'pointer' }} onClick={() => router.push(`/squads?period=${periodDays}`)}>
               <PremiumOrb value={stats.avgHealth} label="GLOBAL CLUB HEALTH" icon="🏥" size={120} unit="%" />

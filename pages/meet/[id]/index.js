@@ -5,7 +5,7 @@ import PremiumOrb from '../../../components/PremiumOrb';
 import { supabase } from '../../../lib/supabase';
 import Link from 'next/link';
 import Head from 'next/head';
-import { normalizeName, normalizeEvent, getCategoryBenchmark, timeToSeconds, getPreferredName } from '../../../lib/analytics-utils';
+import { normalizeName, normalizeEvent, getCategoryBenchmark, timeToSeconds, getPreferredName, generateNameAliases } from '../../../lib/analytics-utils';
 
 export default function MeetReport({ session }) {
   const router = useRouter();
@@ -280,12 +280,14 @@ export default function MeetReport({ session }) {
       const browserStorage = {};
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        browserStorage[key] = localStorage.getItem(key);
+        if (key && (key.startsWith('sb-') || key === 'print-insight-cache' || key === 'print-report-config')) {
+          browserStorage[key] = localStorage.getItem(key);
+        }
       }
 
       const res = await fetch('/api/export-report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
           meetId: meet.id,
           meetName: meet.name,
@@ -363,7 +365,7 @@ export default function MeetReport({ session }) {
     formData.append('file', file);
     formData.append('meetId', id);
     try {
-      const res = await fetch('/api/upload-meet-photo', { method: 'POST', body: formData });
+      const res = await fetch('/api/upload-meet-photo', { method: 'POST', headers: { 'Authorization': `Bearer ${session?.access_token}` }, body: formData });
       const data = await res.json();
       if (data.url) setMeetPhoto(data.url + '?t=' + Date.now()); // cache-bust on replace
       else console.error('Photo upload failed:', data.error);
@@ -396,9 +398,9 @@ export default function MeetReport({ session }) {
 
       const res = await fetch('/api/ai/gala-engine-v2', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          meet, 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
+        body: JSON.stringify({
+          meet,
           stats: meetStats, 
           results: augmentedResults.map(r => ({
             ...r,
@@ -621,7 +623,8 @@ export default function MeetReport({ session }) {
             }
             main, .layout-container { padding: 0 !important; margin: 0 !important; min-height: auto !important; position: static !important; }
             body::after {
-              content: "TONBRIDGE SWIMMING CLUB | EST. 1911 | COACHESEYE PERFORMANCE DNA";
+              content: "COACHESEYE PERFORMANCE DNA \A Disclaimer: CoachesEye insights are algorithmically generated based on historical data and LTAD models. They do not replace professional medical advice or direct poolside coaching assessments.";
+              white-space: pre;
               position: fixed;
               bottom: 10mm;
               left: 0;
@@ -1051,7 +1054,7 @@ export default function MeetReport({ session }) {
           }}></div>
           
           <div style={{ position: 'relative', zIndex: 10, pointerEvents: 'none' }}>
-            {/* Top-left corner left empty for cleaner aesthetic */}
+            <div style={{ fontSize: '0.45rem', fontWeight: 950, letterSpacing: '0.18em', color: 'rgba(251,191,36,0.7)', textTransform: 'uppercase' }}>Individual Medals</div>
           </div>
 
           {stats.podiums?.total > 0 && (
@@ -1753,8 +1756,8 @@ export default function MeetReport({ session }) {
               <th>EVENT</th>
               <th style={{ textAlign: 'center' }}>TIME</th>
               <th style={{ background: 'rgba(255,255,255,0.05)', padding: '1.2rem', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.5 }}>WA Pts</th>
-              <th style={{ background: 'rgba(255,255,255,0.05)', padding: '1.2rem', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.5 }}>Pathway</th>
-              <th style={{ textAlign: 'right', paddingRight: '1.5rem' }}>STATUS</th>
+              <th style={{ background: 'rgba(255,255,255,0.05)', padding: '1.2rem', textAlign: 'left', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.5 }}>Baseline Standard</th>
+              <th style={{ textAlign: 'right', paddingRight: '1.5rem' }}>PBs &amp; Podiums</th>
             </tr>
           </thead>
           <tbody>
@@ -1810,10 +1813,17 @@ export default function MeetReport({ session }) {
                     )}
                     {/* Medal Badge */}
                     {(() => {
-                      const medal = insight?.medalists?.find(m => 
-                        normalizeName(m.swimmer_name) === normalizeName(r.swimmers?.full_name) && 
-                        normalizeEvent(m.event) === normalizeEvent(r.event)
-                      );
+                      const swimmerAliases = generateNameAliases(r.swimmers);
+                      const preferredNorm = normalizeName(getPreferredName(r.swimmers));
+                      const fullNorm = normalizeName(r.swimmers?.full_name);
+                      const medalSource = insight?.detected_medalists || insight?.medalists || [];
+                      const medal = medalSource.find(m => {
+                        const eventMatch = normalizeEvent(m.event) === normalizeEvent(r.event);
+                        if (!eventMatch) return false;
+                        if (m.swimmer_id && r.swimmer_id) return m.swimmer_id === r.swimmer_id;
+                        const mNorm = normalizeName(m.swimmer_name);
+                        return swimmerAliases.includes(mNorm) || mNorm === preferredNorm || mNorm === fullNorm;
+                      });
                       
                       const hasFinal = augmentedResults.some(other => 
                         other.swimmer_id === r.swimmer_id && 
@@ -1824,9 +1834,11 @@ export default function MeetReport({ session }) {
                       const isLegitRank = (r.rank >= 1 && r.rank <= 3) && 
                                           ((r.round?.toLowerCase() === 'final') || !hasFinal);
 
-                      const displayMedal = isLegitRank ? 
-                        (r.rank === 1 ? 'GOLD' : r.rank === 2 ? 'SILVER' : 'BRONZE') : 
-                        (medal && ((r.round?.toLowerCase() === 'final') || !hasFinal) ? medal.medal_type?.toUpperCase() : null);
+                      // Show medal on the final row (or any row if no finals exist for this event)
+                      const roundOk = !hasFinal || r.round?.toLowerCase() === 'final' || r.round == null;
+                      const displayMedal = isLegitRank ?
+                        (r.rank === 1 ? 'GOLD' : r.rank === 2 ? 'SILVER' : 'BRONZE') :
+                        (medal && roundOk ? medal.medal_type?.toUpperCase() : null);
                       
                       if (displayMedal) {
                         return (
@@ -1845,13 +1857,58 @@ export default function MeetReport({ session }) {
                       }
                       return null;
                     })()}
-                    {!isPb && !insight?.medalists?.some(m => normalizeName(m.swimmer_name).includes(normalizeName(r.swimmers.full_name)) && r.event.toLowerCase().includes(m.event.toLowerCase().replace('fly', 'butterfly'))) && (
+                    {!isPb && !(insight?.detected_medalists || insight?.medalists || []).some(m => {
+                      const eventMatch = normalizeEvent(m.event) === normalizeEvent(r.event);
+                      if (!eventMatch) return false;
+                      if (m.swimmer_id && r.swimmer_id) return m.swimmer_id === r.swimmer_id;
+                      const mNorm = normalizeName(m.swimmer_name);
+                      return generateNameAliases(r.swimmers).includes(mNorm) ||
+                             mNorm === normalizeName(getPreferredName(r.swimmers)) ||
+                             mNorm === normalizeName(r.swimmers?.full_name);
+                    }) && (
                       <span style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.5 }}>COMPLETED</span>
                     )}
                   </td>
                 </tr>
               );
             })}
+            {/* Phantom rows: medalists with no result row in DB */}
+            {insight && (() => {
+              const medalSource = insight.detected_medalists || insight.medalists || [];
+              const unmatched = medalSource.filter(m => {
+                if (m.is_relay) return false;
+                if (!m.swimmer_id) return false;
+                return !augmentedResults.some(r => {
+                  if (normalizeEvent(r.event) !== normalizeEvent(m.event)) return false;
+                  if (m.swimmer_id && r.swimmer_id) return m.swimmer_id === r.swimmer_id;
+                  return false;
+                });
+              });
+              if (!unmatched.length) return null;
+              return unmatched.map((m, i) => {
+                const color = m.medal_type === 'Gold' ? '#fbbf24' : m.medal_type === 'Silver' ? '#38bdf8' : '#fb923c';
+                const eventShort = m.event.replace(/^Event\s+\d+\s*/i, '').replace(/\s*(SC|LC)\s*(Meter|Metre)s?\b/gi, '').replace(/\d+[-–]\d+\s*/g, '').trim();
+                return (
+                  <tr key={`phantom-${i}`} style={{ borderTop: '1px solid rgba(255,255,255,0.03)', opacity: 0.7 }}>
+                    <td style={{ padding: '1.2rem 1.5rem', fontWeight: 900 }}>
+                      {m.swimmer_name}
+                      <span style={{ fontSize: '0.55rem', opacity: 0.4, marginLeft: '6px', fontWeight: 400 }}>result not imported</span>
+                    </td>
+                    {meet?.children?.length > 0 && <td>—</td>}
+                    <td style={{ fontSize: '0.75rem', opacity: 0.4 }}>—</td>
+                    <td style={{ fontSize: '0.8rem', fontWeight: 500 }}>{eventShort}</td>
+                    <td style={{ textAlign: 'center', opacity: 0.4 }}>—</td>
+                    <td style={{ padding: '1.2rem', opacity: 0.4 }}>—</td>
+                    <td style={{ padding: '1.2rem', opacity: 0.4 }}>—</td>
+                    <td style={{ textAlign: 'right', paddingRight: '1.5rem' }}>
+                      <span style={{ fontSize: '0.6rem', fontWeight: 950, color, background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: '4px', border: `1px solid ${color}` }}>
+                        {m.medal_type?.toUpperCase()}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              });
+            })()}
           </tbody>
         </table>
       </div>

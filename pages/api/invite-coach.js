@@ -1,9 +1,13 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAdminAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  const caller = await requireAdminAuth(req, res);
+  if (!caller) return;
 
   const { email, role } = req.body;
   if (!email) {
@@ -30,8 +34,13 @@ export default async function handler(req, res) {
     if (error) throw error;
 
     if (role && data?.user?.id) {
-      if (['admin', 'headcoach', 'coach'].includes(role)) {
+      const allowedRoles = caller.profile.role === 'admin'
+        ? ['admin', 'headcoach', 'coach']
+        : ['coach'];
+      if (allowedRoles.includes(role)) {
         await supabase.from('profiles').update({ role }).eq('id', data.user.id);
+      } else {
+        return res.status(403).json({ error: 'Insufficient permissions to assign this role' });
       }
     }
 

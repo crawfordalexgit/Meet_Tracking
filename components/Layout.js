@@ -656,6 +656,10 @@ export default function Layout({ children, session, hideNav = false }) {
 
       {/* Changelog Modal */}
       <ChangelogModal isOpen={changelogVisible} onClose={() => setChangelogVisible(false)} />
+
+      <footer className="coacheseye-disclaimer no-print" style={{ position: 'fixed', bottom: 0, left: '140px', right: 0, padding: '0.4rem 1.5rem', textAlign: 'center', fontSize: '0.6rem', color: 'rgba(255,255,255,0.2)', fontWeight: 600, letterSpacing: '0.02em', borderTop: '1px solid rgba(255,255,255,0.04)', zIndex: 10, pointerEvents: 'none' }}>
+        Data and automated insights provided by the CoachesEye platform are for analytical guidance and modeling purposes only. Always consult your head coach or a medical professional before making significant changes to training volume.
+      </footer>
     </div>
   );
 }
