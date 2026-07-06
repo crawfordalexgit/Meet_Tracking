@@ -1,11 +1,14 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import * as cheerio from 'cheerio';
 import { extractSwimId, fetchSplits } from '../../lib/rankings-scraper';
+import { requireAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAuth(req, res)) return;
 
   const { swimmingYear = '2025/2026', targetClub = 'TONSKNTQ' } = req.body;
 

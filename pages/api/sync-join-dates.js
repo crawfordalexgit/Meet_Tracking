@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { scmLogin, fetchSwimmerSquadJoinDate } from '../../lib/scm-scraper';
+import { requireAuth } from '../../lib/api-auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -10,6 +11,8 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAuth(req, res)) return;
 
   // Set up Server-Sent Events for progress tracking
   res.writeHead(200, {

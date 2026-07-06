@@ -1,10 +1,13 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { fetchScmNumericIds, scmLogin, fetchSwimmerSquadJoinDate, fetchSwimmerSessions } from '../../lib/scm-scraper';
+import { requireAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAuth(req, res)) return;
 
   const scmApiKey = req.body.scmApiKey || process.env.SCM_API_KEY;
   const { includeWebTasks = false } = req.body;

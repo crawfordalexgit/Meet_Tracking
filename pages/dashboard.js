@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
+import { fetchAllRows } from '../lib/paginate';
 import { calculateReliability, calculateSquadHealth, normalizeName, normalizeEvent, getPreferredName, getCategoryBenchmark } from '../lib/analytics-utils';
 import Head from 'next/head';
 import PremiumOrb from '../components/PremiumOrb';
@@ -85,31 +87,15 @@ export default function Dashboard({ session }) {
     }
   }, [router.isReady, router.query.tab]);
 
-  const fetchPaged = async (table, select = '*', filter = null) => {
-    if (!supabase) {
-      console.warn(`Supabase not initialized. Skipping fetch for ${table}`);
-      return [];
-    }
-    let all = []; let page = 0; let more = true;
-    while (more && page < 100) {
-      let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-      if (filter) q = filter(q);
-      const { data: d, error } = await q;
-      if (error || !d) break;
-      all = [...all, ...d];
-      if (d.length < 1000) more = false;
-      page++;
-    }
-    return all;
-  };
+  const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 100 });
 
   const handleMasterSync = async () => {
     setMasterSyncState({ active: true, message: 'Phase 1: Syncing SCM Baseline...' });
     try {
-      await fetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      await authedFetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
 
       setMasterSyncState({ active: true, message: 'Phase 2: Syncing Attendance...' });
-      await fetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      await authedFetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
 
       setMasterSyncState({ active: false, message: 'Daily Master Sync Complete!' });
       fetchAll();
@@ -122,10 +108,10 @@ export default function Dashboard({ session }) {
   const handleSwimEnglandSync = async () => {
     setSeSyncState({ active: true, message: 'Phase 1: Scraping Official Meets...' });
     try {
-      await fetch('/api/scrape-meets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ swimmingYear: '2025/2026' }) });
+      await authedFetch('/api/scrape-meets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ swimmingYear: '2025/2026' }) });
 
       setSeSyncState({ active: true, message: 'Phase 2: Scraping PBs & Rankings...' });
-      await fetch('/api/scrape-rankings', { method: 'POST' });
+      await authedFetch('/api/scrape-rankings', { method: 'POST' });
 
       setSeSyncState({ active: false, message: 'Swim England Update Complete!' });
       fetchAll();
@@ -163,7 +149,7 @@ export default function Dashboard({ session }) {
       const enrichedResults = (results || []).map(r => ({ ...r, meets: meetsById[r.meet_id] || null }));
 
       // Fetch memberships separately so they don't block
-      fetch('/api/memberships')
+      authedFetch('/api/memberships')
         .then(r => r.ok ? r.json() : [])
         .then(memberships => setData(prev => ({ ...prev, memberships })))
         .catch(() => {});

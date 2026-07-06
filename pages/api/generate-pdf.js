@@ -36,7 +36,10 @@ export default async function handler(req, res) {
         const protocol = req.headers['x-forwarded-proto'] || 'http';
         const host = req.headers.host || 'localhost:3000';
         const baseUrl = `${protocol}://${host}`;
-        const printToken = process.env.PRINT_SECRET_TOKEN || 'print-dev-token-fallback';
+        const printToken = process.env.PRINT_SECRET_TOKEN;
+        if (!printToken) {
+            return res.status(500).json({ error: 'Server misconfigured: PRINT_SECRET_TOKEN is not set' });
+        }
         const joinChar = targetPath.includes('?') ? '&' : '?';
         const targetUrl = `${baseUrl}${targetPath}${joinChar}printToken=${printToken}`;
 

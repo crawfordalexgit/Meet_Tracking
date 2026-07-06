@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Layout from '../../components/Layout';
 import Head from 'next/head';
 import { supabase } from '../../lib/supabase';
+import { authedFetch } from '../../lib/api-client';
 import * as Diff from 'diff';
 
 export default function CoachesEyeSandbox() {
@@ -60,7 +61,7 @@ export default function CoachesEyeSandbox() {
   const fetchPreviewMetrics = async () => {
     setLoadingPreview(true);
     try {
-      const res = await fetch('/api/ai/sandbox', {
+      const res = await authedFetch('/api/ai/sandbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ swimmerId: selectedSwimmerId, period: analysisPeriod, previewOnly: true, facet: 'training' })
@@ -77,7 +78,7 @@ export default function CoachesEyeSandbox() {
   const loadPrompt = async (facetName) => {
 
     try {
-      const res = await fetch(`/api/prompts/load?facet=${facetName}`);
+      const res = await authedFetch(`/api/prompts/load?facet=${facetName}`);
       const data = await res.json();
       setPrompt(data.content || '');
       setOriginalPrompt(data.content || '');
@@ -92,7 +93,7 @@ export default function CoachesEyeSandbox() {
 
   const fetchHistory = async (facetName) => {
     try {
-      const res = await fetch(`/api/prompts/history?facet=${facetName}`);
+      const res = await authedFetch(`/api/prompts/history?facet=${facetName}`);
       const data = await res.json();
       setHistory(data.history || []);
     } catch (err) {
@@ -103,7 +104,7 @@ export default function CoachesEyeSandbox() {
   const rollback = async (filename) => {
     if (!confirm("Rollback to this version? A backup of the current state will be created.")) return;
     try {
-      const res = await fetch('/api/prompts/rollback', {
+      const res = await authedFetch('/api/prompts/rollback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facet, filename })
@@ -129,7 +130,7 @@ export default function CoachesEyeSandbox() {
     setError(null);
     setResult(null);
     try {
-      const res = await fetch('/api/ai/sandbox', {
+      const res = await authedFetch('/api/ai/sandbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ swimmerId: selectedSwimmerId, facet, customPrompt: prompt, period: analysisPeriod })
@@ -156,7 +157,7 @@ export default function CoachesEyeSandbox() {
     setRefining(true);
     setOriginalPrompt(prompt); // Snapshot before change
     try {
-      const res = await fetch('/api/ai/refine-prompt', {
+      const res = await authedFetch('/api/ai/refine-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -183,7 +184,7 @@ export default function CoachesEyeSandbox() {
     if (!confirm(`Are you sure you want to promote this prompt to production for ${facet}? This will create a backup of the current version.`)) return;
     setSaving(true);
     try {
-      const res = await fetch('/api/prompts/save', {
+      const res = await authedFetch('/api/prompts/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ facet, content: prompt })

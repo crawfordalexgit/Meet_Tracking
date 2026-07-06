@@ -1,6 +1,7 @@
 import { useEffect, useState, Fragment } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
 import { useRouter } from 'next/router';
 import toast from 'react-hot-toast';
 import { useTheme } from '../lib/ThemeContext';
@@ -104,10 +105,10 @@ export default function Settings({ session, scmApiKey }) {
   const handleMasterSync = async () => {
     setMasterSyncState({ active: true, step: 1, message: 'Phase 1: Syncing SCM Baseline...' });
     try {
-      await fetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
+      await authedFetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
 
       setMasterSyncState({ active: true, step: 2, message: 'Phase 2: Syncing Training Attendance...' });
-      await fetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
+      await authedFetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
 
       setMasterSyncState({ active: false, step: 3, message: 'Daily Master Sync Complete! System is up to date.' });
       loadData();
@@ -121,7 +122,7 @@ export default function Settings({ session, scmApiKey }) {
   const handleSyncAttendance = async () => {
     setAttendanceSyncStatus({ type: 'info', text: 'Syncing Training Attendance...' });
     try {
-      const res = await fetch('/api/sync-attendance', {
+      const res = await authedFetch('/api/sync-attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scmApiKey: scmKey })
@@ -183,7 +184,7 @@ export default function Settings({ session, scmApiKey }) {
       }
 
       // Send to import API (we will create this)
-      const res = await fetch('/api/import-attendance', {
+      const res = await authedFetch('/api/import-attendance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ records })
@@ -466,7 +467,7 @@ export default function Settings({ session, scmApiKey }) {
     setIsDetectingGaps(true);
     setGapStatus({ type: 'info', text: 'Scanning the last 365 days for cancelled sessions...' });
     try {
-      const res = await fetch('/api/detect-missing-sessions', {
+      const res = await authedFetch('/api/detect-missing-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -490,7 +491,7 @@ export default function Settings({ session, scmApiKey }) {
     setIsReconcilingPbs(true);
     setPbSyncStatus({ type: 'info', text: 'Reconciling historical PBs...' });
     try {
-      const res = await fetch('/api/reconcile-pbs', {
+      const res = await authedFetch('/api/reconcile-pbs', {
         method: 'POST'
       });
       const data = await res.json();
@@ -518,7 +519,7 @@ export default function Settings({ session, scmApiKey }) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout for large clubs
       console.log('SCM SYNC: Initiating request to /api/sync-scm...');
-      const res = await fetch('/api/sync-scm', { 
+      const res = await authedFetch('/api/sync-scm', { 
         method: 'POST', 
         headers: { 
           'Content-Type': 'application/json',
@@ -575,7 +576,7 @@ export default function Settings({ session, scmApiKey }) {
         setSessionSyncProgress(progress);
         setSessionSyncStatus({ type: 'info', text: `Syncing Sessions: ${i}/${total} swimmers...` });
 
-        const res = await fetch('/api/sync-session-memberships', {
+        const res = await authedFetch('/api/sync-session-memberships', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ swimmerIds: batch })
@@ -601,7 +602,7 @@ export default function Settings({ session, scmApiKey }) {
     e.preventDefault();
     setIsScraping(true);
     setScrapeProgress(0);
-    const response = await fetch('/api/scrape-meets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ swimmingYear }) });
+    const response = await authedFetch('/api/scrape-meets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ swimmingYear }) });
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -636,7 +637,7 @@ export default function Settings({ session, scmApiKey }) {
     setRankingsScrapeStatus({ type: 'info', text: 'Starting Rankings Scrape...' });
 
     try {
-      const response = await fetch('/api/scrape-rankings', { 
+      const response = await authedFetch('/api/scrape-rankings', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }
       });
@@ -684,7 +685,7 @@ export default function Settings({ session, scmApiKey }) {
     setGlobalPbSyncStatus({ type: 'info', text: 'Starting Global PB Sync...' });
 
     try {
-      const response = await fetch('/api/sync-pbs', { 
+      const response = await authedFetch('/api/sync-pbs', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }
       });
@@ -732,7 +733,7 @@ export default function Settings({ session, scmApiKey }) {
     setAttendanceScrapeProgress(0);
     
     console.log("Starting Historical Attendance Sync request...");
-    const response = await fetch('/api/sync-attendance');
+    const response = await authedFetch('/api/sync-attendance');
     console.log("Response received, status:", response.status);
     
     if (!response.ok) {
@@ -793,7 +794,7 @@ export default function Settings({ session, scmApiKey }) {
     setJoinDateSyncStatus({ type: 'info', text: 'Connecting to SCM Portal...' });
     setJoinDateSyncProgress(0);
     
-    const response = await fetch('/api/sync-join-dates');
+    const response = await authedFetch('/api/sync-join-dates');
     if (!response.ok) {
       setJoinDateSyncStatus({ type: 'error', text: `Connection failed: ${response.status}` });
       setIsJoinDateSyncing(false);
@@ -858,7 +859,7 @@ export default function Settings({ session, scmApiKey }) {
       exempt_volume_offset: exemptVolume !== undefined ? exemptVolume : s.exempt_volume_offset,
       swimmers_per_lane: typeof swimmersPerLane === 'number' ? swimmersPerLane : s.swimmers_per_lane
     } : s));
-    await fetch('/api/update-squad', {
+    await authedFetch('/api/update-squad', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
       body: JSON.stringify({ 
@@ -888,14 +889,14 @@ export default function Settings({ session, scmApiKey }) {
   const toggleCoachSquad = async (coachId, squadId, assign) => {
     if (assign) setCoachSquads([...coachSquads, { coach_id: coachId, squad_id: squadId }]);
     else setCoachSquads(coachSquads.filter(cs => !(cs.coach_id === coachId && cs.squad_id === squadId)));
-    await fetch('/api/assign-coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coachId, squadId, assign }) });
+    await authedFetch('/api/assign-coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coachId, squadId, assign }) });
   };
 
   const handleInviteCoach = async (e) => {
     e.preventDefault();
     setInviteStatus({ type: 'info', text: 'Inviting...' });
     try {
-      const res = await fetch('/api/invite-coach', {
+      const res = await authedFetch('/api/invite-coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({ email: inviteEmail, role: inviteRole })
@@ -924,7 +925,7 @@ export default function Settings({ session, scmApiKey }) {
     e.preventDefault();
     setResetPasswordStatus({ type: 'info', text: 'Updating password...' });
     try {
-      const res = await fetch('/api/update-coach-password', {
+      const res = await authedFetch('/api/update-coach-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({ coachId: resetPasswordCoach.id, newPassword })
@@ -948,7 +949,7 @@ export default function Settings({ session, scmApiKey }) {
     }
     
     try {
-      const res = await fetch('/api/delete-coach', {
+      const res = await authedFetch('/api/delete-coach', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({ coachId })
@@ -1790,7 +1791,7 @@ export default function Settings({ session, scmApiKey }) {
                           if (payload.length === 0) throw new Error('No records with Action="Added" found.');
 
                           setSyncStatus({ type: 'info', text: `Uploading ${payload.length} records...` });
-                          const res = await fetch('/api/import-join-dates', {
+                          const res = await authedFetch('/api/import-join-dates', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ data: payload })

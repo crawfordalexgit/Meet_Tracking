@@ -1,11 +1,14 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from 'fs';
 import path from 'path';
+import { requireAdminAuth } from '../../../lib/api-auth';
 
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAdminAuth(req, res)) return;
 
   const { currentPrompt, dna, originalOutput, feedback } = req.body;
   

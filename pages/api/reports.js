@@ -1,5 +1,6 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { calculateReliability } from '../../lib/analytics-utils';
+import { requireAuth } from '../../lib/api-auth';
 import fs from 'fs';
 import path from 'path';
 
@@ -7,6 +8,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAuth(req, res)) return;
 
   // Support both GET (defaults) and POST
   const body = req.method === 'POST' ? req.body : req.query;

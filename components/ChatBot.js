@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { authedFetch } from '../lib/api-client';
 
 export default function ChatBot({ clubDNA }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -51,7 +52,7 @@ export default function ChatBot({ clubDNA }) {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/ai/chat', {
+      const res = await authedFetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

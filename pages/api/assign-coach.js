@@ -1,9 +1,12 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAdminAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAdminAuth(req, res)) return;
 
   const { coachId, squadId, assign } = req.body;
   if (!coachId || !squadId || typeof assign !== 'boolean') {

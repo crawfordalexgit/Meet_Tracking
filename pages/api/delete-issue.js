@@ -1,30 +1,21 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAdminAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST' && req.method !== 'DELETE') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { issueId, userId } = req.body;
-  if (!issueId || !userId) {
-    return res.status(400).json({ error: 'Missing required parameters: issueId or userId' });
+  // Role is verified from the authenticated session, never from the request body.
+  if (!await requireAdminAuth(req, res)) return;
+
+  const { issueId } = req.body;
+  if (!issueId) {
+    return res.status(400).json({ error: 'Missing required parameter: issueId' });
   }
 
   try {
     const supabase = getServiceSupabase();
-
-    // Security Check: Verify user role is admin or headcoach
-    if (userId !== 'local-dev-user') {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', userId)
-        .single();
-
-      if (profileError || !profile || !['admin', 'headcoach'].includes(profile.role)) {
-        return res.status(403).json({ error: 'Unauthorized: Only admins or head coaches can delete issues.' });
-      }
-    }
 
     // Delete the issue (cascades to upvotes due to ON DELETE CASCADE)
     const { error: deleteError } = await supabase

@@ -33,11 +33,12 @@ export default async function handler(req, res) {
       parentId = meet.parent_id;
     }
 
-    const { data: familyMeets } = await supabase
+    const { data: familyMeetsData } = await supabase
       .from('meets')
       .select('id, staff_text, name, parent_id')
       .or(`id.eq.${parentId},parent_id.eq.${parentId}`);
 
+    const familyMeets = familyMeetsData || [];
     const meetIds = familyMeets.map(m => m.id);
     const parseNote = (text, sourceName) => {
       try {
@@ -66,7 +67,7 @@ export default async function handler(req, res) {
       .order('rank', { ascending: true });
 
     // Use family results as the source of truth
-    const results = (familyResults || bodyResults).map(r => ({
+    const results = (familyResults || bodyResults || []).map(r => ({
       ...r,
       resolved_name: getPreferredName(r.swimmers)
     }));

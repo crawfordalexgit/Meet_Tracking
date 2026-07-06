@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
+import { fetchAllRows } from '../lib/paginate';
 import { getSessionDuration, calculateReliability, isShutdownDate, isGalaDate, getWeekKey } from '../lib/analytics-utils';
 import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useRouter } from 'next/router';
@@ -144,22 +146,7 @@ export default function CapacityDashboard({ session }) {
     fetchData();
   }, [periodDays]);
 
-  const fetchPaged = async (table, select = '*', filter = null) => {
-    let all = [];
-    let page = 0;
-    let more = true;
-    while (more && page < 20) {
-      let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-      if (filter) q = filter(q);
-      const { data: d, error } = await q;
-      if (error) { console.warn(`[capacity] fetchPaged error on ${table}:`, error.message); break; }
-      if (!d) break;
-      all = [...all, ...d];
-      if (d.length < 1000) more = false;
-      page++;
-    }
-    return all;
-  };
+  const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 20 });
 
   const fetchData = async () => {
     setLoading(true);
@@ -304,7 +291,7 @@ export default function CapacityDashboard({ session }) {
 
       const squadFilterStr = config.selectedSquads.join(',');
 
-      const res = await fetch('/api/generate-pdf', {
+      const res = await authedFetch('/api/generate-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
@@ -359,7 +346,7 @@ export default function CapacityDashboard({ session }) {
       const simCount = newSwimmers.length;
       const targetPath = `/capacity?tab=squadModelling&periodDays=${periodDays}&modellingSquadId=${modellingSquadId}&goodAttendanceThreshold=${goodAttendanceThreshold}&forceWeekendSession=${forceWeekendSession}&newSwimmersPriority=${newSwimmersPriority}&simSwimmerCount=${simCount}&runRebalance=true&printTheme=${printConfig.printTheme}`;
 
-      const res = await fetch('/api/generate-pdf', {
+      const res = await authedFetch('/api/generate-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({

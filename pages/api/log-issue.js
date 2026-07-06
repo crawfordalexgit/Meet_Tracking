@@ -1,11 +1,17 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { title, description, type, user_id } = req.body;
+  const user = await requireAuth(req, res);
+  if (!user) return;
+
+  const { title, description, type } = req.body;
+  // Attribute the issue to the authenticated user, not a client-supplied id.
+  const user_id = user.id;
   if (!title || !description || !type) {
     return res.status(400).json({ error: 'Missing required parameters: title, description, or type' });
   }

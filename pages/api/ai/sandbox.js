@@ -1,9 +1,13 @@
 import { getServiceSupabase } from '../../../lib/supabase';
 import { getSwimmerDNA } from '../../../lib/ai-context';
 import { analyzeFacet } from '../../../lib/ai_engine';
+import { requireAdminAuth } from '../../../lib/api-auth';
+import { fetchAllRows } from '../../../lib/paginate';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAdminAuth(req, res)) return;
 
   const { swimmerId, facet, customPrompt, period = 365 } = req.body;
   if (!swimmerId || !facet) return res.status(400).json({ error: 'Swimmer ID and Facet required' });
@@ -11,19 +15,7 @@ export default async function handler(req, res) {
   try {
     const supabase = getServiceSupabase();
 
-    const fetchPaged = async (table, select = '*', filter = null) => {
-      let all = []; let page = 0; let more = true;
-      while (more && page < 10) {
-        let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-        if (filter) q = filter(q);
-        const { data, error } = await q;
-        if (error || !data) break;
-        all = [...all, ...data];
-        if (data.length < 1000) more = false;
-        page++;
-      }
-      return all;
-    };
+    const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 10 });
 
     // 1. Fetch all data needed for DNA
     const { data: swimmer } = await supabase
