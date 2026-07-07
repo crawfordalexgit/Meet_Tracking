@@ -3,6 +3,7 @@ import Head from 'next/head';
 import Link from 'next/link';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
 import { getNormalizedWA } from '../lib/wa-points';
 import { getCategoryBenchmark } from '../lib/analytics-utils';
 import PremiumOrb from '../components/PremiumOrb';
@@ -100,7 +101,7 @@ export default function ReportsCenter({ session }) {
         endDate: isCustomDate ? endDate : undefined
       };
 
-      const res = await fetch('/api/reports', {
+      const res = await authedFetch('/api/reports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -166,7 +167,7 @@ export default function ReportsCenter({ session }) {
         swimmers: reportData.swimmersData
       };
 
-      const res = await fetch('/api/ai/analyze', {
+      const res = await authedFetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify(payload)
@@ -189,7 +190,7 @@ export default function ReportsCenter({ session }) {
     setCompilingBooklet(true);
     try {
       const activeSquad = squads.find(s => s.id === squadId);
-      const res = await fetch('/api/export-report', {
+      const res = await authedFetch('/api/export-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({

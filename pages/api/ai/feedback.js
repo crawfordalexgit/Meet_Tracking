@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { requireAuth } from '../../../lib/api-auth';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -7,6 +8,9 @@ const supabase = createClient(
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const user = await requireAuth(req, res);
+  if (!user) return;
 
   const { swimmerId, coachId, originalInsight, coachCorrection, isPositive } = req.body;
 

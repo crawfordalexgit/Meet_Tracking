@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
 import DOMPurify from 'dompurify';
 
 const sanitizeHtml = (html) => typeof window === 'undefined' ? '' : DOMPurify.sanitize(html);
@@ -107,7 +108,7 @@ export default function AiInsightCard({
   const saveFeedback = async (isPositive) => {
     setIsSaving(true);
     try {
-      const res = await fetch('/api/ai/feedback', {
+      const res = await authedFetch('/api/ai/feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

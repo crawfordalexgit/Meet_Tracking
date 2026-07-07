@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { authedFetch } from '../lib/api-client';
 
 export default function IssueModal({ isOpen, onClose, session }) {
   const [title, setTitle] = useState('');
@@ -13,7 +14,7 @@ export default function IssueModal({ isOpen, onClose, session }) {
     setStatus({ loading: true, success: false, error: null });
 
     try {
-      const response = await fetch('/api/log-issue', {
+      const response = await authedFetch('/api/log-issue', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -22,7 +23,6 @@ export default function IssueModal({ isOpen, onClose, session }) {
           title,
           type,
           description,
-          user_id: session?.user?.id || 'local-dev-user',
         }),
       });
 

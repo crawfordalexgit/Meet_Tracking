@@ -1,19 +1,24 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { issueId, userId } = req.body;
+  const user = await requireAuth(req, res);
+  if (!user) return;
+
+  const { issueId } = req.body;
+  // Vote is attributed to the authenticated user, not a client-supplied id.
+  const userId = user.id;
   if (!issueId) {
     return res.status(400).json({ error: 'Missing required parameter: issueId' });
   }
 
   try {
     const supabase = getServiceSupabase();
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const isValidUserUUID = userId && uuidRegex.test(userId);
+    const isValidUserUUID = true;
 
     let shouldIncrement = false;
 

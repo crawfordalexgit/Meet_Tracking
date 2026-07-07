@@ -33,11 +33,12 @@ export default async function handler(req, res) {
       parentId = meet.parent_id;
     }
 
-    const { data: familyMeets } = await supabase
+    const { data: familyMeetsData } = await supabase
       .from('meets')
       .select('id, staff_text, name, parent_id')
       .or(`id.eq.${parentId},parent_id.eq.${parentId}`);
 
+    const familyMeets = familyMeetsData || [];
     const meetIds = familyMeets.map(m => m.id);
 
     // Extract structured staff entries (type:'staff') — deterministic, no AI needed for names
@@ -83,7 +84,7 @@ export default async function handler(req, res) {
       .order('rank', { ascending: true });
 
     // Use family results as the source of truth, excluding non-ranked members (2nd club swimmers)
-    const results = (familyResults || bodyResults)
+    const results = (familyResults || bodyResults || [])
       .filter(r => r.swimmers?.is_ranked_member !== false)
       .map(r => ({
         ...r,

@@ -3,12 +3,21 @@ import { getServiceSupabase } from '../../../lib/supabase';
 import { parseResults } from '../../../lib/ai_engine';
 import { normalizeName, normalizeEvent, generateNameAliases } from '../../../lib/analytics-utils';
 import { calculateWAPoints } from '../../../lib/wa-points';
+import { requireAuth } from '../../../lib/api-auth';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { PDFExtract } from 'pdf.js-extract';
 
 const pdfExtract = new PDFExtract();
+
+// Best-effort debug artifact write. The serverless filesystem is read-only
+// except /tmp, so this must never throw and abort the scrape.
+const debugWrite = (name, data) => {
+  try {
+    fs.writeFileSync(path.join(process.cwd(), 'scratch', name), data);
+  } catch { /* ignore in production / read-only fs */ }
+};
 
 export const config = {
   api: {
@@ -19,6 +28,8 @@ export const config = {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAuth(req, res)) return;
 
   const { url, meetId } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
@@ -176,11 +187,16 @@ export default async function handler(req, res) {
         }
 
         // 5. Dynamic Targeting: Check if ANY of our swimmers are in this text
+        const lowerText = sessionText.toLowerCase();
         const hasSwimmer = normalizedSwimmers.some(s => {
-          // Check for full name or Last Name + Club context
-          const lowerText = sessionText.toLowerCase();
-          return lowerText.includes(s.normalized) || 
-                 (lowerText.includes(s.lastName) && (lowerText.includes('tonbridge') || lowerText.includes('tsc')));
+          // Full-name hit: every word (>2 chars) of a name alias appears in the text
+          const nameHit = s.aliases.some(alias => {
+            const parts = alias.split(' ');
+            return parts.length >= 2 && parts.every(p => p.length > 2 && lowerText.includes(p));
+          });
+          // Or Last Name + Club context
+          return nameHit ||
+                 (s.lastName && lowerText.includes(s.lastName) && (lowerText.includes('tonbridge') || lowerText.includes('tsc')));
         });
 
         if (hasSwimmer || /tonbridge|tsc|tonb|ton /i.test(sessionText)) {
@@ -218,7 +234,7 @@ export default async function handler(req, res) {
     });
 
     const filteredText = Array.from(relevantIndices).sort((a, b) => a - b).map(idx => allLines[idx]).join('\n');
-    fs.writeFileSync(path.join(process.cwd(), 'scratch', 'filtered_text.txt'), filteredText);
+    debugWrite('filtered_text.txt', filteredText);
 
     sendProgress('AI Result Parser', 85, 'Extracting rankings (Chunking for large data)...');
     
@@ -242,7 +258,7 @@ export default async function handler(req, res) {
       if (chunks.length > 1) await new Promise(r => setTimeout(r, 2000));
     }
 
-    fs.writeFileSync(path.join(process.cwd(), 'scratch', 'ai_response.json'), JSON.stringify(allAiResults, null, 2));
+    debugWrite('ai_response.json', JSON.stringify(allAiResults, null, 2));
     
     sendProgress('Database Sync', 95, 'Merging rankings into ground truth...');
     let resultsSynced = 0;
@@ -323,13 +339,13 @@ export default async function handler(req, res) {
       }
     }
 
-    fs.writeFileSync(path.join(process.cwd(), 'scratch', 'scrape_log.txt'), scrapeLog.join('\n'));
+    debugWrite('scrape_log.txt', scrapeLog.join('\n'));
     sendProgress('Complete', 100, `Successfully synced ${resultsSynced} records.`);
     res.end();
 
   } catch (error) {
     log(`>>> DEEP SCRAPER: CRITICAL ERROR: ${error.message}`);
-    fs.writeFileSync(path.join(process.cwd(), 'scratch', 'scrape_log.txt'), scrapeLog.join('\n'));
+    debugWrite('scrape_log.txt', scrapeLog.join('\n'));
     sendProgress('Error', 0, error.message);
     res.end();
   } finally {

@@ -1,5 +1,6 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { fetchScmNumericIds, fetchSwimmerAttendance } from '../../lib/scm-scraper';
+import { requireAuth } from '../../lib/api-auth';
 import * as cheerio from 'cheerio';
 
 export default async function handler(req, res) {
@@ -7,9 +8,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Vercel Cron Security Check
-  if (req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}` && req.method === 'GET' && !req.headers.host?.includes('localhost')) {
-    return res.status(401).json({ error: 'Unauthorized Cron Invocation' });
+  // Accept the Vercel cron invocation (Bearer CRON_SECRET) or a local dev run;
+  // otherwise require an authenticated user for both GET and POST triggers.
+  const isCron = !!process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
+  const isLocal = req.headers.host?.includes('localhost');
+  if (!isCron && !isLocal) {
+    if (!await requireAuth(req, res)) return;
   }
 
   const isSSE = req.method === 'GET';

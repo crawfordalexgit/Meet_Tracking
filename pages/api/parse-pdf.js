@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAuth } from '../../lib/api-auth';
 
 export const config = {
   api: {
@@ -8,8 +9,9 @@ export const config = {
 };
 
 export default async function handler(req, res) {
-  console.log(">>> PDF API HEARTBEAT: STARTING HANDLER");
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  if (!await requireAuth(req, res)) return;
 
   try {
     const formidableMod = require('formidable');

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
 import { normalizeEvent, timeToSeconds } from '../lib/analytics-utils';
 import { getBenchmarks } from '../lib/qualifying-times';
 
@@ -137,7 +138,7 @@ function PathwayAiCard({ swimmer, age, gapData, rankings, course, session }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/ai/analyze', {
+      const res = await authedFetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({

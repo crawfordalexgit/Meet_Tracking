@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { supabase } from '../../lib/supabase';
+import { authedFetch } from '../../lib/api-client';
 import Layout from '../../components/Layout';
 import PremiumOrb from '../../components/PremiumOrb';
 import TalentIntelligenceCard from '../../components/TalentIntelligenceCard';
@@ -182,7 +183,7 @@ export default function SquadDetail({
       const [attRes, resRes, memRes, allSwimmers, allResults, rankingsRes] = await Promise.all([
         fetchAll('training_attendance', '*', q => q.in('swimmer_id', swimmerIds)),
         fetchAll('results', '*, meets(*)', q => q.in('swimmer_id', swimmerIds)),
-        fetch('/api/memberships').then(r => r.json()),
+        authedFetch('/api/memberships').then(r => r.json()),
         fetchAll('swimmers', '*'),
         fetchAll('results', '*', q => q.gte('date', startStr)),
         fetchAll('rankings', '*', q => q.in('swimmer_id', swimmerIds).order('snapshot_date', { ascending: false }))
@@ -451,7 +452,7 @@ export default function SquadDetail({
         }
       }
 
-      const res = await fetch('/api/export-report', {
+      const res = await authedFetch('/api/export-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({

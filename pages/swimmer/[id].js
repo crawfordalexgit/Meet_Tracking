@@ -7,6 +7,8 @@ import Layout from '../../components/Layout';
 import CoachesEyeGlossary from '../../components/CoachesEyeGlossary';
 import BenchmarkModal from '../../components/BenchmarkModal';
 import { supabase } from '../../lib/supabase';
+import { authedFetch } from '../../lib/api-client';
+import { fetchAllRows } from '../../lib/paginate';
 import { calculateWorkload, isGalaDate, getSessionDuration, isExemptDate, isShutdownDate, calculateReliability, generateSwimmerNarrative, calculateSquadHealth, getKentBenchmark, getCategoryBenchmark, getWeekKey, toLocalISO, normalizeEvent, timeToSeconds, DEFAULT_EXEMPTIONS } from '../../lib/analytics-utils';
 import { getBenchmarks } from '../../lib/qualifying-times';
 import { getNormalizedWA } from '../../lib/wa-points';
@@ -301,7 +303,7 @@ const [decayDistance, setDecayDistance] = useState('100');
   const handleSyncPbs = async () => {
     setSyncingPbs(true);
     try {
-      const res = await fetch('/api/sync-pbs', {
+      const res = await authedFetch('/api/sync-pbs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ swimmerId: id })
@@ -444,19 +446,7 @@ const [decayDistance, setDecayDistance] = useState('100');
       const { data: swData } = await supabase.from('swimmers').select('*, squads(*)').eq('id', id).single();
       if (!swData) return;
 
-      const fetchPaged = async (table, select = '*', filter = null) => {
-        let all = []; let page = 0; let more = true;
-        while (more && page < 20) {
-          let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-          if (filter) q = filter(q);
-          const { data, error } = await q;
-          if (error) break;
-          all = [...all, ...data];
-          if (data.length < 1000) more = false;
-          page++;
-        }
-        return all;
-      };
+      const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 20 });
 
       const t0 = performance.now();
       const [resData, attData, sessData, insData, exemptData, memRes, aiReportsRes, meetsRaw, pbsData] = await Promise.all([
@@ -465,7 +455,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         fetchPaged('sessions', '*').then(d => { console.log(`sessions: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('swimmer_insights').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }).then(d => { console.log(`insights: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('club_exemptions').select('*').then(d => { console.log(`exemptions: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
-        fetch(`/api/memberships?swimmerId=${id}`).then(r => r.json()).then(d => { console.log(`memberships: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        authedFetch(`/api/memberships?swimmerId=${id}`).then(r => r.json()).then(d => { console.log(`memberships: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('ai_reports').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }).then(d => { console.log(`ai_reports: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('meets').select('id, name, date').order('date', { ascending: false }).limit(500).then(d => { console.log(`meets: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('swimmer_pbs').select('*').eq('swimmer_id', id).then(d => { console.log(`pbs: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
@@ -518,7 +508,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
     setIsGeneratingAi(true);
     try {
-      const res = await fetch('/api/ai/analyze', {
+      const res = await authedFetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -556,7 +546,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
     setIsGeneratingWorkload(true);
     try {
-      const res = await fetch('/api/ai/analyze', {
+      const res = await authedFetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -593,7 +583,7 @@ const [decayDistance, setDecayDistance] = useState('100');
     }
     setIsGeneratingPathway(true);
     try {
-      const res = await fetch('/api/ai/analyze', {
+      const res = await authedFetch('/api/ai/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1261,7 +1251,7 @@ const [decayDistance, setDecayDistance] = useState('100');
                 }
             }
 
-            const res = await fetch('/api/generate-pdf', {
+            const res = await authedFetch('/api/generate-pdf', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 

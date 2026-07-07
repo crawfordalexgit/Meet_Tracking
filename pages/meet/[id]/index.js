@@ -3,6 +3,7 @@ import { useEffect, useState, useMemo } from 'react';
 import Layout from '../../../components/Layout';
 import PremiumOrb from '../../../components/PremiumOrb';
 import { supabase } from '../../../lib/supabase';
+import { authedFetch } from '../../../lib/api-client';
 import Link from 'next/link';
 import Head from 'next/head';
 import { normalizeName, normalizeEvent, getCategoryBenchmark, timeToSeconds, getPreferredName, generateNameAliases } from '../../../lib/analytics-utils';
@@ -238,7 +239,7 @@ export default function MeetReport({ session }) {
     formData.append('meetId', id); // Pass meetId to the server for persistence
 
     try {
-      const res = await fetch('/api/parse-pdf', {
+      const res = await authedFetch('/api/parse-pdf', {
         method: 'POST',
         body: formData
       });
@@ -277,7 +278,7 @@ export default function MeetReport({ session }) {
     setErrorMessage("");
 
     try {
-      const response = await fetch('/api/ai/scrape-gala-url', {
+      const response = await authedFetch('/api/ai/scrape-gala-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: resultsUrl, meetId: id })
@@ -341,7 +342,7 @@ export default function MeetReport({ session }) {
         }
       }
 
-      const res = await fetch('/api/export-report', {
+      const res = await authedFetch('/api/export-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({
@@ -385,7 +386,7 @@ export default function MeetReport({ session }) {
     formData.append('type', 'staff');
     
     try {
-      const res = await fetch('/api/parse-pdf', {
+      const res = await authedFetch('/api/parse-pdf', {
         method: 'POST',
         body: formData,
       });
@@ -421,7 +422,7 @@ export default function MeetReport({ session }) {
     formData.append('file', file);
     formData.append('meetId', id);
     try {
-      const res = await fetch('/api/upload-meet-photo', { method: 'POST', headers: { 'Authorization': `Bearer ${session?.access_token}` }, body: formData });
+      const res = await authedFetch('/api/upload-meet-photo', { method: 'POST', headers: { 'Authorization': `Bearer ${session?.access_token}` }, body: formData });
       const data = await res.json();
       if (data.url) setMeetPhoto(data.url + '?t=' + Date.now()); // cache-bust on replace
       else console.error('Photo upload failed:', data.error);
@@ -452,7 +453,7 @@ export default function MeetReport({ session }) {
         avgPts: Math.round(augmentedResults.reduce((a,b) => a + (b.wa_pts || 0), 0) / (augmentedResults.length || 1))
       };
 
-      const res = await fetch('/api/ai/gala-engine-v2', {
+      const res = await authedFetch('/api/ai/gala-engine-v2', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session?.access_token}` },
         body: JSON.stringify({

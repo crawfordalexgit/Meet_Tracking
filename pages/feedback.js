@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
 import Head from 'next/head';
 
 export default function FeedbackBoard({ session }) {
@@ -16,7 +17,7 @@ export default function FeedbackBoard({ session }) {
     try {
       setLoading(true);
       // Fetch all issues via API route to bypass client-side RLS limitations during local dev/demo sessions
-      const res = await fetch('/api/get-issues');
+      const res = await authedFetch('/api/get-issues');
       if (!res.ok) throw new Error('Failed to fetch issues');
       const data = await res.json();
       const issuesData = data.issues || [];
@@ -90,7 +91,7 @@ export default function FeedbackBoard({ session }) {
     setIssues(prevIssues => prevIssues.filter(issue => issue.id !== issueId));
 
     try {
-      const res = await fetch('/api/delete-issue', {
+      const res = await authedFetch('/api/delete-issue', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -136,7 +137,7 @@ export default function FeedbackBoard({ session }) {
     );
 
     try {
-      const res = await fetch('/api/upvote-issue', {
+      const res = await authedFetch('/api/upvote-issue', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

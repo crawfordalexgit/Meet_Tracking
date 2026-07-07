@@ -1,4 +1,5 @@
 import { getServiceSupabase } from '../../lib/supabase';
+import { requireAuth } from '../../lib/api-auth';
 import * as cheerio from 'cheerio';
 
 export const config = {
@@ -76,6 +77,8 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
+
+    if (!await requireAuth(req, res)) return;
 
     // Set up SSE headers
     res.setHeader('Content-Type', 'text/event-stream');

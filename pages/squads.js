@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
+import { authedFetch } from '../lib/api-client';
+import { fetchAllRows } from '../lib/paginate';
 import { calculateReliability } from '../lib/analytics-utils';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -211,19 +213,7 @@ export default function SquadsRegistry({ session }) {
       setPeriodDays(period);
       const startStr = new Date(new Date() - period * 86400000).toISOString();
 
-      const fetchPaged = async (table, select = '*', filter = null) => {
-        let all = []; let page = 0; let more = true;
-        while (more && page < 20) {
-          let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-          if (filter) q = filter(q);
-          const { data } = await q;
-          if (!data || data.length === 0) break;
-          all = [...all, ...data];
-          if (data.length < 1000) more = false;
-          page++;
-        }
-        return all;
-      };
+      const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 20 });
 
       // 1. Fetch data
       const [sRes, swimmersArr, resultsArr, attendanceArr, sessionsArr, membershipsArr, exRes, rankingsRes] = await Promise.all([
@@ -232,7 +222,7 @@ export default function SquadsRegistry({ session }) {
         fetchPaged('results', '*, meets(id,name,type)', q => q.gte('date', startStr)),
         fetchPaged('training_attendance', '*', q => q.gte('date', startStr)),
         fetchPaged('sessions', '*'),
-        fetch('/api/memberships').then(r => r.ok ? r.json() : []),
+        authedFetch('/api/memberships').then(r => r.ok ? r.json() : []),
         supabase.from('club_exemptions').select('*'),
         supabase.from('rankings').select('*').order('snapshot_date', { ascending: false })
       ]);
