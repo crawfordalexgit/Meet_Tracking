@@ -77,7 +77,7 @@ export default function Dashboard({ session }) {
   useEffect(() => {
     setIsClient(true);
     fetchAll();
-  }, [session, router]);
+  }, [session, router.query.period]);
 
   useEffect(() => {
     if (router.isReady && router.query.tab) {
@@ -99,6 +99,30 @@ export default function Dashboard({ session }) {
       all = [...all, ...d];
       if (d.length < 1000) more = false;
       page++;
+    }
+    return all;
+  };
+
+  const fetchParallel = async (table, select = '*', filter = null, maxConcurrent = 8) => {
+    if (!supabase) return [];
+    const pageSize = 1000;
+    let q0 = supabase.from(table).select(select, { count: 'exact' }).range(0, pageSize - 1);
+    if (filter) q0 = filter(q0);
+    const { data: firstPage, count } = await q0;
+    if (!firstPage || firstPage.length === 0) return [];
+    if (!count || count <= pageSize) return firstPage;
+    const totalPages = Math.ceil((count - pageSize) / pageSize);
+    const all = [...firstPage];
+    // Fetch in batches to avoid overwhelming Supabase connection pool
+    for (let batch = 0; batch < totalPages; batch += maxConcurrent) {
+      const batchPages = Array.from({ length: Math.min(maxConcurrent, totalPages - batch) }, (_, i) => {
+        const p = batch + i + 1;
+        let q = supabase.from(table).select(select).range(p * pageSize, (p + 1) * pageSize - 1);
+        if (filter) q = filter(q);
+        return q.then(r => r.data || []);
+      });
+      const results = await Promise.all(batchPages);
+      all.push(...results.flat());
     }
     return all;
   };
@@ -140,49 +164,51 @@ export default function Dashboard({ session }) {
     try {
       const now = new Date();
       const y1ago = new Date(now - 450 * 86400000).toISOString().split('T')[0];
+      const resultsFrom = new Date(now - 365 * 86400000).toISOString().split('T')[0];
       // Fetch latest rankings snapshot date first to avoid loading all history
       const { data: latestSnap } = await supabase.from('rankings').select('snapshot_date').order('snapshot_date', { ascending: false }).limit(1).maybeSingle();
       const latestSnapDate = latestSnap?.snapshot_date;
 
-      const [swimmers, squads, results, attendance, sessions, meets, pbs, exemptions, rankings] = await Promise.all([
+      const [swimmers, squads, results, attendance, sessions, meets, pbs, exemptions, rankings, memberships] = await Promise.all([
         fetchPaged('swimmers', '*, squads(id,name,target_meets,target_sessions_per_week,target_training_percent,target_hours_per_week,require_weekend,use_or_logic)', q => q.order('full_name')),
         fetchPaged('squads', '*', q => q.eq('is_squad', true).order('name')),
-        fetchPaged('results', 'id, swimmer_id, wa_pts, is_pb, date, meet_id, event, course, time', q => q.gte('date', y1ago).order('date', { ascending: false })),
-        fetchPaged('training_attendance', 'id, swimmer_id, session_id, date, status', q => q.gte('date', y1ago).order('date', { ascending: false })),
+        fetchParallel('results', 'swimmer_id, wa_pts, is_pb, date, meet_id, event, course, time', q => q.gte('date', resultsFrom).order('date', { ascending: false })),
+        fetchParallel('training_attendance', 'id, swimmer_id, session_id, date, status', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('sessions', '*', q => q.order('id')),
-        fetchPaged('meets', '*', q => q.gte('date', y1ago).order('date', { ascending: false })),
+        fetchParallel('meets', 'id, name, date, course, level, meet_code, license', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('swimmer_pbs', 'swimmer_id,date', q => q.gte('date', y1ago).order('date', { ascending: false })),
         fetchPaged('club_exemptions', '*'),
         latestSnapDate
-          ? fetchPaged('rankings', 'id, swimmer_id, district, rank, stroke, snapshot_date', q => q.eq('snapshot_date', latestSnapDate))
+          ? fetchParallel('rankings', 'id, swimmer_id, district, rank, stroke, snapshot_date', q => q.eq('snapshot_date', latestSnapDate))
           : Promise.resolve([]),
+        fetchParallel('session_memberships', '*'),
       ]);
-      
-      // Enrich results with meet data (avoids slow DB join)
+
+      // Enrich results with meet data; pre-parse date as timestamp for fast useMemo filtering
       const meetsById = Object.fromEntries((meets || []).map(m => [m.id, m]));
-      const enrichedResults = (results || []).map(r => ({ ...r, meets: meetsById[r.meet_id] || null }));
+      const enrichedResults = (results || []).map(r => ({ ...r, meets: meetsById[r.meet_id] || null, _ts: new Date(r.date).getTime() }));
 
-      // Fetch memberships separately so they don't block
-      fetch('/api/memberships')
-        .then(r => r.ok ? r.json() : [])
-        .then(memberships => setData(prev => ({ ...prev, memberships })))
-        .catch(() => {});
-
-      setData({ swimmers, squads, results: enrichedResults, attendance, sessions, meets, pbs: pbs || [], exemptions, rankings: rankings || [], memberships: [] });
+      setData({ swimmers, squads, results: enrichedResults, attendance, sessions, meets, pbs: pbs || [], exemptions, rankings: rankings || [], memberships: memberships || [] });
     } catch (e) { console.error(e); }
     setLoading(false);
   };
 
   const { squadKPIs, clubShutdowns, stats, clubTrend, strokeData, ageData, qualifiers, targetYear } = useMemo(() => {
+    const T = label => console.log(`[dash] ${label}: ${performance.now().toFixed(0)}ms`);
+    T('useMemo start');
     const { swimmers, squads, results, attendance, sessions, pbs, exemptions, memberships, rankings } = data;
+    T(`data sizes — results:${results.length} attendance:${attendance.length} swimmers:${swimmers.length}`);
     const now = new Date();
-    const periodStart = new Date(now - periodDays * 86400000);
+    const periodTs = now.getTime() - periodDays * 86400000;
+    const periodStart = new Date(periodTs);
     const halfPeriod  = Math.floor(periodDays / 2);
-    const velRecentStart = new Date(now - halfPeriod * 86400000);
-    const velPriorStart  = new Date(now - periodDays * 86400000);
+    const velRecentTs = now.getTime() - halfPeriod * 86400000;
+    const velPriorTs  = now.getTime() - periodDays * 86400000;
+    const velRecentStart = new Date(velRecentTs);
+    const velPriorStart  = new Date(velPriorTs);
 
-    const periodResults = results.filter(r => new Date(r.date) >= periodStart);
-    const periodPbs = pbs.filter(p => new Date(p.date) >= periodStart);
+    const periodResults = results.filter(r => r._ts >= periodTs);
+    const periodPbs = pbs.filter(p => new Date(p.date).getTime() >= periodTs);
     
     // Deduplicate PBs by swimmer, date, and event (prevents double counting heat/final PBs)
     const dedupedGlobalPbs = (() => {
@@ -210,11 +236,10 @@ export default function Dashboard({ session }) {
       resultsBySwimmer[r.swimmer_id].push(r);
     });
 
-    const fullResultsBySwimmer = {};
-    results.forEach(r => {
-      if (!fullResultsBySwimmer[r.swimmer_id]) fullResultsBySwimmer[r.swimmer_id] = [];
-      fullResultsBySwimmer[r.swimmer_id].push(r);
-    });
+    T('pre-grouping start');
+    const membershipsBySwimmer = {};
+    (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
+    T('pre-grouping done');
 
     const swimmersWithPBs = new Set(periodPbs.map(p => p.swimmer_id)).size;
     const activeSwimmersCount = swimmers.filter(s => s.is_active !== false).length;
@@ -224,7 +249,7 @@ export default function Dashboard({ session }) {
 
     const monthMap = {};
     periodResults.forEach(r => {
-      const d = new Date(r.date);
+      const d = new Date(r._ts);
       const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
       const label = d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' });
       if (!monthMap[key]) monthMap[key] = { label, pts: [], key };
@@ -273,6 +298,7 @@ export default function Dashboard({ session }) {
       strokeData[k] = { avg: v.pts.reduce((a,b)=>a+b,0) / v.count, peak: Math.max(...v.pts), count: v.count };
     });
 
+    T('squadKPIs start');
     const squadKPIs = squads.map(sq => {
       const sqSwimmers = swimmers.filter(s => s.squad_id === sq.id && s.is_active !== false);
       if (!sqSwimmers.length) return null;
@@ -282,8 +308,7 @@ export default function Dashboard({ session }) {
         const swAtt = attendanceBySwimmer[sw.id] || [];
         const swRes = resultsBySwimmer[sw.id] || [];
         const swWithSquad = { ...sw, squads: sq };
-        const swMemberships = (memberships || []).filter(m => m.swimmer_id === sw.id);
-        const rel = calculateReliability(swWithSquad, swAtt, sessions, swRes, periodDays, exemptions, swMemberships);
+        const rel = calculateReliability(swWithSquad, swAtt, sessions, swRes, periodDays, exemptions, membershipsBySwimmer[sw.id] || []);
 
         totalConsistency += rel.percentage;
         totalVolume += rel.volumePct;
@@ -293,9 +318,9 @@ export default function Dashboard({ session }) {
       const num = sqSwimmers.length;
       const avg = arr => arr.length ? arr.reduce((a, b) => a + Number(b), 0) / arr.length : 0;
       const swimmerVelocities = sqSwimmers.filter(s => !s.is_exempt).map(sw => {
-        const swRes = fullResultsBySwimmer[sw.id] || [];
-        const recentPts = swRes.filter(r => new Date(r.date) >= velRecentStart).map(r => r.wa_pts || 0);
-        const priorPts  = swRes.filter(r => new Date(r.date) >= velPriorStart && new Date(r.date) < velRecentStart).map(r => r.wa_pts || 0);
+        const swRes = resultsBySwimmer[sw.id] || [];
+        const recentPts = swRes.filter(r => r._ts >= velRecentTs).map(r => r.wa_pts || 0);
+        const priorPts  = swRes.filter(r => r._ts >= velPriorTs && r._ts < velRecentTs).map(r => r.wa_pts || 0);
         if (!recentPts.length && !priorPts.length) return null;
         return avg(recentPts) - avg(priorPts);
       }).filter(v => v !== null);
@@ -322,29 +347,36 @@ export default function Dashboard({ session }) {
         volume: squadStats.avgVolume,
         velocity,
         avgPts: Math.round(avg(sqSwimmers.map(s => {
-          const swRes = fullResultsBySwimmer[s.id] || [];
+          const swRes = resultsBySwimmer[s.id] || [];
           return swRes.length ? Math.max(...swRes.map(r => r.wa_pts || 0)) : 0;
         })))
       };
     }).filter(Boolean);
+    T('squadKPIs done');
 
     const filteredSwimmers = search.trim() ? swimmers.filter(s => s.full_name?.toLowerCase().includes(search.toLowerCase())) : swimmers.filter(s => s.is_active !== false);
     const unassignedCount = swimmers.filter(s => s.is_active !== false && !squadKPIs.some(sq => sq?.id === s.squad_id)).length;
 
+    T('ageData/qualifiers start');
+    // Pre-build swimmers lookup for O(1) access
+    const swimmersById = Object.fromEntries((swimmers || []).map(s => [s.id, s]));
+
+    // Pre-compute age per swimmer (avoid 131k Date objects inside loop)
+    const nowYear = now.getFullYear();
+    const swimmerAge = {};
+    (swimmers || []).forEach(s => {
+      if (s.date_of_birth) swimmerAge[s.id] = nowYear - new Date(s.date_of_birth).getFullYear();
+      else if (s.year_of_birth) swimmerAge[s.id] = nowYear - s.year_of_birth;
+    });
+
     // Age-based Performance for Club
     const agePerformanceMap = {};
-    results.forEach(r => {
-      const swm = swimmers.find(sw => sw.id === r.swimmer_id);
-      if (!swm || (!swm.year_of_birth && !swm.date_of_birth)) return;
-      
-      let calcAge;
-      if (swm.date_of_birth) {
-        const dob = new Date(swm.date_of_birth);
-        calcAge = now.getFullYear() - dob.getFullYear();
-      } else {
-        calcAge = now.getFullYear() - swm.year_of_birth;
-      }
-      
+    periodResults.forEach(r => {
+      const swm = swimmersById[r.swimmer_id];
+      if (!swm) return;
+      const calcAge = swimmerAge[r.swimmer_id];
+      if (!calcAge) return;
+
       if (calcAge >= 8 && calcAge <= 22) {
         if (!agePerformanceMap[calcAge]) agePerformanceMap[calcAge] = { male: [], female: [] };
         if (r.wa_pts) {
@@ -390,7 +422,7 @@ export default function Dashboard({ session }) {
     (swimmers || []).filter(s => s.is_active !== false).forEach(swimmer => {
       const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : null;
       if (!age) return;
-      const swimmerResults = (results || []).filter(r => r.swimmer_id === swimmer.id);
+      const swimmerResults = resultsBySwimmer[swimmer.id] || [];
       const peakWA = swimmerResults.length > 0 ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
       
       const cQT = getCategoryBenchmark(age, swimmer.gender, '', 'COUNTY');
@@ -407,6 +439,7 @@ export default function Dashboard({ session }) {
     const nationalCount = [...new Set((rankings || []).filter(r => r.snapshot_date === latestSnapshot && r.district === 'England').map(r => r.swimmer_id))].length;
 
     const qualifiers = { county: qtCounty, regional: qtRegional, national: nationalCount, targetYear };
+    T('useMemo done');
 
     return { 
       squadKPIs, 
@@ -436,7 +469,7 @@ export default function Dashboard({ session }) {
         complianceRate: Math.round(squadKPIs.reduce((a,b) => a + (b?.meets || 0), 0) / (squadKPIs.length || 1)),
         avgVelocity: Math.round(squadKPIs.reduce((a,b) => a + (b?.velocity || 0), 0) / (squadKPIs.length || 1)),
         peakStandard: Math.round(swimmers.filter(s => s.is_active !== false).reduce((acc, s) => {
-          const swRes = fullResultsBySwimmer[s.id] || [];
+          const swRes = resultsBySwimmer[s.id] || [];
           const peak = swRes.length ? Math.max(...swRes.map(r => r.wa_pts || 0)) : 0;
           return acc + peak;
         }, 0) / (swimmers.filter(s => s.is_active !== false).length || 1))

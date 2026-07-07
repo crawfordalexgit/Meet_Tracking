@@ -39,11 +39,28 @@ export default async function handler(req, res) {
       .or(`id.eq.${parentId},parent_id.eq.${parentId}`);
 
     const meetIds = familyMeets.map(m => m.id);
+
+    // Extract structured staff entries (type:'staff') — deterministic, no AI needed for names
+    const structuredSupportStaff = familyMeets.flatMap(m => {
+      try {
+        if (m.staff_text?.startsWith('[')) {
+          return JSON.parse(m.staff_text)
+            .filter(n => n.type === 'staff')
+            .map(n => ({ name: n.name, role: n.role || '' }));
+        }
+      } catch (e) {}
+      return [];
+    });
+
     const parseNote = (text, sourceName) => {
       try {
         if (text && text.startsWith('[') && text.endsWith(']')) {
           const notes = JSON.parse(text);
-          return notes.map(note => `[${sourceName} - ${new Date(note.date).toLocaleDateString()}]: ${note.text}`).join('\n');
+          // Exclude structured staff entries from coaching notes text
+          return notes
+            .filter(note => !note.type || note.type === 'note')
+            .map(note => `[${sourceName} - ${new Date(note.date).toLocaleDateString()}]: ${note.text}`)
+            .join('\n');
         }
         return text ? `[From ${sourceName}]: ${text}` : '';
       } catch (e) {
@@ -61,15 +78,17 @@ export default async function handler(req, res) {
     // 2. Re-fetch ALL results and ALL stats for the family to ensure complete DNA
     const { data: familyResults } = await supabase
       .from('results')
-      .select('*, swimmers(full_name, known_as, squad, gender, year_of_birth)')
+      .select('*, swimmers(full_name, known_as, squad, gender, year_of_birth, is_ranked_member)')
       .in('meet_id', meetIds)
       .order('rank', { ascending: true });
 
-    // Use family results as the source of truth
-    const results = (familyResults || bodyResults).map(r => ({
-      ...r,
-      resolved_name: getPreferredName(r.swimmers)
-    }));
+    // Use family results as the source of truth, excluding non-ranked members (2nd club swimmers)
+    const results = (familyResults || bodyResults)
+      .filter(r => r.swimmers?.is_ranked_member !== false)
+      .map(r => ({
+        ...r,
+        resolved_name: getPreferredName(r.swimmers)
+      }));
 
     const swimmerNameParts = results.flatMap(r => {
       const preferred = r.swimmers?.known_as || r.swimmers?.full_name;
@@ -110,14 +129,18 @@ export default async function handler(req, res) {
     // eliminating false positives from partial substring matches (e.g. "garfield" inside "ingarfield").
     const detectedMedals = [];
     let currentEvent = 'Unknown Event';
-    const { data: allSwimmers } = await supabase.from('swimmers').select('id, full_name, known_as');
+    const { data: allSwimmersRaw } = await supabase.from('swimmers').select('id, full_name, known_as, is_ranked_member');
+    const allSwimmers = (allSwimmersRaw || []).filter(s => s.is_ranked_member !== false);
 
     if (pdfText) {
       allLines.forEach((line, i) => {
         // Track event headers (strip page-continuation parens)
         const cleanLine = line.trim().replace(/^\(/, '').replace(/\)$/, '');
         if (/^Event\s+\d+/i.test(cleanLine)) {
-          currentEvent = cleanLine;
+          // Truncate at end of stroke name to remove 2-column PDF bleed
+          // (right-column event headers / result rows can follow on the same extracted line)
+          const strokeMatch = cleanLine.match(/^(Event\s+\d+\b.*?\b(?:freestyle|backstroke|breaststroke|butterfly|individual\s*medley))\b/i);
+          currentEvent = strokeMatch ? strokeMatch[1].trim() : cleanLine;
           return;
         }
 
@@ -500,6 +523,7 @@ export default async function handler(req, res) {
       bubble_analysis: nearMisses,
       pdf_evidence: filteredPdfText || null,
       staff_context: consolidatedStaffText || null,
+      support_staff: structuredSupportStaff.length > 0 ? structuredSupportStaff : null,
       user_correction: correction || null,
       benchmarks: benchmarks || [], // Inject benchmarks into the AI context
       relay_medals: relayMedals, // Relay team medal results for AI narrative

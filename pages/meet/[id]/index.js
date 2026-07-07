@@ -21,6 +21,59 @@ export default function MeetReport({ session }) {
     return text;
   };
 
+  const parseStaffBulk = (rawText) => {
+    const entries = [];
+    if (!rawText.trim()) return entries;
+    const now = Date.now();
+    let i = 0;
+
+    // SCM format: "Role:\tLast, First" — one entry per line, tab-separated, Last,First name order
+    if (rawText.includes('\t')) {
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+      for (const line of lines) {
+        const tabIdx = line.indexOf('\t');
+        if (tabIdx < 0) continue;
+        const role = line.slice(0, tabIdx).replace(/:$/, '').trim();
+        const nameRaw = line.slice(tabIdx + 1).trim();
+        // Reverse "Last, First" → "First Last"
+        const commaIdx = nameRaw.indexOf(',');
+        const name = commaIdx > 0
+          ? `${nameRaw.slice(commaIdx + 1).trim()} ${nameRaw.slice(0, commaIdx).trim()}`
+          : nameRaw;
+        if (name.length > 1) entries.push({ id: now + i++, type: 'staff', name, role, date: new Date().toISOString() });
+      }
+      return entries;
+    }
+
+    // Programme format: "Officials: Name1, Name2. Coaches: Name3"
+    const text = rawText
+      .replace(/\.\s+/g, '\n')
+      .replace(/([a-z])\s+([A-Z][a-zA-Z ]+?):\s*/g, '$1\n$2: ');
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const colonIdx = line.indexOf(':');
+      if (colonIdx > 0 && colonIdx < 35) {
+        const role = line.slice(0, colonIdx).trim();
+        const names = line.slice(colonIdx + 1).split(',').map(n => n.trim()).filter(n => n.length > 1);
+        names.forEach(name => entries.push({ id: now + i++, type: 'staff', name, role, date: new Date().toISOString() }));
+      } else {
+        const parts = line.split(',');
+        const first = parts[0].trim();
+        const words = first.split(/\s+/);
+        if (parts.length >= 2 && words.length >= 3) {
+          const role = words.slice(0, -2).join(' ');
+          const firstName = words.slice(-2).join(' ');
+          [firstName, ...parts.slice(1).map(n => n.trim())].filter(n => n.length > 1)
+            .forEach(name => entries.push({ id: now + i++, type: 'staff', name, role, date: new Date().toISOString() }));
+        } else {
+          parts.map(n => n.trim()).filter(n => n.length > 1)
+            .forEach(name => entries.push({ id: now + i++, type: 'staff', name, role: '', date: new Date().toISOString() }));
+        }
+      }
+    }
+    return entries;
+  };
+
   const [loading, setLoading] = useState(true);
   const [meet, setMeet] = useState(null);
   const [results, setResults] = useState([]);
@@ -31,8 +84,11 @@ export default function MeetReport({ session }) {
   const [parsingPdf, setParsingPdf] = useState(false);
   const [pdfText, setPdfText] = useState(null);
   const [staffText, setStaffText] = useState(null);
-  const [staffNotes, setStaffNotes] = useState([]); // Array of { id, text, date }
+  const [staffNotes, setStaffNotes] = useState([]); // Array of { id, text?, date, type?, name?, role? }
   const [newNote, setNewNote] = useState("");
+  const [newStaffName, setNewStaffName] = useState('');
+  const [newStaffRole, setNewStaffRole] = useState('');
+  const [bulkStaffPaste, setBulkStaffPaste] = useState('');
   const [parsingStaff, setParsingStaff] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(null); // 'success' | 'error'
   const [errorMessage, setErrorMessage] = useState("");
@@ -666,7 +722,6 @@ export default function MeetReport({ session }) {
           </div>
           <h1 style={{ fontSize: '3.5rem', fontWeight: 950, margin: 0, letterSpacing: '-0.04em', lineHeight: 1 }}>{meet.name.split(' ').map((word, i) => i === meet.name.split(' ').length - 1 ? <span key={i} style={{ color: 'var(--accent-cyan)' }}>{word}</span> : word + ' ')}</h1>
           <div className="flex gap-4 mt-4">
-            <button className="btn-premium-intel" onClick={handleExport} style={{ background: 'var(--accent-cyan)', color: '#000', fontSize: '0.65rem' }}>Export PDF Showcase</button>
             <p style={{ fontSize: '1rem', opacity: 0.9, alignSelf: 'center', margin: 0 }}>
               {new Date(meet.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })} • {meet.license} • {meet.course} Course Analysis
             </p>
@@ -716,6 +771,21 @@ export default function MeetReport({ session }) {
                   {meetPhoto ? '✓ Photo' : '○ Photo'}
                 </span>
               </div>
+              <button
+                className="period-btn"
+                style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap' }}
+                onClick={handleExport}
+              >
+                ⬇ Export PDF
+              </button>
+              <a
+                href={`/api/export/meet-word?id=${meet?.id}`}
+                download
+                className="period-btn"
+                style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap', textDecoration: 'none' }}
+              >
+                ⬇ Export Word
+              </a>
               <button
                 className="period-btn"
                 style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap' }}
@@ -849,15 +919,57 @@ export default function MeetReport({ session }) {
                 {activeIngestionTab === 'staff' && (
                   <div className="animate-fade-in">
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+                      {/* ── Attending Support Staff (bulk paste) ── */}
+                      <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1.25rem' }}>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '0.75rem' }}>Attending Support Staff</div>
+                        <p style={{ fontSize: '0.7rem', opacity: 0.45, marginBottom: '0.75rem' }}>Paste the staff list from the programme. Format: <em>Officials: Name1, Name2. Coaches: Name3, Name4</em> — roles can use a colon or not, groups separated by full stop.</p>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                          <textarea
+                            style={{ flex: 1, minHeight: '72px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '0.5rem 0.75rem', borderRadius: '10px', fontSize: '0.82rem', color: 'white', outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
+                            placeholder="Officials: Keith Roshier, James Winnifrith... Coaches: Nick Harris... Team Managers: Gill Clouston..."
+                            value={bulkStaffPaste}
+                            onChange={e => setBulkStaffPaste(e.target.value)}
+                          />
+                          <button
+                            className="btn-premium-intel"
+                            style={{ background: 'var(--accent-cyan)', color: 'black', fontSize: '0.7rem', padding: '0.5rem 1rem', whiteSpace: 'nowrap' }}
+                            onClick={async () => {
+                              const parsed = parseStaffBulk(bulkStaffPaste);
+                              if (!parsed.length) return;
+                              const updated = [...parsed, ...staffNotes];
+                              setStaffNotes(updated);
+                              setBulkStaffPaste('');
+                              await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
+                            }}
+                          >PARSE &amp; ADD</button>
+                        </div>
+                        {staffNotes.filter(n => n.type === 'staff').length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.75rem' }}>
+                            {staffNotes.filter(n => n.type === 'staff').map(s => (
+                              <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(14,165,233,0.07)', border: '1px solid rgba(14,165,233,0.15)', padding: '0.5rem 0.75rem', borderRadius: '8px' }}>
+                                <span style={{ fontSize: '0.85rem' }}><strong>{s.name}</strong>{s.role ? <span style={{ opacity: 0.5, marginLeft: '0.5rem' }}>· {s.role}</span> : null}</span>
+                                <button style={{ background: 'none', border: 'none', color: 'var(--accent-rose)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }} onClick={async () => {
+                                  const updated = staffNotes.filter(n => n.id !== s.id);
+                                  setStaffNotes(updated);
+                                  await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
+                                }}>✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── Coach's Log (free-text notes) ── */}
                       <div>
-                        <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Coach’s Log &amp; Context</h4>
+                        <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Coach's Log &amp; Context</h4>
                         <p style={{ fontSize: '0.75rem', opacity: 0.5 }}>Add technical notes, squad feedback, or atmospheric details for the AI to include in the report.</p>
                       </div>
                       <div className="flex gap-4">
                         <textarea
                           className="flex-1"
                           style={{ height: '100px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '16px', fontSize: '0.9rem', color: 'white', outline: 'none', resize: 'none' }}
-                          placeholder="Type a new note here… (e.g. 'Session 3: Kieran’s underwater transitions were elite today')"
+                          placeholder="Type a new note here… (e.g. 'Session 3: Kieran's underwater transitions were elite today')"
                           value={newNote}
                           onChange={(e) => setNewNote(e.target.value)}
                         />
@@ -877,7 +989,7 @@ export default function MeetReport({ session }) {
                         </button>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        {staffNotes.map(note => (
+                        {staffNotes.filter(n => !n.type || n.type === 'note').map(note => (
                           <div key={note.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '1rem' }}>
                             <div style={{ flex: 1 }}>
                               <p style={{ fontSize: '0.9rem', lineHeight: 1.5, color: 'rgba(255,255,255,0.9)' }}>{note.text}</p>
@@ -1353,20 +1465,35 @@ export default function MeetReport({ session }) {
                     </div>
                   </div>
 
-                  {insight.support_team && insight.support_team.length > 0 && (
-                    <div style={{ marginTop: '4rem', paddingTop: '3rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div style={{ fontSize: '0.65rem', fontWeight: 950, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '2rem', letterSpacing: '0.2em', textAlign: 'center' }}>Gala Support & Volunteers</div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        {insight.support_team.map((s, i) => (
-                          <div key={i} style={{ background: 'rgba(255,255,255,0.02)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', pageBreakInside: 'avoid' }}>
-                            <div style={{ fontWeight: 950, fontSize: '0.9rem', marginBottom: '4px' }}>{s.name}</div>
-                            <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '12px', letterSpacing: '0.05em' }}>{s.role}</div>
-                            <div style={{ fontSize: '0.8rem', opacity: 0.7, fontStyle: 'italic', lineHeight: 1.4 }}>"{s.thanks}"</div>
-                          </div>
-                        ))}
+                  {(() => {
+                    const structuredStaff = staffNotes.filter(n => n.type === 'staff');
+                    const structuredNames = new Set(structuredStaff.map(s => s.name?.toLowerCase().trim()));
+                    const aiOnly = (insight?.support_team || []).filter(a => !structuredNames.has(a.name?.toLowerCase().trim()));
+                    const displayTeam = [...structuredStaff, ...aiOnly];
+                    if (displayTeam.length === 0) return null;
+                    // Group by role
+                    const grouped = {};
+                    displayTeam.forEach(s => {
+                      const key = s.role || 'Support';
+                      if (!grouped[key]) grouped[key] = [];
+                      grouped[key].push(s.name);
+                    });
+                    return (
+                      <div className="print-hide" style={{ marginTop: '3rem', paddingTop: '2rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                        <div style={{ fontSize: '0.6rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.15em', marginBottom: '1rem' }}>Gala Support &amp; Volunteers</div>
+                        <div style={{ fontSize: '1.4rem', fontWeight: 900, lineHeight: 1.3, marginBottom: '0.4rem' }}>Without you, none of this happens.</div>
+                        <div style={{ fontSize: '0.85rem', opacity: 0.55, marginBottom: '1.5rem' }}>Every race, every result, every moment — made possible by the people below. Thank you.</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          {Object.entries(grouped).map(([role, names]) => (
+                            <div key={role} style={{ fontSize: '0.8rem', lineHeight: 1.5 }}>
+                              <span style={{ fontWeight: 700, color: 'var(--accent-cyan)', textTransform: 'uppercase', fontSize: '0.65rem', marginRight: '0.5rem' }}>{role}</span>
+                              <span style={{ opacity: 0.75 }}>{names.join(', ')}</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {insight.recruitment_shoutout && (
                     <div style={{ marginTop: '4rem', background: 'linear-gradient(135deg, rgba(6,182,212,0.1), rgba(16,185,129,0.1))', padding: '2.5rem', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.1)', textAlign: 'center', pageBreakInside: 'avoid' }}>
@@ -1534,89 +1661,92 @@ export default function MeetReport({ session }) {
                 {activeIngestionTab === 'staff' && (
                   <div className="animate-fade-in">
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+                      {/* ── Attending Support Staff (bulk paste) ── */}
+                      <div style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '1.25rem' }}>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '0.75rem' }}>Attending Support Staff</div>
+                        <p style={{ fontSize: '0.7rem', opacity: 0.45, marginBottom: '0.75rem' }}>Paste the staff list from the programme. Format: <em>Officials: Name1, Name2. Coaches: Name3, Name4</em> — roles can use a colon or not, groups separated by full stop.</p>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                          <textarea
+                            style={{ flex: 1, minHeight: '72px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '0.5rem 0.75rem', borderRadius: '10px', fontSize: '0.82rem', color: 'white', outline: 'none', resize: 'vertical', lineHeight: 1.5 }}
+                            placeholder="Officials: Keith Roshier, James Winnifrith... Coaches: Nick Harris... Team Managers: Gill Clouston..."
+                            value={bulkStaffPaste}
+                            onChange={e => setBulkStaffPaste(e.target.value)}
+                          />
+                          <button
+                            className="btn-premium-intel"
+                            style={{ background: 'var(--accent-cyan)', color: 'black', fontSize: '0.7rem', padding: '0.5rem 1rem', whiteSpace: 'nowrap' }}
+                            onClick={async () => {
+                              const parsed = parseStaffBulk(bulkStaffPaste);
+                              if (!parsed.length) return;
+                              const updated = [...parsed, ...staffNotes];
+                              setStaffNotes(updated);
+                              setBulkStaffPaste('');
+                              await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
+                            }}
+                          >PARSE &amp; ADD</button>
+                        </div>
+                        {staffNotes.filter(n => n.type === 'staff').length > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.75rem' }}>
+                            {staffNotes.filter(n => n.type === 'staff').map(s => (
+                              <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(14,165,233,0.07)', border: '1px solid rgba(14,165,233,0.15)', padding: '0.5rem 0.75rem', borderRadius: '8px' }}>
+                                <span style={{ fontSize: '0.85rem' }}><strong>{s.name}</strong>{s.role ? <span style={{ opacity: 0.5, marginLeft: '0.5rem' }}>· {s.role}</span> : null}</span>
+                                <button style={{ background: 'none', border: 'none', color: 'var(--accent-rose)', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }} onClick={async () => {
+                                  const updated = staffNotes.filter(n => n.id !== s.id);
+                                  setStaffNotes(updated);
+                                  await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
+                                }}>✕</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── Coach's Log (free-text notes) ── */}
                       <div>
                         <h4 style={{ fontSize: '1rem', fontWeight: 900, marginBottom: 4 }}>Coach's Log & Context</h4>
                         <p style={{ fontSize: '0.75rem', opacity: 0.5 }}>Add technical notes, squad feedback, or atmospheric details for the AI to include in the report.</p>
                       </div>
 
-                      {/* Add New Note */}
                       <div className="flex gap-4">
-                        <textarea 
+                        <textarea
                           className="flex-1"
-                          style={{ 
-                            height: '100px', 
-                            background: 'rgba(255,255,255,0.05)', 
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            padding: '1rem', 
-                            borderRadius: '16px', 
-                            fontSize: '0.9rem', 
-                            color: 'white',
-                            outline: 'none',
-                            resize: 'none'
-                          }}
+                          style={{ height: '100px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '1rem', borderRadius: '16px', fontSize: '0.9rem', color: 'white', outline: 'none', resize: 'none' }}
                           placeholder="Type a new note here... (e.g. 'Session 3: Kieran's underwater transitions were elite today')"
                           value={newNote}
                           onChange={(e) => setNewNote(e.target.value)}
                         />
-                        <button 
-                          className="btn-premium-intel" 
+                        <button
+                          className="btn-premium-intel"
                           style={{ background: 'var(--accent-emerald)', color: 'black', height: 'fit-content' }}
                           onClick={async () => {
                             if (!newNote.trim()) return;
                             const updated = [{ id: Date.now(), text: newNote, date: new Date().toISOString() }, ...staffNotes];
                             setStaffNotes(updated);
                             setNewNote("");
-                            
-                            // Auto-save to DB
                             const { error } = await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
-                            if (!error) {
-                              setUploadStatus('success');
-                              setTimeout(() => setUploadStatus(null), 3000);
-                            }
+                            if (!error) { setUploadStatus('success'); setTimeout(() => setUploadStatus(null), 3000); }
                           }}
                         >
                           ADD NOTE
                         </button>
                       </div>
 
-                      {/* Notes List */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                        {staffNotes.map(note => (
-                          <div key={note.id} style={{ 
-                            background: 'rgba(255,255,255,0.03)', 
-                            border: '1px solid rgba(255,255,255,0.05)', 
-                            padding: '1rem', 
-                            borderRadius: '12px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'start',
-                            gap: '1rem'
-                          }}>
+                        {staffNotes.filter(n => !n.type || n.type === 'note').map(note => (
+                          <div key={note.id} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '1rem' }}>
                             <div style={{ flex: 1 }}>
                               <p style={{ fontSize: '0.9rem', lineHeight: 1.5, color: 'rgba(255,255,255,0.9)' }}>{note.text}</p>
-                              <span style={{ fontSize: '0.65rem', opacity: 0.3, marginTop: '0.5rem', display: 'block' }}>
-                                {new Date(note.date).toLocaleString()}
-                              </span>
+                              <span style={{ fontSize: '0.65rem', opacity: 0.3, marginTop: '0.5rem', display: 'block' }}>{new Date(note.date).toLocaleString()}</span>
                             </div>
-                            <button 
-                              style={{ 
-                                background: 'rgba(244, 63, 94, 0.1)', 
-                                color: 'var(--accent-rose)', 
-                                border: 'none', 
-                                padding: '4px 10px', 
-                                borderRadius: '6px', 
-                                fontSize: '0.6rem', 
-                                fontWeight: 700,
-                                cursor: 'pointer'
-                              }}
+                            <button
+                              style={{ background: 'rgba(244, 63, 94, 0.1)', color: 'var(--accent-rose)', border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '0.6rem', fontWeight: 700, cursor: 'pointer' }}
                               onClick={async () => {
                                 const updated = staffNotes.filter(n => n.id !== note.id);
                                 setStaffNotes(updated);
                                 await supabase.from('meets').update({ staff_text: JSON.stringify(updated) }).eq('id', id);
                               }}
-                            >
-                              DELETE
-                            </button>
+                            >DELETE</button>
                           </div>
                         ))}
                       </div>

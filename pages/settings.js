@@ -432,6 +432,13 @@ export default function Settings({ session, scmApiKey }) {
     setSwimmers(swimmers.map(s => s.id === swimmerId ? { ...s, is_exempt: isExempt } : s));
   };
 
+  const toggleRankedMember = async (swimmerId, isRanked) => {
+    const { error } = await supabase.from('swimmers').update({ is_ranked_member: isRanked }).eq('id', swimmerId);
+    if (error) { setDebugLog(`DB ERROR: ${error.message}`); return; }
+    setSwimmers(swimmers.map(s => s.id === swimmerId ? { ...s, is_ranked_member: isRanked } : s));
+    setDebugLog(`${isRanked ? 'Marked as ranked member' : 'Marked as non-ranked (2nd club)'}.`);
+  };
+
   const toggleMeetType = async (meetId, type) => {
     setMeets(meets.map(m => m.id === meetId ? { ...m, type } : m));
     await supabase.from('meets').update({ type }).eq('id', meetId);
@@ -2043,7 +2050,7 @@ export default function Settings({ session, scmApiKey }) {
 
               <div className="table-wrapper" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
                 <table className="stats-table">
-                  <thead><tr><th>Name</th><th>Squad</th><th className="text-center">Action</th></tr></thead>
+                  <thead><tr><th>Name</th><th>Squad</th><th className="text-center">Session Exempt</th><th className="text-center">Ranked Member</th></tr></thead>
                   <tbody>
                     {filteredSwimmers.map(s => (
                       <tr key={s.id}>
@@ -2051,6 +2058,13 @@ export default function Settings({ session, scmApiKey }) {
                         <td><span className="badge">{s.squads?.name}</span></td>
                         <td className="text-center">
                           <button onClick={() => toggleExempt(s.id, !s.is_exempt)} className={`btn ${s.is_exempt ? 'btn-primary' : 'btn-secondary'}`} style={{ padding: '6px 12px', fontSize: '0.8rem', background: s.is_exempt ? 'var(--danger-color)' : '' }}>{s.is_exempt ? 'Exempt' : 'Include'}</button>
+                        </td>
+                        <td className="text-center">
+                          <button
+                            onClick={() => toggleRankedMember(s.id, s.is_ranked_member === false ? true : false)}
+                            className={`btn ${s.is_ranked_member === false ? 'btn-secondary' : 'btn-primary'}`}
+                            style={{ padding: '6px 12px', fontSize: '0.8rem', background: s.is_ranked_member === false ? 'var(--danger-color)' : '' }}
+                          >{s.is_ranked_member === false ? '2nd Club' : 'Ranked'}</button>
                         </td>
                       </tr>
                     ))}

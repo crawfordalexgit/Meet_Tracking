@@ -47,7 +47,7 @@ You will receive a "Meet DNA" object containing:
     - Example: "Arlo's new PB in the 100m Breaststroke is fast enough for a Top 40 National ranking!"
 - **Synthesized Storytelling**: If a swimmer has `is_pb: true` AND a medal, this is the "Ultimate Performance" and must be your top highlight.
 - **PDF Evidence — Context Only**: The `pdf_evidence` is provided so you can understand the narrative of the meet (number of competitors, event names, etc.). You MUST NOT attempt to identify medal winners from the PDF. Medal detection is handled by the backend engine before this prompt runs. Trust `detected_medalists` completely.
-- **Moments of Brilliance (QUALITY OVER QUANTITY)**: 
+- **Moments of Brilliance (QUALITY OVER QUANTITY + SQUAD COVERAGE)**: 
     - **NO MAN LEFT BEHIND IS CANCELLED**: We no longer aim to list every single swimmer. This report should focus on **MOMENTS OF BRILLIANCE**. 
     - Only include swimmers in the `standout_performers` section if they achieved at least ONE of the following:
         1. A **Medal** (Gold, Silver, or Bronze).
@@ -55,16 +55,25 @@ You will receive a "Meet DNA" object containing:
         3. A **Finalist** status (Reached a Final session).
         4. A **Near Miss** (Finished 9th or 10th in heats, just missing the final).
         5. A **Pathway Standard** (National, Regional, or County).
-    - This ensures the report is high-impact and celebrates elite progress.
+    - **SQUAD COVERAGE (MANDATORY)**: Every squad that attended must have **at least one swimmer** in `standout_performers`. After selecting your high-achievers, check which squads are unrepresented. For each missing squad, pick the swimmer from that squad with the single best achievement (most PBs, highest WA Points, biggest time drop) and include them. Their `insight` should celebrate that achievement genuinely — no filler.
+    - This ensures the report is high-impact and celebrates elite progress while making every squad feel seen.
     - [CRITICAL]: Swimmers who reached a **Final** (where `round` is 'Final') have achieved something massive at this level. You MUST specifically mention 'Finalist' status for these athletes.
     - [NEW]: Identify "Near Misses". If a swimmer finished **9th or 10th** in a heat, look at the 8th place time in the `pdf_evidence` or use the `gap` provided in `bubble_analysis`. YOU MUST mention exactly how close they were (e.g., "Kieran was just 0.4s away from the final!") to add drama and recognition of their effort. Frame this as a major "resilience" achievement.
 
 ## Objectives
 - **Comprehensive, high-fidelity** race report for the club community.
-- **User Correction (HIGHEST PRIORITY)**: If `user_correction` is provided, you MUST follow those instructions above all else. 
-    - If `staff_context` contains SCALE DATA (e.g. number of clubs, total swimmers in region, entry counts), you MUST use these specific numbers to provide perspective.
-    - Example: "In a massive field of 38,000 regional swimmers, making a final is an elite achievement..."
-    - Treat these notes as the "Lead Story" for the report.
+- **User Correction (HIGHEST PRIORITY)**: If `user_correction` is provided, you MUST follow those instructions above all else.
+- **COACHING NOTES (HIGH PRIORITY)**: The `### COACHING NOTES & STAFF CONTEXT` section contains observations from the coaching team. You MUST:
+    - Weave coaching themes and observations into the narrative summary (e.g. if coaches noted a swimmer was ill or nervous, acknowledge that; if they flagged a squad performed above expectations, celebrate it).
+    - If coaching notes contain SCALE DATA (e.g. number of clubs, total swimmers in region, entry counts), use those specific numbers in Paragraph 1 for context.
+    - If coaching notes mention specific swimmers or events, prioritise those in `standout_performers` and `successes`.
+    - Treat coaching notes as the authoritative "inside story" — they tell you what the coaches actually saw and felt.
+- **NO STAFF NAMES IN SUMMARY (MANDATORY)**: Do NOT list or thank support staff, coaches, team managers, or volunteers anywhere in the `summary` paragraphs. Staff recognition lives exclusively in the `support_team` JSON field. Never attempt to reconstruct names from PDF evidence — the PDF uses "Last, First" format which produces garbled output.
+- **SUPPORT STAFF (CRITICAL — MANDATORY)**: The DNA may contain a `support_staff` array with structured entries `[{name, role}]` entered directly by the coaching team. If this array is present and non-empty:
+    - You MUST include EVERY person in `support_team` output, using the exact name and role provided.
+    - Do NOT invent or substitute names. Do NOT omit anyone from the list.
+    - Write a short personalised `thanks` sentence for each person based on their role.
+    - If `support_staff` is null or empty, derive `support_team` from named helpers in `staff_context` instead.
 - **Medal Attribution — ABSOLUTE RULE**: You MUST ONLY list swimmers who appear in `detected_medalists`. Do NOT add any swimmer to the medal list based on the PDF, your training data, or any other source. If a swimmer is not in `detected_medalists`, they did not medal — do not mention them in a medal context regardless of what you see in `pdf_evidence`. The engine is authoritative; you are not.
 - **WA POINTS EXPLANATION (MANDATORY)**: Since this report is for parents, you MUST include a brief explanation of what "World Aquatics (WA) Points" represent.
 - **NAME VARIATIONS (CRITICAL)**: Names in PDFs often appear as "Day, William" or "DAY William", but our records use "William Day". You MUST match these intelligently.
@@ -81,7 +90,7 @@ Return a strictly valid JSON object with the following structure:
     "target_bronze": "<Insert bronze count from DNA.stats>",
     "listed_medals_verification": "<List exactly which swimmers make up the count to prove it matches the targets>"
   },
-  "summary": "MANDATORY: 4 substantial, narrative paragraphs. SEPARATE EACH PARAGRAPH WITH TWO NEWLINES (\\n\\n). Paragraph 1: Atmosphere/Club presence AND SCALE/CONTEXT (use the regional statistics from staff_context to set the stage). Paragraph 2: Elite achievements (Medals/Finals). Paragraph 3: Development & Resilience (PBs/Near Misses) AND a detailed Year-over-Year Comparative Growth check (using the `historical_comparisons` array, describe how this year's squad presence, medal count, and average World Aquatics points compare directly to the same gala over the last 2 years, demonstrating if the club is in growth, stability, or decline). Paragraph 4: Strategic takeaway and warm thanks to staff/helpers. Integrate specific names and stats directly into the narrative. Be descriptive and celebratory.",
+  "summary": "MANDATORY: 4 substantial, narrative paragraphs. SEPARATE EACH PARAGRAPH WITH TWO NEWLINES (\\n\\n). Paragraph 1: Atmosphere/Club presence AND SCALE/CONTEXT (use the regional statistics from staff_context to set the stage). Paragraph 2: Elite achievements (Medals/Finals). Paragraph 3: Development & Resilience (PBs/Near Misses) AND a detailed Year-over-Year Comparative Growth check (using the `historical_comparisons` array, describe how this year's squad presence, medal count, and average World Aquatics points compare directly to the same gala over the last 2 years, demonstrating if the club is in growth, stability, or decline). Paragraph 4: Strategic takeaway — what this meet reveals about the squad's trajectory and what to focus on in training. NO staff/volunteer thanks here; those are handled separately in the `support_team` JSON field. Be descriptive and celebratory.",
   "successes": [
     "MANDATORY: One summary line for individual medals — e.g. '13 Golds, 11 Silvers, 13 Bronzes (37 individual medals)'. Then name ONLY Gold medalists and any swimmer who won a medal AND set a PB in the same event. Do NOT list every single Silver or Bronze winner here — the table already shows them.",
     "MANDATORY: If 'relay_medals' is non-empty, list each relay team medal here with just the event and medal type (e.g., 'GOLD — Mixed 4x100m Freestyle Relay'). Do NOT list the individual swimmer names here — the relay podium section on the frontend already displays them.",
