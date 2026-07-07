@@ -1,4 +1,5 @@
 import { getServiceSupabase } from '../../../lib/supabase';
+import { requireAuth } from '../../../lib/api-auth';
 import { normalizeEvent, timeToSeconds } from '../../../lib/analytics-utils';
 import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
@@ -223,6 +224,9 @@ function narrativePara(text) {
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).end();
+
+  if (!await requireAuth(req, res)) return;
+
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'Meet ID required' });
 

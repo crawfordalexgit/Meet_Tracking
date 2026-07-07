@@ -375,6 +375,30 @@ export default function MeetReport({ session }) {
     }
   };
 
+  // Word export is an authenticated fetch (not a plain <a href>) so the API route
+  // can require a bearer token like every other route.
+  const handleWordExport = async () => {
+    try {
+      const res = await authedFetch(`/api/export/meet-word?id=${meet?.id}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to generate Word document');
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(meet?.name || 'meet').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_report.docx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (error) {
+      console.error('Word export error:', error);
+      alert(error.message || 'Failed to generate Word report.');
+    }
+  };
+
   const handleStaffUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -779,14 +803,13 @@ export default function MeetReport({ session }) {
               >
                 ⬇ Export PDF
               </button>
-              <a
-                href={`/api/export/meet-word?id=${meet?.id}`}
-                download
+              <button
                 className="period-btn"
-                style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap', textDecoration: 'none' }}
+                style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap' }}
+                onClick={handleWordExport}
               >
                 ⬇ Export Word
-              </a>
+              </button>
               <button
                 className="period-btn"
                 style={{ fontSize: '0.6rem', padding: '5px 14px', opacity: 0.7, whiteSpace: 'nowrap' }}
