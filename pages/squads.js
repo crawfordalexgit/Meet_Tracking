@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react';
 import Layout from '../components/Layout';
-import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
-import { fetchAllRows } from '../lib/paginate';
-import { computeSquadStats, calculateSquadHealth } from '../lib/analytics-utils';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 
@@ -212,75 +209,13 @@ export default function SquadsRegistry({ session }) {
       const period = parseInt(router.query.period) || 365;
       setPeriodDays(period);
 
-      const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 100 });
-
-      // 1. Fetch data
-      // IMPORTANT: attendance and results are fetched ALL-TIME (no date pre-filter).
-      // computeSquadStats (via calculateReliability) owns ALL period windowing
-      // internally, and the squad detail page (/squad/[id]) also passes all-time
-      // rows. Pre-filtering here previously double-filtered and made the two pages
-      // disagree for the same squad+period (F11). Both pages must feed the SAME
-      // scope of data into the shared computeSquadStats.
-      const [sRes, swimmersArr, resultsArr, attendanceArr, sessionsArr, membershipsArr, exRes, rankingsRes] = await Promise.all([
-        supabase.from('squads').select('*').eq('is_squad', true).order('name'),
-        fetchPaged('swimmers', '*'),
-        fetchPaged('results', '*, meets(id,name,type)'),
-        fetchPaged('training_attendance', '*'),
-        fetchPaged('sessions', '*'),
-        authedFetch('/api/memberships').then(r => r.ok ? r.json() : []),
-        supabase.from('club_exemptions').select('*'),
-        supabase.from('rankings').select('*').order('snapshot_date', { ascending: false })
-      ]);
-
-      const squadsArr = sRes.data || [];
-      const exemptionsArr = exRes.data || [];
-      const rankings = rankingsRes.data || [];
-
-      const uniqueSnapshots = [...new Set((rankings || []).map(r => r.snapshot_date))].sort((a,b) => new Date(b) - new Date(a));
-      const latestSnapshot = uniqueSnapshots[0] || null;
-      const currentRankings = (rankings || []).filter(r => r.snapshot_date === latestSnapshot);
-
-      // 2. Map KPIs
-      const kpis = squadsArr.map(s => {
-        const squadSwimmers = swimmersArr.filter(sw => sw.squad_id === s.id);
-
-        // Canonical, shared computation (identical to the squad detail page).
-        const stats = computeSquadStats(s, squadSwimmers, {
-          attendance: attendanceArr,
-          sessions: sessionsArr,
-          results: resultsArr,
-          memberships: membershipsArr,
-          exemptions: exemptionsArr,
-          period
-        });
-
-        const squadRanks = currentRankings.filter(r => squadSwimmers.some(sw => sw.id === r.swimmer_id));
-        const achievements = {
-          nationals: new Set(squadRanks.filter(r => r.district === 'England' && r.rank <= 40).map(r => r.swimmer_id)).size,
-          regionals: new Set(squadRanks.filter(r => r.district === 'South East' && r.rank <= 30).map(r => r.swimmer_id)).size,
-          counties: new Set(squadRanks.filter(r => r.district === 'Kent' && r.rank <= 10).map(r => r.swimmer_id)).size
-        };
-
-        // Health via the shared calculateSquadHealth so the registry and detail agree.
-        const overall = calculateSquadHealth(
-          { avgTraining: stats.training, avgVolume: stats.volume, avgVelocity: stats.avgVelocity, complianceRate: stats.compliance },
-          s
-        ).total;
-
-        // Count reflects the same set the stats average over (active, non-exempt).
-        const count = squadSwimmers.filter(sw => sw.is_active !== false && !sw.is_exempt).length;
-
-        return {
-          ...s,
-          training: stats.training,
-          volume: stats.volume,
-          meets: stats.meets,
-          avgPts: stats.avgPts,
-          achievements,
-          overall,
-          count
-        };
-      });
+      // KPIs are computed server-side (pages/api/squad-stats.js) using the
+      // SAME shared computeSquadStats as the squad detail page, so the two
+      // pages agree (F11) without shipping the club's full attendance/results
+      // tables to the browser on every load (previous approach: >120s load).
+      const r = await authedFetch(`/api/squad-stats?period=${period}`);
+      if (!r.ok) throw new Error(`squad-stats ${r.status}`);
+      const kpis = await r.json();
 
       setSquads(kpis);
     } catch (e) {

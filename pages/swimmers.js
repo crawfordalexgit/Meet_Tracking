@@ -38,17 +38,19 @@ export default function SwimmersRegistry({ session }) {
       const y1ago = new Date(new Date() - period * 86400000).toISOString();
       const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 100 });
 
-      // Parallel page fetch: fetch first page + count together, then remaining pages in parallel
+      // Parallel page fetch: fetch first page + count together, then remaining pages in parallel.
+      // .order('id') keeps .range() page boundaries stable — without it Postgres
+      // can duplicate/drop rows across pages under concurrent load.
       const fetchParallel = async (table, select = '*', filter = null) => {
         const pageSize = 1000;
-        let q0 = supabase.from(table).select(select, { count: 'exact' }).range(0, pageSize - 1);
+        let q0 = supabase.from(table).select(select, { count: 'exact' }).order('id').range(0, pageSize - 1);
         if (filter) q0 = filter(q0);
         const { data: firstPage, count } = await q0;
         if (!firstPage || firstPage.length === 0) return [];
         if (!count || count <= pageSize) return firstPage;
         const remaining = await Promise.all(
           Array.from({ length: Math.ceil((count - pageSize) / pageSize) }, (_, i) => {
-            let q = supabase.from(table).select(select).range((i + 1) * pageSize, (i + 2) * pageSize - 1);
+            let q = supabase.from(table).select(select).order('id').range((i + 1) * pageSize, (i + 2) * pageSize - 1);
             if (filter) q = filter(q);
             return q.then(r => r.data || []);
           })
@@ -79,6 +81,8 @@ export default function SwimmersRegistry({ session }) {
       // Pre-group by swimmer_id once — avoids O(n×m) filtering inside the map
       const resultsBySwimmer = {};
       (results || []).forEach(r => { (resultsBySwimmer[r.swimmer_id] ||= []).push(r); });
+      const attendanceBySwimmer = {};
+      (attendance || []).forEach(a => { (attendanceBySwimmer[a.swimmer_id] ||= []).push(a); });
       const membershipsBySwimmer = {};
       (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
       const exemptions = exRes.data || [];
@@ -110,7 +114,7 @@ export default function SwimmersRegistry({ session }) {
 
         const rel = calculateReliability(
           swimmer,
-          attendance,
+          attendanceBySwimmer[swimmer.id] || [],
           sessions,
           swimmerResults,
           period,

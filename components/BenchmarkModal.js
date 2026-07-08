@@ -49,10 +49,10 @@ export default function BenchmarkModal({ isOpen, onClose }) {
       setLoading(false);
     }
   };
-  if (!isOpen) return null;
-
-  const ages = [11, 12, 13, 14, 15, 16, 17];
-
+  // This useMemo must run on every render (not just when isOpen) — Rules of
+  // Hooks forbids calling a hook after a conditional early return, since that
+  // changes the hook count between renders and crashes React ("Rendered more
+  // hooks than during the previous render").
   const sortedTable = useMemo(() => {
     return [...tableData].sort((a, b) => {
       let aVal, bVal;
@@ -63,12 +63,16 @@ export default function BenchmarkModal({ isOpen, onClose }) {
         aVal = a[sortConfig.key]?.pts || 0;
         bVal = b[sortConfig.key]?.pts || 0;
       }
-      
+
       if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
       if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
   }, [tableData, sortConfig]);
+
+  if (!isOpen) return null;
+
+  const ages = [11, 12, 13, 14, 15, 16, 17];
 
   const requestSort = (key) => {
     let direction = 'desc';

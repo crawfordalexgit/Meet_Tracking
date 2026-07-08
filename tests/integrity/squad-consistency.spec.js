@@ -6,27 +6,32 @@
 // These are source-level guards: they FAIL until both pages derive squad stats
 // from one shared helper. Flip nothing — fix the code so a single
 // `computeSquadStats` (or calculateSquadHealth) drives both pages.
+//
+// 2026-07-08 perf fix: the registry (/squads) now delegates its KPI computation
+// to pages/api/squad-stats.js (server-side, avoids shipping the whole club's
+// attendance/results to the browser) instead of computing inline. The shared-
+// helper checks below now scan that API route rather than squads.js itself.
 import { test, expect } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 
 const P = f => fs.readFileSync(path.join(__dirname, '..', '..', 'pages', f), 'utf8');
-const registry = P('squads.js');
+const registry = P('api/squad-stats.js');
 const detail = P('squad/[id].js');
 
 test('squad HEALTH is computed by the shared helper on both pages, not an inline formula', () => {
-  // detail already uses calculateSquadHealth; registry must too (not inline weights).
+  // detail already uses calculateSquadHealth; registry (squad-stats API) must too (not inline weights).
   const registryUsesShared = /calculateSquadHealth/.test(registry);
   const registryHasInlineWeights = /\*\s*0\.[0-9]+/.test(registry); // e.g. training * 0.2
   expect(detail, 'detail should use calculateSquadHealth').toMatch(/calculateSquadHealth/);
-  expect(registryUsesShared, 'squads.js must use calculateSquadHealth like the detail page').toBe(true);
-  expect(registryHasInlineWeights, 'squads.js still hardcodes health weights inline').toBe(false);
+  expect(registryUsesShared, 'squad-stats API must use calculateSquadHealth like the detail page').toBe(true);
+  expect(registryHasInlineWeights, 'squad-stats API still hardcodes health weights inline').toBe(false);
 });
 
 test('both pages average the same swimmer set (active/non-exempt) for squad stats', () => {
-  // detail filters to activeNonExempt before averaging; registry averages all.
+  // detail filters to activeNonExempt before averaging; registry (squad-stats API) must too.
   const detailFiltersExempt = /activeNonExempt|is_exempt|isExempt/.test(detail);
   const registryFiltersExempt = /activeNonExempt|is_exempt|isExempt/.test(registry);
   expect(detailFiltersExempt, 'detail filters exempt swimmers').toBe(true);
-  expect(registryFiltersExempt, 'squads.js does NOT apply the same exempt filter as the detail page').toBe(true);
+  expect(registryFiltersExempt, 'squad-stats API does NOT apply the same exempt filter as the detail page').toBe(true);
 });

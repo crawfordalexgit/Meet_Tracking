@@ -89,10 +89,12 @@ export default function Dashboard({ session }) {
 
   const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 100 });
 
+  // .order('id') keeps .range() page boundaries stable — without it Postgres
+  // can duplicate/drop rows across pages under concurrent load.
   const fetchParallel = async (table, select = '*', filter = null, maxConcurrent = 8) => {
     if (!supabase) return [];
     const pageSize = 1000;
-    let q0 = supabase.from(table).select(select, { count: 'exact' }).range(0, pageSize - 1);
+    let q0 = supabase.from(table).select(select, { count: 'exact' }).order('id').range(0, pageSize - 1);
     if (filter) q0 = filter(q0);
     const { data: firstPage, count } = await q0;
     if (!firstPage || firstPage.length === 0) return [];
@@ -103,7 +105,7 @@ export default function Dashboard({ session }) {
     for (let batch = 0; batch < totalPages; batch += maxConcurrent) {
       const batchPages = Array.from({ length: Math.min(maxConcurrent, totalPages - batch) }, (_, i) => {
         const p = batch + i + 1;
-        let q = supabase.from(table).select(select).range(p * pageSize, (p + 1) * pageSize - 1);
+        let q = supabase.from(table).select(select).order('id').range(p * pageSize, (p + 1) * pageSize - 1);
         if (filter) q = filter(q);
         return q.then(r => r.data || []);
       });
