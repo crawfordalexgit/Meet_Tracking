@@ -34,10 +34,8 @@ test.describe('normalizeName', () => {
 
 test.describe('generateNameAliases', () => {
   test('includes known_as and legal first name variants', () => {
-    // KNOWN BUG (lib/analytics-utils.js:53-54): for "First Last" names the
-    // lastName fallback grabs the WHOLE full_name, producing "Will William Day"
-    // instead of "Will Day" — alias matching never works for SCM-format names.
-    test.fail();
+    // Fixed: surname extraction now handles "First Last" as well as "Last, First",
+    // so "Will Day" is produced correctly (was "Will William Day").
     const aliases = generateNameAliases({ full_name: 'William Day', known_as: 'Will', legal_first_name: 'William' });
     expect(aliases).toContain(normalizeName('William Day'));
     expect(aliases).toContain(normalizeName('Will Day'));
