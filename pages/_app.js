@@ -6,10 +6,17 @@ import Head from 'next/head';
 import { ThemeProvider } from '../lib/ThemeContext';
 import { Toaster } from 'react-hot-toast';
 
+// Routes that render without a session. Everything else bounces to /login.
+// Puppeteer print/export pages (?print=true) still work: the export APIs inject
+// the sb-*-auth-token into localStorage before load, so getSession() resolves
+// with a real session in the headless browser.
+const PUBLIC_PATHS = ['/', '/login'];
+
 export default function MyApp({ Component, pageProps }) {
   const [session, setSession] = useState(undefined);
   const [isPending, setIsPending] = useState(false);
   const router = useRouter();
+  const isPublicRoute = PUBLIC_PATHS.includes(router.pathname);
 
   useEffect(() => {
     // 1. Grab the session if they just returned from Google
@@ -24,6 +31,14 @@ export default function MyApp({ Component, pageProps }) {
 
     return () => subscription?.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    // session === undefined means getSession() hasn't resolved yet; only
+    // redirect once we know there is definitely no session.
+    if (session === null && !isPublicRoute) {
+      router.replace('/login');
+    }
+  }, [session, isPublicRoute, router]);
 
   const checkProfile = async (currentSession) => {
     if (!currentSession?.user) {
@@ -48,6 +63,19 @@ export default function MyApp({ Component, pageProps }) {
     setIsPending(false);
     router.push('/login');
   };
+
+  // Hold back protected pages until the session is known (undefined) and while
+  // an anonymous visitor (null) is being redirected to /login.
+  if (!session && !isPublicRoute) {
+    return (
+      <ThemeProvider>
+        <Head><title>Tonbridge Open Meet Dashboard</title></Head>
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(255,255,255,0.5)' }}>
+          Checking your session…
+        </div>
+      </ThemeProvider>
+    );
+  }
 
   if (isPending && router.pathname !== '/login') {
     return (
