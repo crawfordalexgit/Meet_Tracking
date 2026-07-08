@@ -1,12 +1,21 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.177",
+  "version": "1.0.178",
   "description": "",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "playwright test --project=unit --project=api --project=integrity --project=e2e",
+    "test:unit": "playwright test --project=unit",
+    "test:api": "playwright test --project=api",
+    "test:integrity": "playwright test --project=integrity",
+    "test:e2e": "playwright test --project=e2e",
+    "test:destructive": "playwright test --project=destructive && playwright test --project=integrity",
+    "test:backup": "node scripts/test-backup.js",
+    "test:restore": "node scripts/test-restore.js",
+    "test:setup-users": "node scripts/create-test-user.js"
   },
   "keywords": [],
   "author": "",
@@ -31,6 +40,7 @@
     "recharts": "^3.8.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "pdf-parse": "^2.4.5",
     "pdf.js-extract": "^1.0.1",
     "pdf2json": "^4.0.3"

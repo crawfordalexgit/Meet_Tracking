@@ -40,6 +40,12 @@ next-env.d.ts
 /_backups/
 /backup_pre_ui_changes/
 
+# test artifacts (auth tokens, DB dumps, reports)
+/tests/.auth/
+/tests/.backups/
+/tests/.report/
+/test-results/
+
 # reports and static reference materials
 /Reports/
 /AiTraining/
