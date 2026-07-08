@@ -8,11 +8,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Accept the Vercel cron invocation (Bearer CRON_SECRET) or a local dev run;
+  // Accept the Vercel cron invocation (Bearer CRON_SECRET);
   // otherwise require an authenticated user for both GET and POST triggers.
   const isCron = !!process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
-  const isLocal = req.headers.host?.includes('localhost');
-  if (!isCron && !isLocal) {
+  if (!isCron) {
     if (!await requireAuth(req, res)) return;
   }
 
