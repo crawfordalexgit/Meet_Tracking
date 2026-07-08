@@ -56,17 +56,22 @@ export default function SwimmersRegistry({ session }) {
         return [...firstPage, ...remaining.flat()];
       };
 
-      // Use 180 days for results (reliability calc only) — peak WA comes from swimmer_pbs
+      // Use 180 days for results (reliability calc only) — peak WA is derived
+      // separately below from all-time results.wa_pts.
       const reliabilityWindow = new Date(new Date() - 180 * 86400000).toISOString();
 
-      const [swRes, results, attendance, sessions, exRes, memberships, pbsRes] = await Promise.all([
+      const [swRes, results, attendance, sessions, exRes, memberships, peakResults] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
         fetchParallel('results', 'swimmer_id, date', q => q.gte('date', reliabilityWindow)),
         fetchParallel('training_attendance', '*', q => q.gte('date', y1ago)),
         fetchPaged('sessions', '*'),
         supabase.from('club_exemptions').select('*'),
         fetchParallel('session_memberships', '*'),
-        supabase.from('swimmer_pbs').select('swimmer_id, wa_pts'),
+        // Peak WA is derived from results.wa_pts (all-time, all events). The
+        // swimmer_pbs table has NO wa_pts column, so querying it there returned
+        // nothing and every peak fell back to 0. Mirror the swimmer detail page,
+        // which derives peaks from results.
+        fetchParallel('results', 'swimmer_id, wa_pts'),
       ]);
 
       if (swRes.error) throw swRes.error;
@@ -77,9 +82,9 @@ export default function SwimmersRegistry({ session }) {
       const membershipsBySwimmer = {};
       (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
       const exemptions = exRes.data || [];
-      // Peak WA per swimmer from pbs table (best time across all events/history)
+      // Peak WA per swimmer from results (best score across all events/history)
       const peakWABySwimmer = {};
-      (pbsRes.data || []).forEach(p => {
+      (peakResults || []).forEach(p => {
         if ((p.wa_pts || 0) > (peakWABySwimmer[p.swimmer_id] || 0)) peakWABySwimmer[p.swimmer_id] = p.wa_pts;
       });
       const now = new Date();

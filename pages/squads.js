@@ -211,16 +211,21 @@ export default function SquadsRegistry({ session }) {
     try {
       const period = parseInt(router.query.period) || 365;
       setPeriodDays(period);
-      const startStr = new Date(new Date() - period * 86400000).toISOString();
 
-      const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 20 });
+      const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 100 });
 
       // 1. Fetch data
+      // IMPORTANT: attendance and results are fetched ALL-TIME (no date pre-filter).
+      // computeSquadStats (via calculateReliability) owns ALL period windowing
+      // internally, and the squad detail page (/squad/[id]) also passes all-time
+      // rows. Pre-filtering here previously double-filtered and made the two pages
+      // disagree for the same squad+period (F11). Both pages must feed the SAME
+      // scope of data into the shared computeSquadStats.
       const [sRes, swimmersArr, resultsArr, attendanceArr, sessionsArr, membershipsArr, exRes, rankingsRes] = await Promise.all([
         supabase.from('squads').select('*').eq('is_squad', true).order('name'),
         fetchPaged('swimmers', '*'),
-        fetchPaged('results', '*, meets(id,name,type)', q => q.gte('date', startStr)),
-        fetchPaged('training_attendance', '*', q => q.gte('date', startStr)),
+        fetchPaged('results', '*, meets(id,name,type)'),
+        fetchPaged('training_attendance', '*'),
         fetchPaged('sessions', '*'),
         authedFetch('/api/memberships').then(r => r.ok ? r.json() : []),
         supabase.from('club_exemptions').select('*'),
