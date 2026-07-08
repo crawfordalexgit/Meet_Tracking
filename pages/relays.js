@@ -91,7 +91,7 @@ export default function RelaysPage({ session: propSession }) {
     (async () => {
       setLoading(true);
       const [{ data: swData }, pbs] = await Promise.all([
-        supabase.from('swimmers').select('id, full_name, known_as, year_of_birth, gender').eq('is_active', true),
+        supabase.from('swimmers').select('id, full_name, known_as, year_of_birth, gender'),
         fetchAllRows(supabase, 'swimmer_pbs', { select: 'swimmer_id,event,course,time_seconds', filter: (q) => q.eq('course', 'S') }),
       ]);
       const bySwimmer = {};
