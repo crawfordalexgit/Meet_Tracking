@@ -77,7 +77,13 @@ export default function RelaysPage({ session: propSession }) {
   const [allowAnyGender, setAllowAnyGender] = useState(false);
   const [useLcFallback, setUseLcFallback] = useState(true);
 
+  // availability — swimmer ids marked "not available" are excluded everywhere
+  const [unavailable, setUnavailable] = useState(() => new Set());
+  const [showAvail, setShowAvail] = useState(false);
+  const [availSearch, setAvailSearch] = useState('');
+
   const capValue = cap === 0 ? Infinity : cap;
+  const LS_KEY = `relay-unavailable-${MEET.code}`;
 
   // Pool is derived: short-course 50 PBs, falling back to converted long-course
   // times (flagged) only when no SCM time exists — so toggling the fallback
@@ -86,6 +92,21 @@ export default function RelaysPage({ session: propSession }) {
     () => (rawPbs ? buildSwimmerPool(rawSwimmers, rawPbs, MEET.ageYear, { lcFallback: useLcFallback }) : []),
     [rawSwimmers, rawPbs, useLcFallback]
   );
+
+  // Roster minus anyone marked unavailable — used for all optimisation/selection.
+  const availablePool = useMemo(() => pool.filter((p) => !unavailable.has(p.id)), [pool, unavailable]);
+
+  // Persist availability locally (per browser) so it survives reloads without a migration.
+  useEffect(() => {
+    try { const raw = localStorage.getItem(LS_KEY); if (raw) setUnavailable(new Set(JSON.parse(raw))); } catch { /* ignore */ }
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify([...unavailable])); } catch { /* ignore */ }
+  }, [unavailable]);
+
+  const setAvailable = useCallback((id, available) => {
+    setUnavailable((prev) => { const n = new Set(prev); if (available) n.delete(id); else n.add(id); return n; });
+  }, []);
 
   const settingsRef = useRef({});
   settingsRef.current = { depth, capValue, allowAnyGender };
@@ -134,7 +155,7 @@ export default function RelaysPage({ session: propSession }) {
       const lockedByEvent = {};
       for (const [k, slot] of Object.entries(prev || {})) { const L = slot.teams.filter((t) => t.locked); if (L.length) lockedByEvent[k] = L; }
       const { depth: d, capValue: c, allowAnyGender: g } = settingsRef.current;
-      const built = buildAll(pool, { depth: d, cap: c, allowAnyGender: g }, lockedByEvent);
+      const built = buildAll(availablePool, { depth: d, cap: c, allowAnyGender: g }, lockedByEvent);
       if (!builtOnce.current && savedRaw && Object.keys(savedRaw).length) {
         const byId = new Map(pool.map((p) => [p.id, p]));
         for (const key of Object.keys(savedRaw)) {
@@ -153,15 +174,15 @@ export default function RelaysPage({ session: propSession }) {
 
   const eligibleByEvent = useMemo(() => {
     const m = {};
-    for (const ev of EVENTS) m[ev.key] = eligiblePool(pool, ev, { allowAnyGender }).pool;
+    for (const ev of EVENTS) m[ev.key] = eligiblePool(availablePool, ev, { allowAnyGender }).pool;
     return m;
-  }, [pool, allowAnyGender]);
+  }, [availablePool, allowAnyGender]);
 
   const benchedByEvent = useMemo(() => {
     const m = {};
-    for (const ev of EVENTS) m[ev.key] = eligiblePool(pool, ev, { allowAnyGender }).benched;
+    for (const ev of EVENTS) m[ev.key] = eligiblePool(availablePool, ev, { allowAnyGender }).benched;
     return m;
-  }, [pool, allowAnyGender]);
+  }, [availablePool, allowAnyGender]);
 
   const usage = useMemo(() => {
     const u = {};
@@ -170,18 +191,22 @@ export default function RelaysPage({ session: propSession }) {
   }, [lineups]);
 
   const stats = useMemo(() => {
-    let teams = 0, complete = 0;
+    let teams = 0, complete = 0, conflicts = 0;
     const ids = new Set();
     let shortfall = 0;
     for (const ev of EVENTS) {
       const slot = lineups[ev.key];
       if (!slot) continue;
       teams += slot.teams.length;
-      for (const t of slot.teams) { if (teamComplete(t)) complete += 1; for (const l of t.legs) if (l.swimmer) ids.add(l.swimmer.id); }
+      for (const t of slot.teams) {
+        if (teamComplete(t)) complete += 1;
+        if (t.legs.some((l) => l.swimmer && unavailable.has(l.swimmer.id))) conflicts += 1;
+        for (const l of t.legs) if (l.swimmer) ids.add(l.swimmer.id);
+      }
       if ((eligibleByEvent[ev.key]?.length || 0) < 4) shortfall += 1;
     }
-    return { teams, complete, swimmers: ids.size, fee: teams * MEET.feePerTeam, shortfall };
-  }, [lineups, eligibleByEvent]);
+    return { teams, complete, swimmers: ids.size, fee: teams * MEET.feePerTeam, shortfall, conflicts };
+  }, [lineups, eligibleByEvent, unavailable]);
 
   const closesIn = useMemo(() => {
     const d = Math.ceil((new Date(MEET.closes) - new Date()) / 86400000);
@@ -249,9 +274,9 @@ export default function RelaysPage({ session: propSession }) {
   const runAutoOptimise = useCallback(() => {
     const locked = {};
     for (const [key, slot] of Object.entries(lineups)) locked[key] = slot.teams.filter((t) => t.locked);
-    setLineups(buildAll(pool, { depth, cap: capValue, allowAnyGender }, locked));
+    setLineups(buildAll(availablePool, { depth, cap: capValue, allowAnyGender }, locked));
     setNotice('Re-optimised all events (locked teams kept).');
-  }, [lineups, pool, depth, capValue, allowAnyGender]);
+  }, [lineups, availablePool, depth, capValue, allowAnyGender]);
 
   // ── Persistence ─────────────────────────────────────────────────────────────
 
@@ -370,6 +395,7 @@ export default function RelaysPage({ session: propSession }) {
             { label: 'Swimmers used', value: stats.swimmers },
             { label: 'Closes in', value: `${closesIn}d`, sub: MEET.closes },
             { label: "Can't field", value: stats.shortfall, sub: 'events < 4 eligible', warn: stats.shortfall > 0 },
+            { label: 'Unavailable', value: unavailable.size, sub: stats.conflicts > 0 ? `${stats.conflicts} teams affected` : 'excluded from picks', warn: stats.conflicts > 0 },
           ].map((m) => (
             <div key={m.label} style={{ padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '12px' }}>
               <div style={{ fontSize: '0.55rem', fontWeight: 900, opacity: 0.4, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{m.label}</div>
@@ -400,6 +426,7 @@ export default function RelaysPage({ session: propSession }) {
             <input type="checkbox" checked={useLcFallback} onChange={(e) => setUseLcFallback(e.target.checked)} />
             Convert LC times when no SCM
           </label>
+          <button className="period-btn" style={{ fontSize: '0.7rem', color: unavailable.size ? 'var(--accent-rose)' : undefined }} onClick={() => setShowAvail((v) => !v)}>🚫 Availability{unavailable.size ? ` (${unavailable.size} out)` : ''}</button>
           <div style={{ flex: 1 }} />
           <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={handleSaveAll}>💾 Save all</button>
           <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={exportWord}>📄 Word forms</button>
@@ -408,6 +435,35 @@ export default function RelaysPage({ session: propSession }) {
         </div>
         {notice && <div style={{ marginTop: 12, fontSize: '0.72rem', color: 'var(--accent-cyan)' }}>{notice}</div>}
         {!persisted && <div style={{ marginTop: 8, fontSize: '0.68rem', color: 'var(--accent-amber)' }}>⚠ Cloud save unavailable — create the <code>relay_lineups</code> table (schema.sql) to persist between sessions.</div>}
+
+        {showAvail && (
+          <div style={{ marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.5, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Availability — {unavailable.size} of {pool.length} marked out. Excluded from auto-optimise and selection; re-run Auto-optimise to fill gaps.
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input value={availSearch} onChange={(e) => setAvailSearch(e.target.value)} placeholder="Search…" style={{ ...selStyle, width: 160 }} />
+                {unavailable.size > 0 && <button className="period-btn" style={{ fontSize: '0.65rem' }} onClick={() => setUnavailable(new Set())}>Reset all</button>}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+              {[...pool]
+                .filter((p) => !availSearch.trim() || `${p.name} ${p.fullName}`.toLowerCase().includes(availSearch.toLowerCase()))
+                .sort((a, b) => (unavailable.has(b.id) - unavailable.has(a.id)) || a.name.localeCompare(b.name))
+                .map((p) => {
+                  const out = unavailable.has(p.id);
+                  return (
+                    <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', background: out ? 'rgba(244,63,94,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${out ? 'rgba(244,63,94,0.25)' : 'rgba(255,255,255,0.05)'}` }}>
+                      <input type="checkbox" checked={!out} onChange={(e) => setAvailable(p.id, e.target.checked)} />
+                      <span style={{ fontSize: '0.74rem', textDecoration: out ? 'line-through' : 'none', opacity: out ? 0.6 : 1 }}>{p.name}</span>
+                      <span style={{ fontSize: '0.6rem', opacity: 0.4, marginLeft: 'auto' }}>{p.age}y {p.sex}</span>
+                    </label>
+                  );
+                })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Matrix */}
@@ -436,11 +492,13 @@ export default function RelaysPage({ session: propSession }) {
           eligible={eligibleByEvent[selectedEvent.key] || []}
           usage={usage}
           cap={capValue}
+          unavailableIds={unavailable}
           onSwap={handleSwap}
           onToggleLock={handleToggleLock}
           onReoptimise={handleReoptimise}
           onAddTeam={() => handleAddTeam(selectedEvent.key)}
           onRemoveTeam={handleRemoveTeam}
+          onMarkUnavailable={(id) => setAvailable(id, false)}
           onClose={() => setSelected(null)}
         />
       )}
