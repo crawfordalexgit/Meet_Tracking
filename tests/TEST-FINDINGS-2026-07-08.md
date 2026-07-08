@@ -39,25 +39,27 @@ All fixes merged to master (v1.0.181), then dashboard-integrity coverage added (
 2. Surface results-insert errors in the SSE progress stream.
 3. Re-run `npm run test:destructive` (after `npm run test:backup`) — its scrape-meets test asserts results actually land and swimmer pages show them.
 
+> The tables below record each defect **as originally found**. The **Status** column shows its state as of v1.0.182.
+
 ## Security findings
 
-| # | Severity | Finding | Where | Reproducing test |
+| # | Severity | Status | Finding | Where |
 |---|---|---|---|---|
-| S1 | High | `/api/download-report` has **no auth** — anyone can download report PDFs (contain minors' names/performance) | pages/api/download-report.js | tests/api/auth.spec.js (marked expected-fail) |
-| S2 | Medium | `/api/sync-attendance` bypasses auth whenever Host contains "localhost" — any local process can trigger SCM syncs; risky if ever run behind a proxy | pages/api/sync-attendance.js:14 | documented in tests/api/auth.spec.js comment |
+| S1 | High | ✅ Fixed | `/api/download-report` had **no auth** — anyone could download report PDFs (minors' names/performance). `requireAuth` added | pages/api/download-report.js |
+| S2 | Medium | ✅ Fixed | `/api/sync-attendance` bypassed auth whenever Host contained "localhost" — any local process could trigger SCM syncs. Bypass removed (only CRON_SECRET path remains) | pages/api/sync-attendance.js |
 
 ## Functional bugs
 
-| # | Severity | Finding | Where | Reproducing test |
+| # | Severity | Status | Finding | Where |
 |---|---|---|---|---|
-| F1 | High | Post-scrape call to `/api/reconcile-pbs` sends **no Authorization header** → always 401 → PB reconciliation never runs after a meet sync | pages/api/scrape-meets.js:270 | destructive suite comment; auth contract confirms 401 |
-| F2 | High | Results-insert errors swallowed silently during meet scrape — sync reports success while writing nothing | pages/api/scrape-meets.js:232 | destructive scrape-meets test asserts results land |
-| F3 | Medium | Swimmer page meets query selects only `id, name, date` but the code reads `meet.level` / `meet.type` (lines 646–659) → every meet counted as L3/open; open-vs-internal meet counts wrong. Also capped at 500 meets (currently safe: 210 meets — integrity test guards the window) | pages/swimmer/[id].js:460 | tests/integrity (window guard) |
-| F4 | Medium | `generateNameAliases` broken for "First Last" names: lastName fallback grabs the whole name → alias "Will Day" becomes "Will William Day"; alias matching never works for SCM-format names | lib/analytics-utils.js:53-54 | tests/unit/analytics-utils.spec.js (expected-fail) |
-| F5 | ~~Withdrawn~~ | Duplicate meets by (name, date) are NORMAL per Alex — multi-round galas (Kent Junior League, Arena League) share a name; meet_code is the true identity. Integrity test downgraded to informational | — | tests/integrity (informational) |
-| F6 | Low | `sync-scm` deletes swimmers absent from SCM; `results.swimmer_id ON DELETE CASCADE` silently destroys their history. Not the current cause of the missing-meets bug, but a standing data-loss risk | pages/api/sync-scm.js cleanup + schema.sql:122 | destructive sync-scm test guards UUID stability |
-| F7 | Low | `schema.sql` drifted from live DB (live `issue_upvotes` has no `id` column; `swimmers.created_at` absent; live `results` HAS `date`/`splits` columns that schema.sql lacks) | schema.sql | discovered via test runs |
-| F8 | Medium | No client-side auth guard on `/dashboard` (and likely other pages): anonymous visitors see the full dashboard shell instead of being redirected to /login. Data is blocked by RLS, but the UI should bounce | pages/dashboard.js | tests/e2e/pages-smoke.spec.js (expected-fail) |
+| F1 | High | ✅ Fixed | Post-scrape call to `/api/reconcile-pbs` sent **no auth header** → always 401 → PB reconcile never ran. Now a direct `lib/reconcile-pbs.js` call | pages/api/scrape-meets.js |
+| F2 | High | ✅ Fixed | Results-insert errors swallowed silently during scrape — reported success while writing nothing. Now surfaced in the SSE stream + summary | pages/api/scrape-meets.js |
+| F3 | Medium | ✅ Fixed | Swimmer page meets query omitted `level`/`type`, so every meet counted as L3/open. Columns added | pages/swimmer/[id].js |
+| F4 | Medium | ✅ Fixed | `generateNameAliases` grabbed the whole name as the surname for "First Last" inputs ("Will Day" → "Will William Day"). Surname extraction corrected | lib/analytics-utils.js |
+| F5 | — | Withdrawn | Duplicate meets by (name, date) are NORMAL — multi-round galas share a name; meet_code is the true identity. Integrity test downgraded to informational | — |
+| F6 | Low | ⏳ Open | `sync-scm` deletes swimmers absent from SCM; `results.swimmer_id ON DELETE CASCADE` silently destroys their history — standing data-loss risk | pages/api/sync-scm.js + schema.sql:122 |
+| F7 | Low | ⏳ Open | `schema.sql` drifted from live DB (`issue_upvotes` has no `id`; `swimmers.created_at` absent; live `results` has `date`/`splits` that schema.sql lacks) | schema.sql |
+| F8 | Medium | ✅ Fixed | Anonymous visitors saw the full dashboard shell instead of a redirect. `_app.js` now bounces non-public routes to `/login` | pages/_app.js |
 
 ## Dashboard display-integrity bugs (found 2026-07-08, round 2)
 
@@ -73,13 +75,17 @@ Prompted by a screenshot: the Cockpit shows numbers that contradict each other. 
 
 **Why the first suite missed these:** the smoke tests checked page *loads* + body text length + DB truth, but never (a) that rendered numbers agree across panels, (b) that charts actually plot a series, or (c) that copy degrades sanely on empty data. Those three coverage classes were added in v1.0.182.
 
-## Suite results (safe projects)
+## Suite results — fresh run at v1.0.182 (projects run sequentially)
 
-- **unit**: 62 pass, 1 expected-fail (F4).
-- **api**: 88/89 pass when run cleanly; the 1 failure is S2 (sync-attendance anonymous 200). Note: the initial 27-min combined run showed 33 flaky failures from resource contention — run projects separately or accept longer timeouts.
-- **integrity**: 7 pass, 3 fail — the 3 failures are the live data defects above (100 empty meets, 88 PB-only swimmers, 12 duplicate meets). They will pass once a full scrape lands results and duplicates are consolidated.
-- **e2e**: 22+ pass after selector fixes. The swimmer-meets reproduction test **auto-skips with "no results in last 450 days — run a meet sync first"** — third independent confirmation of the headline root cause. Dashboard shows **"MEET ATTENDANCE 0%"** and renders no squad intelligence cards for the same reason. One expected-fail: F8 (no login redirect).
-- **destructive**: NOT run — requires you to run `npm run test:backup` first (Claude is blocked from dumping swimmer PII to disk).
+- **unit**: **62 passed, 0 failed.** The F4 alias test is now green (no expected-fails remain).
+- **api**: **102 passed, 5 skipped, 0 failed.** All 401/403/405 contracts pass — including the S1 (download-report) and S2 (sync-attendance) probes that used to fail. 5 skips are the heavy `@ai`/`@pdf` routes (need `RUN_HEAVY=1`).
+- **integrity**: **8 passed, 5 failed.** The 5 failures are all expected and map to open bugs:
+  - `100/100 recent meets have ZERO results` and `88 swimmers with PBs but no results` → the **headline root cause** (results empty; clears after a live scrape).
+  - `|| N` fallbacks, hardcoded ranking literals, unguarded narrative → **D1, D2, D4**.
+- **e2e**: **19 passed, 4 failed, 4 skipped.** The 4 failures map to **D1 (cross-panel), D3 (County Top 10 > 10), D4 (+0 pt narrative), D5 (blank chart)**. The 4 skips are data-dependent (swimmer-meets reproduction auto-skips with "no results in last 450 days" — a third independent confirmation of the headline).
+- **destructive**: NOT run — requires you to run `npm run test:backup` first (Claude is blocked from dumping swimmer PII to disk). This is the run that proves the scrape fix repopulates `results` and makes swimmer pages show meets again.
+
+**Net: 191 passed, 9 failed, 9 skipped.** Every one of the 9 failures is a *known* item — 2 are the headline data-defect (awaiting a live scrape), 7 are the open D1–D5 dashboard bugs. No fixed item regressed.
 
 ## Note on side effects during testing
 
