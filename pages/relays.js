@@ -6,13 +6,14 @@ import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { fetchAllRows } from '../lib/paginate';
 import {
-  MEET, AGE_BANDS, CATEGORIES, RELAYS, relayEvents, formatTime,
+  MEET, AGE_BANDS, CATEGORIES, RELAYS, relayEvents, formatTime, teamName,
 } from '../lib/relays/kent-relays-config';
 import {
   buildSwimmerPool, eligiblePool, bestTeam,
 } from '../lib/relays/relay-optimizer';
 
 const CLUB_NAME = 'Tonbridge';
+const CLUB_CODE = ''; // Swim England club code — left blank for the secretary to confirm on the form
 const EVENTS = relayEvents();
 const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -311,29 +312,31 @@ export default function RelaysPage({ session: propSession }) {
         if (!teamComplete(t)) continue;
         rows.push({
           eventKey: ev.key, programmeNo: ev.programmeNo, label: ev.label,
-          band: ev.band.label, cat: ev.cat.label, relay: ev.relay.label, letter: t.letter,
+          bandKey: ev.band.key, catKey: ev.cat.key, relayKey: ev.relay.key, composition: ev.cat.composition,
+          band: ev.band.label, cat: ev.cat.label, relay: ev.relay.label,
+          letter: t.letter, teamName: teamName(t.letter),
           entryTime: formatTime(teamTotal(t)),
           converted: t.legs.some((l) => l.swimmer.converted?.[l.stroke]),
-          legs: t.legs.map((l) => ({ stroke: l.stroke, name: l.swimmer.name, fullName: l.swimmer.fullName, yob: l.swimmer.yob, time: formatTime(l.time), converted: !!l.swimmer.converted?.[l.stroke] })),
+          legs: t.legs.map((l) => ({ stroke: l.stroke, name: l.swimmer.name, fullName: l.swimmer.fullName, yob: l.swimmer.yob, sex: l.swimmer.sex, time: formatTime(l.time), converted: !!l.swimmer.converted?.[l.stroke] })),
         });
       }
     }
     return rows;
   }
 
-  async function exportWord() {
-    setNotice('Building Word document…');
+  async function exportForm(form) {
+    setNotice(`Building official ${form} form…`);
     const res = await authedFetch('/api/export/relay-forms', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clubName: CLUB_NAME, teams: exportTeams() }),
+      body: JSON.stringify({ form, clubName: CLUB_NAME, clubCode: CLUB_CODE, teams: exportTeams() }),
     });
-    if (!res.ok) { setNotice('Word export failed.'); return; }
+    if (!res.ok) { setNotice(`${form} export failed.`); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'Kent_Relays_2026_Entry.docx'; a.click();
+    a.href = url; a.download = `Kent_Relays_2026_${form === 'summary' ? 'Entry_Summary' : 'Team_Declaration'}.docx`; a.click();
     URL.revokeObjectURL(url);
-    setNotice('Word document downloaded.');
+    setNotice(`Official ${form} form downloaded.`);
   }
 
   function exportCsv() {
@@ -429,7 +432,8 @@ export default function RelaysPage({ session: propSession }) {
           <button className="period-btn" style={{ fontSize: '0.7rem', color: unavailable.size ? 'var(--accent-rose)' : undefined }} onClick={() => setShowAvail((v) => !v)}>🚫 Availability{unavailable.size ? ` (${unavailable.size} out)` : ''}</button>
           <div style={{ flex: 1 }} />
           <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={handleSaveAll}>💾 Save all</button>
-          <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={exportWord}>📄 Word forms</button>
+          <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={() => exportForm('summary')}>📄 Entry summary</button>
+          <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={() => exportForm('declaration')}>📄 Declaration</button>
           <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={printSheet}>🖨 Print</button>
           <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={exportCsv}>⬇ CSV</button>
         </div>
