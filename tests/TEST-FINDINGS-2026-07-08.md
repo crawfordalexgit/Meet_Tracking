@@ -66,6 +66,17 @@ All fixes merged to master (v1.0.181), then dashboard-integrity coverage added (
 | F7 | Low | ⏳ Open | `schema.sql` drifted from live DB (`issue_upvotes` has no `id`; `swimmers.created_at` absent; live `results` has `date`/`splits` that schema.sql lacks) | schema.sql |
 | F8 | Medium | ✅ Fixed | Anonymous visitors saw the full dashboard shell instead of a redirect. `_app.js` now bounces non-public routes to `/login` | pages/_app.js |
 
+## Chrome walkthrough findings (2026-07-08, round 3 — every screen manually driven)
+
+Manual Chrome pass over all 15 screens at v1.0.187. Most screens verified good (dashboard, swimmer detail incl. Competition meets, meets, meet detail, capacity, predictor, reports, feedback, sandbox, settings — no console errors anywhere). Two real bugs the automated suite missed:
+
+| # | Severity | Finding | Where | Note |
+|---|---|---|---|---|
+| **F11-reopened** | High | **Squad registry vs detail STILL disagree** — AGE DEVELOPMENT shows Health/Training/Volume **54/21/67** on /squads but **50/17/55** on /squad/[id]. Both call `computeSquadStats` but feed it **differently-windowed data**: registry pre-filters attendance/results to the period (`squads.js:223` `.gte('date', startStr)`), detail passes all-time (`squad/[id].js:184`). | pages/squads.js, pages/squad/[id].js | The source-level `squad-consistency.spec.js` PASSED (checks code shape) while rendered numbers differ — **the refix needs a rendered-number cross-page test**. |
+| **F13** | High | **Swimmers registry "Peak WA Standard" = 0 for every swimmer.** `swimmers.js:69` queries `swimmer_pbs.wa_pts`, but that **column does not exist** (swimmer_pbs has no wa_pts). Should derive peak from `results.wa_pts`. Also breaks the registry's QT-standard classification. Swimmer detail / squad / sandbox pages prove the real values (e.g. Alyssa 202, Kieran 387). | pages/swimmers.js:69-118 | Schema-drift class (F7). |
+| UX-1 | Med | Session gate "Checking your session…" blocks the **entire render** on every hard load 5–16s (amplified by Next dev compile; faster in prod, but it hides the shell instead of streaming). | pages/_app.js | From the F8 fix. |
+| UX-2 | Low | Dashboard KPI orbs flash `0%` before the client fetch resolves (no spinner). | pages/dashboard.js | Cosmetic. |
+
 ## Dashboard display-integrity bugs (found 2026-07-08, round 2)
 
 Prompted by a screenshot: the Cockpit shows numbers that contradict each other. These are **independent of the results-empty root cause** — the hardcoded/fallback numbers would mislead even with a full database. All reproduced by new tests; all currently FAIL.
