@@ -38,7 +38,9 @@ export async function getServerSideProps(context) {
   const fetchAll = async (table, select = '*', filter = null) => {
     let all = []; let page = 0; let more = true;
     while (more && page < 20) {
-      let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
+      // .order('id') keeps .range() page boundaries stable — without it Postgres
+      // can duplicate/drop rows across pages under concurrent load.
+      let q = supabase.from(table).select(select).order('id').range(page * 1000, (page + 1) * 1000 - 1);
       if (filter) q = filter(q);
       const { data } = await q;
       if (!data || data.length === 0) break;
@@ -140,7 +142,9 @@ export default function SquadDetail({
     let page = 0;
     let hasMore = true;
     while (hasMore) {
-      let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
+      // .order('id') keeps .range() page boundaries stable — without it Postgres
+      // can duplicate/drop rows across pages under concurrent load.
+      let q = supabase.from(table).select(select).order('id').range(page * 1000, (page + 1) * 1000 - 1);
       if (filter) q = filter(q);
       const { data, error } = await q;
       if (error) throw error;

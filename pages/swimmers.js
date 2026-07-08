@@ -38,17 +38,19 @@ export default function SwimmersRegistry({ session }) {
       const y1ago = new Date(new Date() - period * 86400000).toISOString();
       const fetchPaged = (table, select = '*', filter = null) => fetchAllRows(supabase, table, { select, filter, maxPages: 100 });
 
-      // Parallel page fetch: fetch first page + count together, then remaining pages in parallel
+      // Parallel page fetch: fetch first page + count together, then remaining pages in parallel.
+      // .order('id') keeps .range() page boundaries stable — without it Postgres
+      // can duplicate/drop rows across pages under concurrent load.
       const fetchParallel = async (table, select = '*', filter = null) => {
         const pageSize = 1000;
-        let q0 = supabase.from(table).select(select, { count: 'exact' }).range(0, pageSize - 1);
+        let q0 = supabase.from(table).select(select, { count: 'exact' }).order('id').range(0, pageSize - 1);
         if (filter) q0 = filter(q0);
         const { data: firstPage, count } = await q0;
         if (!firstPage || firstPage.length === 0) return [];
         if (!count || count <= pageSize) return firstPage;
         const remaining = await Promise.all(
           Array.from({ length: Math.ceil((count - pageSize) / pageSize) }, (_, i) => {
-            let q = supabase.from(table).select(select).range((i + 1) * pageSize, (i + 2) * pageSize - 1);
+            let q = supabase.from(table).select(select).order('id').range((i + 1) * pageSize, (i + 2) * pageSize - 1);
             if (filter) q = filter(q);
             return q.then(r => r.data || []);
           })
@@ -56,17 +58,22 @@ export default function SwimmersRegistry({ session }) {
         return [...firstPage, ...remaining.flat()];
       };
 
-      // Use 180 days for results (reliability calc only) — peak WA is the best
-      // wa_pts recorded within the selected reporting period.
+      // Use 180 days for results (reliability calc only) — peak WA is derived
+      // separately below from all-time results.wa_pts.
       const reliabilityWindow = new Date(new Date() - 180 * 86400000).toISOString();
 
-      const [swRes, results, attendance, sessions, exRes, memberships] = await Promise.all([
+      const [swRes, results, attendance, sessions, exRes, memberships, peakResults] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
         fetchParallel('results', 'swimmer_id, date, wa_pts', q => q.gte('date', reliabilityWindow)),
         fetchParallel('training_attendance', '*', q => q.gte('date', y1ago)),
         fetchPaged('sessions', '*'),
         supabase.from('club_exemptions').select('*'),
         fetchParallel('session_memberships', '*'),
+        // Peak WA is derived from results.wa_pts (all-time, all events). The
+        // swimmer_pbs table has NO wa_pts column, so querying it there returned
+        // nothing and every peak fell back to 0. Mirror the swimmer detail page,
+        // which derives peaks from results.
+        fetchParallel('results', 'swimmer_id, wa_pts'),
       ]);
 
       if (swRes.error) throw swRes.error;
@@ -74,15 +81,22 @@ export default function SwimmersRegistry({ session }) {
       // Pre-group by swimmer_id once — avoids O(n×m) filtering inside the map
       const resultsBySwimmer = {};
       (results || []).forEach(r => { (resultsBySwimmer[r.swimmer_id] ||= []).push(r); });
+      const attendanceBySwimmer = {};
+      (attendance || []).forEach(a => { (attendanceBySwimmer[a.swimmer_id] ||= []).push(a); });
       const membershipsBySwimmer = {};
       (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
       const exemptions = exRes.data || [];
+      // Peak WA per swimmer from results (best score across all events/history)
+      const peakWABySwimmer = {};
+      (peakResults || []).forEach(p => {
+        if ((p.wa_pts || 0) > (peakWABySwimmer[p.swimmer_id] || 0)) peakWABySwimmer[p.swimmer_id] = p.wa_pts;
+      });
       const now = new Date();
       const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
 
       const enrichedSwimmers = (swRes.data || []).map(swimmer => {
         const swimmerResults = resultsBySwimmer[swimmer.id] || [];
-        const peakWA = swimmerResults.length ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
+        const peakWA = peakWABySwimmer[swimmer.id] || 0;
 
         const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : (swimmer.date_of_birth ? targetYear - new Date(swimmer.date_of_birth).getFullYear() : null);
 
@@ -100,7 +114,7 @@ export default function SwimmersRegistry({ session }) {
 
         const rel = calculateReliability(
           swimmer,
-          attendance,
+          attendanceBySwimmer[swimmer.id] || [],
           sessions,
           swimmerResults,
           period,

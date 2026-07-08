@@ -8,6 +8,7 @@ function fakeClient(rows, { failOnPage = -1 } = {}) {
       select: () => {
         const q = {
           _from: 0, _to: 0,
+          order() { return q; },
           range(from, to) { q._from = from; q._to = to; return q; },
           eq() { return q; },
           then(resolve) {

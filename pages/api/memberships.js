@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     let hasMore = true;
 
     while (hasMore) {
-      let query = supabase.from('session_memberships').select('*').range(page * pageSize, (page + 1) * pageSize - 1);
+      let query = supabase.from('session_memberships').select('*').order('id').range(page * pageSize, (page + 1) * pageSize - 1);
       if (swimmerId) query = query.eq('swimmer_id', swimmerId);
       
       const { data, error } = await query;

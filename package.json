@@ -1,6 +1,6 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.194",
+  "version": "1.0.195",
   "description": "",
   "scripts": {
     "dev": "next dev",
@@ -28,10 +28,12 @@
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
     "docx": "^9.7.1",
+    "docxtemplater": "^3.69.0",
     "dompurify": "^3.4.8",
     "dotenv": "^17.4.2",
     "formidable": "^3.5.4",
     "next": "^16.2.6",
+    "pizzip": "^3.2.0",
     "puppeteer": "^24.43.1",
     "puppeteer-core": "^24.43.1",
     "react": "^19.2.6",
