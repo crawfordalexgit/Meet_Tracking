@@ -80,17 +80,21 @@ Prompted by a screenshot: the Cockpit shows numbers that contradict each other. 
 
 **Why the first suite missed these:** the smoke tests checked page *loads* + body text length + DB truth, but never (a) that rendered numbers agree across panels, (b) that charts actually plot a series, or (c) that copy degrades sanely on empty data. Those three coverage classes were added in v1.0.182.
 
-## Suite results — fresh run at v1.0.182 (projects run sequentially)
+## Suite results — v1.0.187 (data repopulated; all fixes merged)
 
-- **unit**: **62 passed, 0 failed.** The F4 alias test is now green (no expected-fails remain).
-- **api**: **102 passed, 5 skipped, 0 failed.** All 401/403/405 contracts pass — including the S1 (download-report) and S2 (sync-attendance) probes that used to fail. 5 skips are the heavy `@ai`/`@pdf` routes (need `RUN_HEAVY=1`).
-- **integrity**: **8 passed, 5 failed.** The 5 failures are all expected and map to open bugs:
-  - `100/100 recent meets have ZERO results` and `88 swimmers with PBs but no results` → the **headline root cause** (results empty; clears after a live scrape).
-  - `|| N` fallbacks, hardcoded ranking literals, unguarded narrative → **D1, D2, D4**.
-- **e2e**: **19 passed, 4 failed, 4 skipped.** The 4 failures map to **D1 (cross-panel), D3 (County Top 10 > 10), D4 (+0 pt narrative), D5 (blank chart)**. The 4 skips are data-dependent (swimmer-meets reproduction auto-skips with "no results in last 450 days" — a third independent confirmation of the headline).
-- **destructive**: NOT run — requires you to run `npm run test:backup` first (Claude is blocked from dumping swimmer PII to disk). This is the run that proves the scrape fix repopulates `results` and makes swimmer pages show meets again.
+After the full scrape (results 823→5,219) and all fixes (F1-F4, F8, F9, F11, D1-D5, S1-S2):
 
-**Net: 191 passed, 9 failed, 9 skipped.** Every one of the 9 failures is a *known* item — 2 are the headline data-defect (awaiting a live scrape), 7 are the open D1–D5 dashboard bugs. No fixed item regressed.
+- **unit**: **68 passed, 0 failed** (incl. the new `scrape-utils` dedupe tests).
+- **api**: **102 passed, 5 skipped, 0 failed.** All 401/403/405 contracts pass. (Run the safe suite as ONE `playwright test` invocation, not per-project — separate invocations spawn a webServer each and collide on :3000.)
+- **integrity**: **passes except one** — the sole red is **F12: 25 swimmers have SE PBs but no results** (scraper name-match residual, was 88). Every other invariant (results↔meets, no duplicate swimmer+meet+event, level/type, name format) is green.
+- **e2e**: **green.** dashboard-integrity 4/4 (D1-D5), squad-consistency 2/2 (F11), and the swimmer-meets reproduction now **passes** — verified on Charles Dunstan (48 meets shown under the Competition tab). A couple of heavy-page nav tests were made timing-tolerant.
+- **destructive**: still gated on `npm run test:backup` (Claude can't dump PII). The scrape fix was instead proven directly: single-meet scrape of 86891 wrote 0→86, full scrape wrote 124 meets/4,396 results, no constraint failures.
+
+**Net: the safe suite is green except the single F12 residual.** No fixed item regressed.
+
+### Notes for the operator
+- The GUI "Update Swim England" button fire-and-forgets the meet-scrape stream (F10) — it shows "Complete!" early and only reliably runs the scrape locally. Prefer a local run until F10 is fixed.
+- The dashboard's per-squad cards live in a hidden `squadsVisible` overlay (toggled by a button), not the default view — by design, but easy to miss.
 
 ## Note on side effects during testing
 
