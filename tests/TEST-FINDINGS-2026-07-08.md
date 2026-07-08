@@ -9,6 +9,8 @@ Automated suite built and run against the live app + DB. This report lists every
 | Headline | Swimmers show no meets (results empty) | **Fully root-caused (see F9)** — scrape now persists, reports errors, AND dedupes heats/finals; needs a full local scrape to repopulate |
 | F9 | Scrape blocked by UNIQUE(swimmer_id, meet_id, event) | ✅ **Fixed** — scraper dedupes to fastest per event ([lib/scrape-utils.js]) |
 | F10 | GUI "Update Swim England" abandons the meet-scrape SSE stream | ⏳ **Open** — fire-and-forget; shows "Complete!" before scrape finishes (UX, not data-loss locally) |
+| F11 | Squad stats differ between /squads registry and /squad/[id] detail | ⏳ **Open** — each page computes training/volume/health/compliance its own way (different swimmer set, compliance definition, and health formula). Guarded by `tests/integrity/squad-consistency.spec.js` |
+| squad-standard | `squad.county_standard \|\| 350` fabricates a standard when unset | ⏳ **Open** (D1-class) — pages/squad/[id].js:585 |
 | S1 | download-report no auth | ✅ **Fixed & verified** (test:api 78/78) |
 | S2 | sync-attendance localhost bypass | ✅ **Fixed & verified** |
 | F1 | reconcile-pbs 401 self-call | ✅ **Fixed** (now a direct `lib/reconcile-pbs.js` call) |
