@@ -8,7 +8,7 @@
  */
 
 import { useMemo } from 'react';
-import { formatTime } from '../lib/relays/kent-relays-config';
+import { formatTime, teamName } from '../lib/relays/kent-relays-config';
 
 const strokeColor = { Back: '#38bdf8', Breast: '#f472b6', Fly: '#fbbf24', Free: '#34d399' };
 
@@ -90,7 +90,7 @@ export default function RelayBuilderDrawer({
             <div key={team.letter} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', background: team.locked ? 'rgba(6,182,212,0.04)' : 'transparent' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '1.1rem', fontWeight: 900 }}>Team {team.letter}</span>
+                  <span style={{ fontSize: '1.1rem', fontWeight: 900 }}>{teamName(team.letter)}</span>
                   <span style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', fontVariantNumeric: 'tabular-nums' }}>{formatTime(total)}</span>
                   <span style={{ fontSize: '0.6rem', fontWeight: 900, padding: '3px 8px', borderRadius: '6px', textTransform: 'uppercase', letterSpacing: '0.05em',
                     background: team.letter === 'A' ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.12)',
@@ -158,7 +158,7 @@ export default function RelayBuilderDrawer({
       </div>
 
       <div style={{ display: 'flex', gap: '10px', marginTop: '1.25rem', flexWrap: 'wrap' }}>
-        <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={onAddTeam}>+ Add {String.fromCharCode(65 + teams.length)} team</button>
+        <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={onAddTeam}>+ Add {teamName(String.fromCharCode(65 + teams.length))}</button>
       </div>
     </div>
   );
