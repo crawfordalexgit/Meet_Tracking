@@ -457,7 +457,7 @@ const [decayDistance, setDecayDistance] = useState('100');
         supabase.from('club_exemptions').select('*').then(d => { console.log(`exemptions: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         authedFetch(`/api/memberships?swimmerId=${id}`).then(r => r.json()).then(d => { console.log(`memberships: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('ai_reports').select('*').eq('swimmer_id', id).order('created_at', { ascending: false }).then(d => { console.log(`ai_reports: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
-        supabase.from('meets').select('id, name, date').order('date', { ascending: false }).limit(500).then(d => { console.log(`meets: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
+        supabase.from('meets').select('id, name, date, end_date, level, type').order('date', { ascending: false }).limit(500).then(d => { console.log(`meets: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
         supabase.from('swimmer_pbs').select('*').eq('swimmer_id', id).then(d => { console.log(`pbs: ${(performance.now()-t0).toFixed(0)}ms`); return d; }),
       ]);
 
