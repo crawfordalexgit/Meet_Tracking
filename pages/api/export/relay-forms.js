@@ -77,6 +77,9 @@ export default async function handler(req, res) {
   // 2. Team Declaration
   children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun({ text: 'Team declaration' })] }));
   children.push(new Paragraph({ children: [new TextRun({ text: 'DOB column left blank for the club to complete — only year of birth is held on file.', size: 18, color: '666666' })] }));
+  if (ordered.some((t) => (t.legs || []).some((l) => l.converted))) {
+    children.push(new Paragraph({ children: [new TextRun({ text: '* 50m time estimated from a long-course PB (no short-course time on record) — verify before entry.', size: 18, color: '996600' })] }));
+  }
   children.push(new Paragraph({ text: '' }));
 
   for (const t of ordered) {
@@ -87,7 +90,7 @@ export default async function handler(req, res) {
       rows.push(new TableRow({ children: [
         cell(l.stroke), cell(l.fullName || l.name),
         cell(l.yob || '', { align: AlignmentType.CENTER }),
-        cell('', {}), cell(l.time || '', { align: AlignmentType.CENTER }),
+        cell('', {}), cell((l.time || '') + (l.converted ? ' *' : ''), { align: AlignmentType.CENTER }),
       ] }));
     }
     children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));
