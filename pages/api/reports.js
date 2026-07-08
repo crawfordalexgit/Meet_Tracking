@@ -100,22 +100,31 @@ export default async function handler(req, res) {
 
     console.log(`API: Fetching report details for ${swimmers.length} athletes. Period days: ${periodDays}. Start: ${startStr}, End: ${endStr}`);
 
+    // Only the most recent rankings snapshot is ever used below, so find that
+    // date first instead of pulling every swimmer's entire rankings history —
+    // fetching all of it for 300+ swimmer_ids with no date bound is what was
+    // causing this endpoint to hit the DB statement timeout.
+    const { data: latestSnapshotRow } = await supabase
+      .from('rankings')
+      .select('snapshot_date')
+      .in('swimmer_id', swimmerIds)
+      .order('snapshot_date', { ascending: false })
+      .limit(1);
+    const latestSnapshot = latestSnapshotRow?.[0]?.snapshot_date || null;
+
     const [attendanceRes, resultsRes, membershipsRes, rankingsRes] = await Promise.all([
       fetchAll('training_attendance', '*', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
       fetchAll('results', '*, meets(*)', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
       fetchAll('session_memberships', '*', q => q.in('swimmer_id', swimmerIds)),
-      fetchAll('rankings', '*', q => q.in('swimmer_id', swimmerIds).order('snapshot_date', { ascending: false }))
+      latestSnapshot
+        ? fetchAll('rankings', '*', q => q.in('swimmer_id', swimmerIds).eq('snapshot_date', latestSnapshot))
+        : Promise.resolve([])
     ]);
 
     const attendance = attendanceRes || [];
     const results = resultsRes || [];
     const memberships = membershipsRes || [];
-    const rankings = rankingsRes || [];
-
-    // Get latest snapshot for Swim England rankings
-    const uniqueSnapshots = [...new Set(rankings.map(r => r.snapshot_date))].sort((a, b) => new Date(b) - new Date(a));
-    const latestSnapshot = uniqueSnapshots[0] || null;
-    const currentRankings = rankings.filter(r => r.snapshot_date === latestSnapshot);
+    const currentRankings = rankingsRes || [];
 
     // Group attendance and results by swimmer_id for fast lookup
     const attBySwimmer = {};

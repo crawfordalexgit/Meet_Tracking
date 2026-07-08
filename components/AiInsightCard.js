@@ -5,6 +5,11 @@ import DOMPurify from 'dompurify';
 
 const sanitizeHtml = (html) => typeof window === 'undefined' ? '' : DOMPurify.sanitize(html);
 
+// AI-generated text sometimes contains literal markdown (**bold**) that React
+// would otherwise print as raw asterisks instead of rendering.
+const renderInlineMarkdown = (text) =>
+  sanitizeHtml((text || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'));
+
 export default function AiInsightCard({ 
   swimmerId, 
   coachId, 
@@ -325,7 +330,7 @@ export default function AiInsightCard({
       )}
 
       <div className="mb-10">
-        <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }}>{insight.headline}</h3>
+        <h3 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingBottom: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.1)', marginBottom: '1.5rem', marginTop: '1rem' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.headline) }} />
 
       {(type === 'training' || type === 'pathway') ? (
         <>
@@ -336,11 +341,11 @@ export default function AiInsightCard({
                 📣 Transition Target: {insight.squad_transition.target_squad}
               </h4>
               <p style={{ fontSize: '0.85rem', lineHeight: '1.6', margin: 0 }}>
-                <strong>Readiness Summary:</strong> {insight.squad_transition.transition_analysis || insight.overview}
+                <strong>Readiness Summary:</strong> <span dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.squad_transition.transition_analysis || insight.overview) }} />
               </p>
               {insight.pathway_audit && (
                 <p style={{ fontSize: '0.85rem', lineHeight: '1.6', marginTop: '0.75rem', color: 'var(--text-secondary)' }}>
-                  <strong>Pathway Audit:</strong> {insight.pathway_audit}
+                  <strong>Pathway Audit:</strong> <span dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.pathway_audit) }} />
                 </p>
               )}
 
@@ -376,9 +381,7 @@ export default function AiInsightCard({
                       </div>
                     </div>
                   </div>
-                  <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5, margin: 0 }}>
-                    {insight.squad_transition.safety_build_up.detailed_safety_plan}
-                  </p>
+                  <p style={{ fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)', lineHeight: 1.5, margin: 0 }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.squad_transition.safety_build_up.detailed_safety_plan) }} />
                 </div>
               )}
             </div>
@@ -387,13 +390,13 @@ export default function AiInsightCard({
           {/* SWOT quadrant grid */}
           {insight.swot_analysis && (
             <div style={{ marginTop: '1.5rem', marginBottom: '2rem' }}>
-                <h4 className="section-title" style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)', marginBottom: '1rem' }}>SWOT Analysis</h4>
+                <h4 className="section-title" style={{ fontSize: '0.65rem', color: 'var(--accent-cyan)', marginBottom: '1rem' }}>Strengths & areas to work on</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
                     {[
                         { title: 'STRENGTHS', data: insight.swot_analysis.strengths, color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.03)' },
-                        { title: 'WEAKNESSES', data: insight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)' },
-                        { title: 'OPPORTUNITIES', data: insight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)' },
-                        { title: 'THREATS', data: insight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)' }
+                        { title: 'AREAS TO WORK ON', data: insight.swot_analysis.weaknesses, color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.03)' },
+                        { title: 'ROOM TO GROW', data: insight.swot_analysis.opportunities, color: 'var(--accent-cyan)', bg: 'rgba(0, 212, 255, 0.03)' },
+                        { title: 'WATCH OUT FOR', data: insight.swot_analysis.threats, color: 'var(--accent-amber)', bg: 'rgba(251, 191, 36, 0.03)' }
                     ].map((item, idx) => (
                         <div key={idx} style={{ background: item.bg, border: `1px solid ${item.color}40`, borderRadius: '12px', padding: '1.25rem' }}>
                             <h4 style={{ color: item.color, margin: '0 0 0.75rem 0', fontSize: '0.8rem', fontWeight: 900, letterSpacing: '0.05em' }}>{item.title}</h4>
@@ -430,11 +433,11 @@ export default function AiInsightCard({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <h4 style={{ color: 'white', margin: '0 0 0.5rem 0', fontSize: '0.85rem', fontWeight: 800 }}>Squad Comparison</h4>
-                    <p style={{ fontSize: '0.8rem', margin: 0, opacity: 0.85, lineHeight: '1.5' }}>{insight.squad_comparison.swimmer_vs_squad}</p>
+                    <p style={{ fontSize: '0.8rem', margin: 0, opacity: 0.85, lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.squad_comparison.swimmer_vs_squad) }} />
                 </div>
                 <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1.25rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
                     <h4 style={{ color: 'white', margin: '0 0 0.5rem 0', fontSize: '0.85rem', fontWeight: 800 }}>Coach Directives</h4>
-                    <p style={{ fontSize: '0.8rem', margin: 0, opacity: 0.85, lineHeight: '1.5' }}>{insight.squad_comparison.coach_view}</p>
+                    <p style={{ fontSize: '0.8rem', margin: 0, opacity: 0.85, lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.squad_comparison.coach_view) }} />
                 </div>
             </div>
           )}
@@ -446,15 +449,15 @@ export default function AiInsightCard({
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
                     <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
                         <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Consistency Status</div>
-                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>{insight.metrics_deep_dive.consistency_status}</div>
+                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.metrics_deep_dive.consistency_status) }} />
                     </div>
                     <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
                         <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Volume Audit</div>
-                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>{insight.metrics_deep_dive.volume_audit}</div>
+                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.metrics_deep_dive.volume_audit) }} />
                     </div>
                     <div style={{ background: 'rgba(255,255,255,0.01)', padding: '1rem', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.03)' }}>
                         <div style={{ fontSize: '0.65rem', opacity: 0.5, fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Racing Readiness</div>
-                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>{insight.metrics_deep_dive.racing_readiness}</div>
+                        <div style={{ fontSize: '0.8rem', lineHeight: '1.5' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.metrics_deep_dive.racing_readiness) }} />
                     </div>
                 </div>
             </div>
@@ -466,7 +469,7 @@ export default function AiInsightCard({
                   <div style={{ background: 'rgba(244, 63, 94, 0.03)', border: '1px solid rgba(244, 63, 94, 0.15)', padding: '1.25rem', borderRadius: '12px' }}>
                       <h4 style={{ color: 'var(--accent-rose)', margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 900 }}>⚠️ Risk Flags</h4>
                       <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', opacity: 0.9, lineHeight: '1.5' }}>
-                          {insight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 4 }}>{flag}</li>)}
+                          {insight.risk_flags.map((flag, idx) => <li key={idx} style={{ marginBottom: 4 }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(flag) }} />)}
                       </ul>
                   </div>
               )}
@@ -474,7 +477,7 @@ export default function AiInsightCard({
                   <div style={{ background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.15)', padding: '1.25rem', borderRadius: '12px' }}>
                       <h4 style={{ color: 'var(--accent-emerald)', margin: '0 0 0.75rem 0', fontSize: '0.85rem', fontWeight: 900 }}>⚡ Action Items</h4>
                       <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.8rem', opacity: 0.9, lineHeight: '1.5' }}>
-                          {insight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 4 }}>{item}</li>)}
+                          {insight.action_items.map((item, idx) => <li key={idx} style={{ marginBottom: 4 }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(item) }} />)}
                       </ul>
                   </div>
               )}
@@ -484,33 +487,33 @@ export default function AiInsightCard({
         <>
           {insight.summary && <><div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
               <div className="md:col-span-2">
-                 <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Executive Profile</h4>
-                 <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.5rem' }}>{insight.summary.assessment}</p>
-             
-             <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Technical Review</h4>
+                 <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Summary</h4>
+                 <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '1.5rem' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.assessment) }} />
+
+             <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1rem' }}>Notes</h4>
              <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>
-               {(insight.analysis || '').split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1rem' }}>{p}</p>)}
+               {(insight.analysis || '').split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1rem' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(p) }} />)}
              </div>
           </div>
 
           <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-6">
-            <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1.5rem', justifyContent: 'center' }}>SWOT Analysis</h4>
+            <h4 className="section-title" style={{ fontSize: '0.6rem', marginBottom: '1.5rem', justifyContent: 'center' }}>Strengths & areas to work on</h4>
             <div style={{ spaceY: '1.5rem' }}>
               <div className="mb-4">
                 <div style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Strengths</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.strengths}</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.strengths) }} />
               </div>
               <div className="mb-4">
-                <div style={{ fontSize: '0.6rem', color: 'var(--accent-rose)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Weaknesses</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.weaknesses}</div>
+                <div style={{ fontSize: '0.6rem', color: 'var(--accent-rose)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Areas to work on</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.weaknesses) }} />
               </div>
               <div className="mb-4">
-                <div style={{ fontSize: '0.6rem', color: 'var(--accent-cyan)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Opportunities</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.opportunities}</div>
+                <div style={{ fontSize: '0.6rem', color: 'var(--accent-cyan)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Room to grow</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.opportunities) }} />
               </div>
               <div>
-                <div style={{ fontSize: '0.6rem', color: '#f59e0b', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Threats</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{insight.summary.swot.threats}</div>
+                <div style={{ fontSize: '0.6rem', color: '#f59e0b', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Watch out for</div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.threats) }} />
               </div>
             </div>
           </div>
@@ -547,21 +550,21 @@ export default function AiInsightCard({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 border-t border-white/5">
           <div>
-            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>CoachesEye Insights: Predictive Foresight</h4>
+            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>What's next</h4>
             <div style={{ padding: '1.25rem', background: 'rgba(var(--accent-cyan-rgb), 0.05)', borderRadius: '16px', border: '1px solid rgba(var(--accent-cyan-rgb), 0.1)' }}>
               <p style={{ fontSize: '0.9rem', fontStyle: 'italic', color: 'var(--text-primary)', margin: 0 }}>
-                "{insight.foresight}"
+                "<span dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.foresight) }} />"
               </p>
             </div>
           </div>
 
           <div>
-            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>Strategic Recommendations</h4>
+            <h4 className="section-title" style={{ fontSize: '0.6rem' }}>Recommendations</h4>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {(insight.recommendations || []).map((rec, i) => (
                 <li key={i} style={{ fontSize: '0.85rem', display: 'flex', gap: '12px', marginBottom: '10px' }}>
                   <div style={{ minWidth: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '8px' }}></div>
-                  <span style={{ color: 'var(--text-secondary)' }}>{rec}</span>
+                  <span style={{ color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(rec) }} />
                 </li>
               ))}
             </ul>

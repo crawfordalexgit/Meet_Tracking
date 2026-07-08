@@ -1016,6 +1016,11 @@ export default function Dashboard({ session }) {
             </button>
           </div>
 
+          <div className="section-divider" style={{ marginTop: '2.5rem' }}>
+            <span className="label">Club health at a glance</span>
+            <span className="rule" />
+          </div>
+
           <div className="flex gap-6 mb-12 w-full overflow-x-auto no-scrollbar" style={{ flexWrap: 'nowrap', justifyContent: 'center', alignItems: 'center' }}>
             <div style={{ cursor: 'pointer' }} onClick={() => router.push(`/squads?period=${periodDays}`)}>
               <PremiumOrb value={stats.avgHealth} label="GLOBAL CLUB HEALTH" icon="🏥" size={120} unit="%" />
@@ -1032,11 +1037,15 @@ export default function Dashboard({ session }) {
           </div>
 
 
-      <div className="tactical-insight-module expansive mb-12" style={{ marginTop: '2.5rem' }}>
+      <div className="section-divider">
+        <span className="label">What needs attention</span>
+        <span className="rule" />
+      </div>
+
+      <div className="tactical-insight-module expansive mb-12">
         <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
           <div className="flex items-center gap-3">
-            <div className="insight-tag" style={{ color: 'var(--accent-amber)', fontSize: '0.8rem', fontWeight: 900 }}>COACHESEYE BRAIN</div>
-            <h2 style={{ fontSize: '1.6rem', fontWeight: 900, margin: 0, letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Strategic Intelligence Matrix</h2>
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0, letterSpacing: '-0.02em' }}>Top priorities right now</h2>
           </div>
           <button 
             onClick={() => setShowAIAudit(!showAIAudit)}
@@ -1182,7 +1191,12 @@ export default function Dashboard({ session }) {
 
 
       {/* MACRO-CYCLE TRACKING: Chart & Tactical Explainer + Orbs */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" style={{ marginTop: '2.5rem' }}>
+      <div className="section-divider">
+        <span className="label">Performance trends</span>
+        <span className="rule" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Left Column: Chart (top) + Explainer (bottom) */}
         <div className="lg:col-span-2 flex flex-col gap-6">
@@ -1292,10 +1306,9 @@ export default function Dashboard({ session }) {
 
 
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
-         <div className="insight-heading-group mb-4">
-            <h3 className="text-xs font-black tracking-widest opacity-30 uppercase">Tactical Audit & Risk Assessment</h3>
-         </div>
+      <div className="section-divider">
+        <span className="label">Risks &amp; alerts</span>
+        <span className="rule" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-16">
@@ -1334,10 +1347,9 @@ export default function Dashboard({ session }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-4">
-         <div className="insight-heading-group">
-            <h3 className="text-xs font-black tracking-widest opacity-30 uppercase">Performance Ceiling & Technical Velocity</h3>
-         </div>
+      <div className="section-divider">
+        <span className="label">Performance ceiling</span>
+        <span className="rule" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">

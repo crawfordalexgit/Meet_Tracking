@@ -1608,6 +1608,10 @@ export default function CapacityDashboard({ session }) {
 
             {activeTab === 'heatmap' ? (
               <div className="flex flex-col gap-8">
+                <div className="section-divider" style={{ marginTop: '1rem' }}>
+                  <span className="label">At a glance</span>
+                  <span className="rule" />
+                </div>
                 {/* 1. Summary Cards */}
                 <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
                   <div
@@ -1699,7 +1703,7 @@ export default function CapacityDashboard({ session }) {
                   allSquadsMetrics.length > 0 && (
                     <div className="glass-card" style={{ padding: '1.25rem 1.5rem' }}>
                       <div className="section-title">All Squads — Capacity Overview</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
                         {allSquadsMetrics.map(sq => {
                           const barColor = sq.isOverCapacity ? 'var(--accent-rose)' : sq.pct >= 85 ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-emerald)';
                           return (
@@ -1713,7 +1717,7 @@ export default function CapacityDashboard({ session }) {
                               }}
                               title="Click to drill down into this squad"
                             >
-                              <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: barColor }}>{sq.name}</span>
+                              <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: barColor, wordBreak: 'break-word', whiteSpace: 'normal', lineHeight: 1.3 }}>{sq.name}</span>
                               <div className="flex items-baseline gap-1.5">
                                 <span className="text-xl font-black" style={{ color: barColor }}>{sq.currentSquadSize}</span>
                                 <span className="text-xs text-white/40 font-bold">/ {sq.maxSquadSize}</span>

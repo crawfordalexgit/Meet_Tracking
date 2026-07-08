@@ -56,17 +56,17 @@ export default function SwimmersRegistry({ session }) {
         return [...firstPage, ...remaining.flat()];
       };
 
-      // Use 180 days for results (reliability calc only) — peak WA comes from swimmer_pbs
+      // Use 180 days for results (reliability calc only) — peak WA is the best
+      // wa_pts recorded within the selected reporting period.
       const reliabilityWindow = new Date(new Date() - 180 * 86400000).toISOString();
 
-      const [swRes, results, attendance, sessions, exRes, memberships, pbsRes] = await Promise.all([
+      const [swRes, results, attendance, sessions, exRes, memberships] = await Promise.all([
         supabase.from('swimmers').select('*, squads(*)').not('squad_id', 'is', null).order('full_name'),
-        fetchParallel('results', 'swimmer_id, date', q => q.gte('date', reliabilityWindow)),
+        fetchParallel('results', 'swimmer_id, date, wa_pts', q => q.gte('date', reliabilityWindow)),
         fetchParallel('training_attendance', '*', q => q.gte('date', y1ago)),
         fetchPaged('sessions', '*'),
         supabase.from('club_exemptions').select('*'),
         fetchParallel('session_memberships', '*'),
-        supabase.from('swimmer_pbs').select('swimmer_id, wa_pts'),
       ]);
 
       if (swRes.error) throw swRes.error;
@@ -77,17 +77,12 @@ export default function SwimmersRegistry({ session }) {
       const membershipsBySwimmer = {};
       (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
       const exemptions = exRes.data || [];
-      // Peak WA per swimmer from pbs table (best time across all events/history)
-      const peakWABySwimmer = {};
-      (pbsRes.data || []).forEach(p => {
-        if ((p.wa_pts || 0) > (peakWABySwimmer[p.swimmer_id] || 0)) peakWABySwimmer[p.swimmer_id] = p.wa_pts;
-      });
       const now = new Date();
       const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
 
       const enrichedSwimmers = (swRes.data || []).map(swimmer => {
         const swimmerResults = resultsBySwimmer[swimmer.id] || [];
-        const peakWA = peakWABySwimmer[swimmer.id] || 0;
+        const peakWA = swimmerResults.length ? Math.max(...swimmerResults.map(r => r.wa_pts || 0)) : 0;
 
         const age = swimmer.year_of_birth ? targetYear - swimmer.year_of_birth : (swimmer.date_of_birth ? targetYear - new Date(swimmer.date_of_birth).getFullYear() : null);
 
@@ -192,6 +187,11 @@ export default function SwimmersRegistry({ session }) {
            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyan-400"></div>
         </div>
       ) : (
+        <>
+        <div className="section-divider">
+          <span className="label">{filtered.length} swimmers</span>
+          <span className="rule" />
+        </div>
         <div className="glass-card overflow-hidden">
            <table className="w-full text-left">
               <thead>
@@ -215,12 +215,11 @@ export default function SwimmersRegistry({ session }) {
                           <div className="font-bold text-white text-lg">
                             {getPreferredName(sw)}
                           </div>
-                          <div className="text-xs opacity-30 font-bold uppercase tracking-tighter mt-1">
-                            ID: {sw.id.slice(0,8)} 
-                            {sw.known_as && <span className="ml-2">| Known as: {sw.known_as}</span>}
-                            {sw.full_name && sw.known_as && <span className="ml-2">| Full: {sw.full_name}</span>}
-                            {sw.legal_first_name && <span className="ml-2">| Legal: {sw.legal_first_name}</span>}
-                          </div>
+                          {sw.known_as && sw.full_name && sw.known_as !== sw.full_name && (
+                            <div className="text-xs opacity-30 font-bold uppercase tracking-tighter mt-1">
+                              {sw.full_name}
+                            </div>
+                          )}
                        </td>
                        <td className="p-6">
                           <span className="squad-tag">{sw.squads?.name || 'Unassigned'}</span>
@@ -243,6 +242,7 @@ export default function SwimmersRegistry({ session }) {
               </tbody>
            </table>
         </div>
+        </>
       )}
 
       <style jsx>{`

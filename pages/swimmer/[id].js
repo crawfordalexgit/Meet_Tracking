@@ -2763,22 +2763,20 @@ const [decayDistance, setDecayDistance] = useState('100');
         <div className="no-print animate-fade-in">
         
         {/* AI Insight & Foresight Timeline container */}
-        <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16 ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
-          <div className="lg:col-span-2">
-            <AiInsightCard 
-              swimmerId={id} 
-              coachId={session?.user?.id} 
-              performance_slope={performance_slope}
-              totalActualHours={Math.round(totalActualHours)}
-              meetsAttended={rel?.meetsAttended || 0}
-              targetMeets={rel?.targetMeets || 5}
-              complianceRate={progressPercent || 0}
-              squadTargetCompliance={squad?.target_training_percent || 75}
-              insight={aiInsight}
-              loading={isGeneratingAi}
-              onGenerate={generateAthleteInsight}
-            />
-          </div>
+        <div className={`mb-16 ${!reportConfig.sections.aiTechnical ? 'hide-in-report' : ''}`}>
+          <AiInsightCard
+            swimmerId={id}
+            coachId={session?.user?.id}
+            performance_slope={performance_slope}
+            totalActualHours={Math.round(totalActualHours)}
+            meetsAttended={rel?.meetsAttended || 0}
+            targetMeets={rel?.targetMeets || 5}
+            complianceRate={progressPercent || 0}
+            squadTargetCompliance={squad?.target_training_percent || 75}
+            insight={aiInsight}
+            loading={isGeneratingAi}
+            onGenerate={generateAthleteInsight}
+          />
         </div>
 
         {/* ELITE MARGINAL GAINS: MULTI-STROKE DROP-OFF RATIOS */}
@@ -3481,8 +3479,7 @@ const [decayDistance, setDecayDistance] = useState('100');
 
       {activeTab === 'workload' && (
         <div className={`no-print ${!reportConfig.sections.attendance ? 'hide-in-report' : ''} animate-fade-in`}>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
-          <div className="lg:col-span-2 flex flex-col gap-8">
+        <div className="flex flex-col gap-8 mb-16">
             <div className="glass-card" style={{ padding: '2.5rem', minHeight: '400px' }}>
              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
@@ -3623,6 +3620,21 @@ const [decayDistance, setDecayDistance] = useState('100');
              </div>
             </div>
 
+            <AiInsightCard
+              swimmerId={id}
+              coachId={session?.user?.id}
+              performance_slope={performance_slope}
+              totalActualHours={Math.round(totalActualHours)}
+              meetsAttended={rel?.meetsAttended || 0}
+              targetMeets={rel?.targetMeets || 5}
+              complianceRate={progressPercent || 0}
+              squadTargetCompliance={squad?.target_training_percent || 75}
+              insight={workloadInsight}
+              loading={isGeneratingWorkload}
+              onGenerate={generateWorkloadInsight}
+              type="training"
+            />
+
             <div className="glass-card" style={{ padding: '2rem' }}>
               <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-cyan)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
                   Weekly Workload Details
@@ -3701,65 +3713,13 @@ const [decayDistance, setDecayDistance] = useState('100');
               </div>
             </div>
 
-            <div className="glass-card" style={{ padding: '2rem' }}>
-              <h4 style={{ marginBottom: '1.5rem', color: 'var(--accent-amber)', fontSize: '0.8rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                  System Exemptions & Holidays Applied
-              </h4>
-              <div style={{ overflowX: 'auto', maxHeight: '300px', overflowY: 'auto' }} className="custom-scrollbar">
-                  <table className="stats-table-glass" style={{ width: '100%', fontSize: '0.85rem' }}>
-                      <thead style={{ position: 'sticky', top: '-1.5rem', background: 'var(--bg-dark)', zIndex: 10, boxShadow: '0 4px 6px -4px rgba(0,0,0,0.5)' }}>
-                          <tr>
-                              <th style={{ padding: '12px', width: '40%' }}>Exemption / Event</th>
-                              <th style={{ padding: '12px', textAlign: 'center' }}>Start Date</th>
-                              <th style={{ padding: '12px', textAlign: 'center' }}>End Date</th>
-                              <th style={{ padding: '12px', textAlign: 'center' }}>Type</th>
-                          </tr>
-                      </thead>
-                      <tbody>
-                          {activeExemptions.map((ex, i) => (
-                              <tr key={i}>
-                                  <td style={{ padding: '12px', fontWeight: 800 }}>{ex.name}</td>
-                                  <td style={{ padding: '12px', textAlign: 'center', opacity: 0.8 }}>{new Date(ex.start_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                                  <td style={{ padding: '12px', textAlign: 'center', opacity: 0.8 }}>{new Date(ex.end_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                                      <span style={{ padding: '4px 8px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', background: ex.type === 'credit' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(251, 191, 36, 0.15)', color: ex.type === 'credit' ? 'var(--accent-emerald)' : 'var(--accent-amber)' }}>
-                                          {ex.type}
-                                      </span>
-                                  </td>
-                              </tr>
-                          ))}
-                          {activeExemptions.length === 0 && (
-                              <tr>
-                                  <td colSpan="4" style={{ padding: '24px', textAlign: 'center', opacity: 0.5 }}>No exemptions found for this time period.</td>
-                              </tr>
-                          )}
-                      </tbody>
-                  </table>
-              </div>
-            </div>
-
             <div className="glass-card" style={{ padding: '1.5rem', borderLeft: '4px solid var(--accent-cyan)' }}>
               <h4 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textTransform: 'uppercase', marginBottom: '8px' }}>COACHESEYE GUIDE: WORKLOAD</h4>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
                 Consistent workload is the primary driver of aerobic adaptation. This section tracks volume compliance against the athlete's specific squad targets and LTAD stage. <strong>If an athlete joins a squad mid-season, the system automatically truncates the timeline and prorates their target hours to ensure fair compliance grading.</strong>
               </p>
             </div>
-          </div>
-          <div className="lg:col-span-1 flex flex-col gap-6 no-print">
-            <AiInsightCard 
-              swimmerId={id} 
-              coachId={session?.user?.id} 
-              performance_slope={performance_slope}
-              totalActualHours={Math.round(totalActualHours)}
-              meetsAttended={rel?.meetsAttended || 0}
-              targetMeets={rel?.targetMeets || 5}
-              complianceRate={progressPercent || 0}
-              squadTargetCompliance={squad?.target_training_percent || 75}
-              insight={workloadInsight}
-              loading={isGeneratingWorkload}
-              onGenerate={generateWorkloadInsight}
-              type="training"
-            />
+
             <div className="glass-card" style={{ padding: 0, overflow: 'hidden', height: '400px', display: 'flex', flexDirection: 'column' }}>
               <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'linear-gradient(135deg, rgba(6, 182, 212, 0.05) 0%, transparent 100%)' }}>
                  <div className="section-title" style={{ marginBottom: 4 }}>Intelligence Trace</div>
@@ -3833,7 +3793,6 @@ const [decayDistance, setDecayDistance] = useState('100');
                 </div>
               </div>
             </div>
-          </div>
 
         </div>
       </div>

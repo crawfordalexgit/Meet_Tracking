@@ -153,6 +153,11 @@ export default function MeetManagement({ session }) {
         </div>
       )}
 
+      <div className="section-divider">
+        <span className="label">Calendar overview</span>
+        <span className="rule" />
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
         <div className="glass-card lg:col-span-2" style={{ borderLeft: '4px solid var(--accent-cyan)', padding: '2rem' }}>
           <div className="flex justify-between items-center mb-6">
@@ -205,6 +210,11 @@ export default function MeetManagement({ session }) {
           </div>
           <div style={{ fontSize: '0.6rem', fontWeight: 900, marginTop: 12, opacity: 0.8 }}>OPEN MEET RATIO</div>
         </div>
+      </div>
+
+      <div className="section-divider">
+        <span className="label">All meets</span>
+        <span className="rule" />
       </div>
 
       <div className="glass-card" style={{ padding: '2rem' }}>

@@ -69,11 +69,23 @@ function SquadCard({ squad, periodDays }) {
       <div className="squad-brief">
          <div className="brief-tag">COACHESEYE</div>
          <p className="brief-text">
-            {squad.overall > 80 
-              ? "Elite operational rhythm. High compliance is delivering sustained technical growth."
-              : squad.overall > 60 
-                ? "Stable performance baseline. Focus on individual attendance gaps to trigger next phase."
-                : "Operational Risk Identified. Volume deficit and attendance volatility require immediate intervention."}
+            {(() => {
+              if (squad.overall > 80) {
+                return "Elite operational rhythm. High compliance is delivering sustained technical growth.";
+              }
+              if (squad.overall > 60) {
+                return "Stable performance baseline. Focus on individual attendance gaps to trigger next phase.";
+              }
+              // Name the weakest of the three tracked metrics rather than a
+              // generic canned line, so each squad's insight actually differs.
+              const metrics = [
+                { label: 'meet attendance', value: squad.meets },
+                { label: 'training attendance', value: squad.training },
+                { label: 'training volume', value: squad.volume }
+              ];
+              const weakest = metrics.reduce((a, b) => (b.value < a.value ? b : a));
+              return `Operational risk identified. ${weakest.label} is lagging at ${weakest.value}% — immediate intervention needed to stabilize the squad.`;
+            })()}
          </p>
       </div>
 
@@ -332,9 +344,15 @@ export default function SquadsRegistry({ session }) {
            <div style={{ fontSize: '0.75rem', fontWeight: 950, letterSpacing: '0.2em', opacity: 0.8 }}>SYNTHESIZING TACTICAL DATA...</div>
         </div>
       ) : (
+        <>
+        <div className="section-divider">
+          <span className="label">{squads.length} squads</span>
+          <span className="rule" />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-10">
           {squads.map(s => <SquadCard key={s.id} squad={s} periodDays={periodDays} />)}
         </div>
+        </>
       )}
     </Layout>
   );
