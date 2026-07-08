@@ -109,6 +109,21 @@ test('all swimmers have a member_id (needed for SE scraper matching)', () => {
   expect(missing.map(s => s.full_name), `${missing.length} swimmers without member_id can only match by exact name`).toHaveLength(0);
 });
 
+test('no duplicate (swimmer_id, meet_id, event) results — the scrape dedupe holds', () => {
+  // A swimmer races an event multiple times per meet (heats + finals). The DB
+  // has UNIQUE(swimmer_id, meet_id, event); the scraper must dedupe to one
+  // fastest row (lib/scrape-utils.dedupeFastestPerEvent) or a whole meet's
+  // insert is rejected — the bug that left `results` empty (found 2026-07-08).
+  const seen = new Set();
+  const dupes = [];
+  results.forEach(r => {
+    const key = `${r.swimmer_id}|${r.meet_id}|${(r.event || '').trim().toLowerCase()}`;
+    if (seen.has(key)) dupes.push(key);
+    seen.add(key);
+  });
+  expect(dupes, `${dupes.length} duplicate swimmer+meet+event result rows`).toHaveLength(0);
+});
+
 test('results date sanity: no future dates, none before 2000', () => {
   const now = Date.now() + 86400000;
   const bad = results.filter(r => {

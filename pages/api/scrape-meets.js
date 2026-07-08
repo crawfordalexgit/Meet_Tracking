@@ -2,6 +2,7 @@ import { getServiceSupabase } from '../../lib/supabase';
 import * as cheerio from 'cheerio';
 import { extractSwimId, fetchSplits } from '../../lib/rankings-scraper';
 import { reconcilePbs } from '../../lib/reconcile-pbs';
+import { dedupeFastestPerEvent } from '../../lib/scrape-utils';
 import { requireAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
@@ -244,14 +245,18 @@ export default async function handler(req, res) {
               });
             }
 
+            // Collapse heats+finals to one fastest row per swimmer+event so the
+            // UNIQUE(swimmer_id, meet_id, event) constraint doesn't reject the meet.
+            const dedupedResults = dedupeFastestPerEvent(resultsWithSplits);
+
             await supabase.from('results').delete().eq('meet_id', meetId);
-            const { error: resultsError } = await supabase.from('results').insert(resultsWithSplits);
+            const { error: resultsError } = await supabase.from('results').insert(dedupedResults);
             if (resultsError) {
               console.error(`Failed to insert results for ${meetMeta.name}:`, resultsError);
               failedMeets.push({ name: meetMeta.name, error: `results insert failed: ${resultsError.message}` });
               sendProgress(`⚠ Results insert failed for ${meetMeta.name}: ${resultsError.message}`, progressPercent);
             } else {
-              totalResultsScraped += resultsWithSplits.length;
+              totalResultsScraped += dedupedResults.length;
             }
           }
         } catch (err) {

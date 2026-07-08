@@ -6,7 +6,9 @@ Automated suite built and run against the live app + DB. This report lists every
 
 | ID | Finding | Status |
 |---|---|---|
-| Headline | Swimmers show no meets (results empty) | **Code fixed** (scrape now persists + reports errors); needs a live scrape to repopulate — run `npm run test:backup` then `npm run test:destructive` |
+| Headline | Swimmers show no meets (results empty) | **Fully root-caused (see F9)** — scrape now persists, reports errors, AND dedupes heats/finals; needs a full local scrape to repopulate |
+| F9 | Scrape blocked by UNIQUE(swimmer_id, meet_id, event) | ✅ **Fixed** — scraper dedupes to fastest per event ([lib/scrape-utils.js]) |
+| F10 | GUI "Update Swim England" abandons the meet-scrape SSE stream | ⏳ **Open** — fire-and-forget; shows "Complete!" before scrape finishes (UX, not data-loss locally) |
 | S1 | download-report no auth | ✅ **Fixed & verified** (test:api 78/78) |
 | S2 | sync-attendance localhost bypass | ✅ **Fixed & verified** |
 | F1 | reconcile-pbs 401 self-call | ✅ **Fixed** (now a direct `lib/reconcile-pbs.js` call) |
