@@ -35,6 +35,29 @@ test.describe('buildSwimmerPool', () => {
     expect(p.times.Free).toBeCloseTo(30.9, 2); // takes the faster of the two labels
     expect(p.times.Back).toBeCloseTo(35.2, 2);
     expect(p.times.Breast).toBeNull();
+    expect(p.converted.Free).toBe(false);
+  });
+
+  test('falls back to a converted long-course time only when no short-course PB exists', () => {
+    const swimmers = [{ id: 's', full_name: 'LC Only', known_as: 'Lee', year_of_birth: 2013, gender: 'M' }];
+    const pbs = { s: [{ event: '50 Freestyle', course: 'L', time_seconds: 30.0 }] };
+    const withFallback = buildSwimmerPool(swimmers, pbs, MEET.ageYear, { lcFallback: true })[0];
+    expect(withFallback.converted.Free).toBe(true);
+    expect(withFallback.times.Free).toBeLessThan(30.0);      // SC estimate is faster than LC
+    expect(withFallback.times.Free).toBeGreaterThan(28.0);   // but sensible (WA ratio ~0.96)
+    const noFallback = buildSwimmerPool(swimmers, pbs, MEET.ageYear, { lcFallback: false })[0];
+    expect(noFallback.times.Free).toBeNull();
+  });
+
+  test('short-course time always wins over a faster-looking long-course one', () => {
+    const swimmers = [{ id: 's', full_name: 'Both', known_as: 'Bo', year_of_birth: 2013, gender: 'M' }];
+    const pbs = { s: [
+      { event: '50 Freestyle', course: 'S', time_seconds: 29.5 },
+      { event: '50 Freestyle', course: 'L', time_seconds: 28.0 },
+    ] };
+    const p = buildSwimmerPool(swimmers, pbs, MEET.ageYear, { lcFallback: true })[0];
+    expect(p.times.Free).toBeCloseTo(29.5, 2);
+    expect(p.converted.Free).toBe(false);
   });
 });
 

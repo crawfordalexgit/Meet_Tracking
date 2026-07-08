@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Layout from '../components/Layout';
 import RelayBuilderDrawer from '../components/RelayBuilderDrawer';
@@ -63,7 +63,9 @@ export default function RelaysPage({ session: propSession }) {
   const router = useRouter();
   const [session, setSession] = useState(propSession || null);
   const [loading, setLoading] = useState(true);
-  const [pool, setPool] = useState([]);
+  const [rawSwimmers, setRawSwimmers] = useState([]);
+  const [rawPbs, setRawPbs] = useState(null);       // { [id]: pbRows } — null until loaded
+  const [savedRaw, setSavedRaw] = useState(null);   // saved lineups (unresolved swimmer ids)
   const [lineups, setLineups] = useState({});
   const [selected, setSelected] = useState(null);   // event key
   const [notice, setNotice] = useState('');
@@ -73,8 +75,21 @@ export default function RelaysPage({ session: propSession }) {
   const [depth, setDepth] = useState(1);
   const [cap, setCap] = useState(0);                // 0 = no cap
   const [allowAnyGender, setAllowAnyGender] = useState(false);
+  const [useLcFallback, setUseLcFallback] = useState(true);
 
   const capValue = cap === 0 ? Infinity : cap;
+
+  // Pool is derived: short-course 50 PBs, falling back to converted long-course
+  // times (flagged) only when no SCM time exists — so toggling the fallback
+  // rebuilds without re-fetching.
+  const pool = useMemo(
+    () => (rawPbs ? buildSwimmerPool(rawSwimmers, rawPbs, MEET.ageYear, { lcFallback: useLcFallback }) : []),
+    [rawSwimmers, rawPbs, useLcFallback]
+  );
+
+  const settingsRef = useRef({});
+  settingsRef.current = { depth, capValue, allowAnyGender };
+  const builtOnce = useRef(false);
 
   useEffect(() => { if (propSession) setSession(propSession); }, [propSession]);
   useEffect(() => {
@@ -85,46 +100,56 @@ export default function RelaysPage({ session: propSession }) {
     });
   }, [router, propSession]);
 
-  // Load roster + short-course PBs, then optimise.
+  // Load roster + both-course 50 PBs + any saved lineups.
   useEffect(() => {
     if (!session) return;
     (async () => {
       setLoading(true);
       const [{ data: swData }, pbs] = await Promise.all([
         supabase.from('swimmers').select('id, full_name, known_as, year_of_birth, gender'),
-        fetchAllRows(supabase, 'swimmer_pbs', { select: 'swimmer_id,event,course,time_seconds', filter: (q) => q.eq('course', 'S') }),
+        fetchAllRows(supabase, 'swimmer_pbs', { select: 'swimmer_id,event,course,time_seconds', filter: (q) => q.in('course', ['S', 'L']) }),
       ]);
       const bySwimmer = {};
       for (const pb of pbs || []) (bySwimmer[pb.swimmer_id] ||= []).push(pb);
-      const builtPool = buildSwimmerPool(swData || [], bySwimmer, MEET.ageYear);
-      setPool(builtPool);
-
-      // Overlay any saved lineups.
       let saved = {};
       try {
         const res = await authedFetch(`/api/relay-lineups?meet_code=${MEET.code}`);
         const json = await res.json();
         setPersisted(json.persisted !== false);
-        const byId = new Map(builtPool.map((p) => [p.id, p]));
-        for (const row of json.lineups || []) {
-          const legs = (row.legs || []).map((l) => ({
-            stroke: l.stroke,
-            swimmer: byId.get(l.swimmer_id) || null,
-            time: byId.get(l.swimmer_id)?.times?.[l.stroke] ?? l.time_seconds ?? null,
-          }));
-          (saved[row.event_key] ||= []).push({ letter: row.team_letter, legs, locked: !!row.is_locked, capForced: false });
-        }
+        for (const row of json.lineups || []) (saved[row.event_key] ||= []).push({ letter: row.team_letter, legs: row.legs || [], locked: !!row.is_locked });
       } catch { /* persistence optional */ }
-
-      const built = buildAll(builtPool, { depth: 1, cap: Infinity, allowAnyGender: false }, {});
-      // Replace auto teams with saved teams where present.
-      for (const key of Object.keys(saved)) {
-        built[key] = { teams: saved[key].sort((a, b) => a.letter.localeCompare(b.letter)) };
-      }
-      setLineups(built);
+      builtOnce.current = false;
+      setSavedRaw(saved);
+      setRawSwimmers(swData || []);
+      setRawPbs(bySwimmer);
       setLoading(false);
     })();
   }, [session]);
+
+  // Build lineups whenever the pool changes (initial load, or LC-fallback toggle).
+  // Locked teams are preserved; saved lineups are overlaid on the first build.
+  useEffect(() => {
+    if (!rawPbs) return;
+    setLineups((prev) => {
+      const lockedByEvent = {};
+      for (const [k, slot] of Object.entries(prev || {})) { const L = slot.teams.filter((t) => t.locked); if (L.length) lockedByEvent[k] = L; }
+      const { depth: d, capValue: c, allowAnyGender: g } = settingsRef.current;
+      const built = buildAll(pool, { depth: d, cap: c, allowAnyGender: g }, lockedByEvent);
+      if (!builtOnce.current && savedRaw && Object.keys(savedRaw).length) {
+        const byId = new Map(pool.map((p) => [p.id, p]));
+        for (const key of Object.keys(savedRaw)) {
+          built[key] = {
+            teams: savedRaw[key].map((t) => ({
+              letter: t.letter, locked: t.locked, capForced: false,
+              legs: (t.legs || []).map((l) => ({ stroke: l.stroke, swimmer: byId.get(l.swimmer_id) || null, time: byId.get(l.swimmer_id)?.times?.[l.stroke] ?? l.time_seconds ?? null })),
+            })).sort((a, b) => a.letter.localeCompare(b.letter)),
+          };
+        }
+      }
+      return built;
+    });
+    builtOnce.current = true;
+  }, [pool, savedRaw]);
 
   const eligibleByEvent = useMemo(() => {
     const m = {};
@@ -263,7 +288,8 @@ export default function RelaysPage({ session: propSession }) {
           eventKey: ev.key, programmeNo: ev.programmeNo, label: ev.label,
           band: ev.band.label, cat: ev.cat.label, relay: ev.relay.label, letter: t.letter,
           entryTime: formatTime(teamTotal(t)),
-          legs: t.legs.map((l) => ({ stroke: l.stroke, name: l.swimmer.name, fullName: l.swimmer.fullName, yob: l.swimmer.yob, time: formatTime(l.time) })),
+          converted: t.legs.some((l) => l.swimmer.converted?.[l.stroke]),
+          legs: t.legs.map((l) => ({ stroke: l.stroke, name: l.swimmer.name, fullName: l.swimmer.fullName, yob: l.swimmer.yob, time: formatTime(l.time), converted: !!l.swimmer.converted?.[l.stroke] })),
         });
       }
     }
@@ -286,8 +312,8 @@ export default function RelaysPage({ session: propSession }) {
   }
 
   function exportCsv() {
-    const rows = [['Event no', 'Event', 'Team', 'Entry time', 'Leg', 'Swimmer', 'Year', '50m time']];
-    for (const t of exportTeams()) for (const l of t.legs) rows.push([t.programmeNo || '', t.label, t.letter, t.entryTime, l.stroke, l.fullName || l.name, l.yob || '', l.time]);
+    const rows = [['Event no', 'Event', 'Team', 'Entry time', 'Leg', 'Swimmer', 'Year', '50m time', 'Source']];
+    for (const t of exportTeams()) for (const l of t.legs) rows.push([t.programmeNo || '', t.label, t.letter, t.entryTime, l.stroke, l.fullName || l.name, l.yob || '', l.time, l.converted ? 'LC est' : 'SCM']);
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a'); a.href = url; a.download = 'Kent_Relays_2026_Lineups.csv'; a.click();
@@ -299,8 +325,9 @@ export default function RelaysPage({ session: propSession }) {
     const body = teams.map((t) => `
       <h3>${t.programmeNo ? `[${t.programmeNo}] ` : ''}${t.label} — Team ${t.letter} <span style="color:#0891b2">${t.entryTime}</span></h3>
       <table><thead><tr><th>Leg</th><th>Swimmer</th><th>Year</th><th>DOB</th><th>50m</th></tr></thead><tbody>
-      ${t.legs.map((l) => `<tr><td>${l.stroke}</td><td>${l.fullName || l.name}</td><td>${l.yob || ''}</td><td></td><td>${l.time}</td></tr>`).join('')}
+      ${t.legs.map((l) => `<tr><td>${l.stroke}</td><td>${l.fullName || l.name}</td><td>${l.yob || ''}</td><td></td><td>${l.time}${l.converted ? ' *' : ''}</td></tr>`).join('')}
       </tbody></table>`).join('');
+    const anyConverted = teams.some((t) => t.converted);
     const w = window.open('', '_blank');
     w.document.write(`<html><head><title>${MEET.name} — ${CLUB_NAME}</title>
       <style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{margin:0 0 4px}h3{margin:18px 0 6px;font-size:14px}
@@ -308,7 +335,9 @@ export default function RelaysPage({ session: propSession }) {
       .sub{color:#666;font-size:12px;margin-bottom:16px}</style></head><body>
       <h1>${MEET.name} — ${CLUB_NAME}</h1>
       <div class="sub">${MEET.venue} · ${MEET.date} · ${MEET.courseLabel} · entries close ${MEET.closes}. Age as at ${MEET.ageAsAt}. DOB column for club to complete.</div>
-      ${body}</body></html>`);
+      ${body}
+      ${anyConverted ? '<div class="sub" style="margin-top:16px">* time estimated from a long-course PB (no short-course time on record) — verify before entry.</div>' : ''}
+      </body></html>`);
     w.document.close(); w.focus(); w.print();
   }
 
@@ -366,6 +395,10 @@ export default function RelaysPage({ session: propSession }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', opacity: 0.8 }}>
             <input type="checkbox" checked={allowAnyGender} onChange={(e) => setAllowAnyGender(e.target.checked)} />
             Allow any gender in Open/Male
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', opacity: 0.8 }} title="When a swimmer has no short-course 50, estimate from their long-course time (WA base-time ratio). Real SCM times always win.">
+            <input type="checkbox" checked={useLcFallback} onChange={(e) => setUseLcFallback(e.target.checked)} />
+            Convert LC times when no SCM
           </label>
           <div style={{ flex: 1 }} />
           <button className="period-btn" style={{ fontSize: '0.7rem' }} onClick={handleSaveAll}>💾 Save all</button>

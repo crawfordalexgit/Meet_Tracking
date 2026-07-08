@@ -123,11 +123,14 @@ export default function RelayBuilderDrawer({
                         <option value="">— pick swimmer —</option>
                         {opts.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} · {p.age}y · {p.sex} · {formatTime(p.times[leg.stroke])}
+                            {p.name} · {p.age}y · {p.sex} · {formatTime(p.times[leg.stroke])}{p.converted?.[leg.stroke] ? ' (LC est)' : ''}
                           </option>
                         ))}
                       </select>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 900, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: leg.time ? 1 : 0.3 }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 900, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: leg.time ? 1 : 0.3, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5 }}>
+                        {leg.swimmer?.converted?.[leg.stroke] && (
+                          <span style={{ fontSize: '0.5rem', fontWeight: 900, padding: '1px 4px', borderRadius: 4, background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }} title="Estimated from a long-course time — no short-course PB on record">LC</span>
+                        )}
                         {leg.time ? formatTime(leg.time) : '—'}
                       </span>
                     </div>
