@@ -1,6 +1,7 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import * as cheerio from 'cheerio';
 import { extractSwimId, fetchSplits } from '../../lib/rankings-scraper';
+import { reconcilePbs } from '../../lib/reconcile-pbs';
 import { requireAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
@@ -10,7 +11,12 @@ export default async function handler(req, res) {
 
   if (!await requireAuth(req, res)) return;
 
-  const { swimmingYear = '2025/2026', targetClub = 'TONSKNTQ' } = req.body;
+  // meetCode: scrape a single meet only. limit: cap the number of meets processed.
+  // Both exist so the scrape can be run in chunks on serverless hosts (Vercel)
+  // where a full scrape exceeds the function timeout — run the full scrape locally,
+  // or call this repeatedly with meetCode/limit in production.
+  const { swimmingYear = '2025/2026', targetClub = 'TONSKNTQ', meetCode = null, limit = null } = req.body;
+  const isPartialScrape = Boolean(meetCode || limit);
 
   // Set up SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -108,12 +114,20 @@ export default async function handler(req, res) {
       }
     }
 
-    if (meetsMetadata.length === 0) {
-      sendProgress('No meets found.', 100, true);
+    let meetsToProcess = meetsMetadata;
+    if (meetCode) {
+      meetsToProcess = meetsToProcess.filter(m => m.meet_code === String(meetCode));
+    }
+    if (limit) {
+      meetsToProcess = meetsToProcess.slice(0, parseInt(limit, 10) || meetsToProcess.length);
+    }
+
+    if (meetsToProcess.length === 0) {
+      sendProgress(meetCode ? `Meet ${meetCode} not found in ${swimmingYear}.` : 'No meets found.', 100, true);
       return res.end();
     }
 
-    sendProgress(`Found ${meetsMetadata.length} meets. Scraping results (only storing meets with Tonbridge results)...`, 30);
+    sendProgress(`Found ${meetsToProcess.length} meets. Scraping results (only storing meets with Tonbridge results)...`, 30);
 
     const { data: currentSwimmers } = await supabase.from('swimmers').select('id, full_name, member_id');
     const swimmerMap = {};
@@ -128,9 +142,10 @@ export default async function handler(req, res) {
     let totalResultsScraped = 0;
     let meetsWithResults = 0;
     const meetCodesWithResults = [];
+    const failedMeets = [];
 
     const concurrency = 4;
-    const meetsQueue = [...meetsMetadata];
+    const meetsQueue = [...meetsToProcess];
     let processedCount = 0;
 
     const runWorker = async () => {
@@ -139,7 +154,7 @@ export default async function handler(req, res) {
         if (!meetMeta) continue;
 
         processedCount++;
-        const progressPercent = 35 + Math.min(58, Math.round((processedCount / meetsMetadata.length) * 58));
+        const progressPercent = 35 + Math.min(58, Math.round((processedCount / meetsToProcess.length) * 58));
         sendProgress(`Scraping results for: ${meetMeta.name}...`, progressPercent);
 
         try {
@@ -202,6 +217,7 @@ export default async function handler(req, res) {
 
             if (meetError || !upsertedMeet) {
               console.error(`Failed to upsert meet ${meetMeta.name}:`, meetError);
+              failedMeets.push({ name: meetMeta.name, error: `meet upsert failed: ${meetError?.message || 'no row returned'}` });
               continue;
             }
 
@@ -230,12 +246,18 @@ export default async function handler(req, res) {
 
             await supabase.from('results').delete().eq('meet_id', meetId);
             const { error: resultsError } = await supabase.from('results').insert(resultsWithSplits);
-            if (!resultsError) {
+            if (resultsError) {
+              console.error(`Failed to insert results for ${meetMeta.name}:`, resultsError);
+              failedMeets.push({ name: meetMeta.name, error: `results insert failed: ${resultsError.message}` });
+              sendProgress(`⚠ Results insert failed for ${meetMeta.name}: ${resultsError.message}`, progressPercent);
+            } else {
               totalResultsScraped += resultsWithSplits.length;
             }
           }
         } catch (err) {
           console.error(`Error scraping results for ${meetMeta.name}:`, err);
+          failedMeets.push({ name: meetMeta.name, error: err.message });
+          sendProgress(`⚠ Scrape failed for ${meetMeta.name}: ${err.message}`, progressPercent);
         }
       }
     };
@@ -245,7 +267,9 @@ export default async function handler(req, res) {
 
     // Cleanup: delete auto-scraped meets in this date range that produced no results
     // Only delete meets without manual data (no pdf_text, no pdf_url) to protect dashboard meets
-    if (meetCodesWithResults.length > 0) {
+    // Skipped for partial scrapes (meetCode/limit): meets outside the chunk would
+    // look orphaned and get deleted even though other chunks cover them.
+    if (!isPartialScrape && meetCodesWithResults.length > 0) {
       sendProgress('Cleaning up orphaned meets...', 95);
       const rangeStart = `${startYear}-09-01`;
       const rangeEnd = `${endYear}-08-31`;
@@ -266,8 +290,22 @@ export default async function handler(req, res) {
       }
     }
 
-    sendProgress(`Done! ${meetsWithResults} meets with Tonbridge results, ${totalResultsScraped} individual results imported.`, 100, true);
-    fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/reconcile-pbs`, { method: 'POST' }).catch(console.error);
+    if (totalResultsScraped > 0) {
+      sendProgress('Reconciling PBs...', 98);
+      try {
+        await reconcilePbs(supabase);
+      } catch (err) {
+        console.error('PB reconciliation failed after scrape:', err);
+        failedMeets.push({ name: 'PB reconciliation', error: err.message });
+      }
+    }
+
+    let summary = `Done! ${meetsWithResults} meets with Tonbridge results, ${totalResultsScraped} individual results imported.`;
+    if (failedMeets.length > 0) {
+      const detail = failedMeets.map(f => `${f.name} (${f.error})`).join('; ');
+      summary += ` ${failedMeets.length} failure(s): ${detail}`;
+    }
+    sendProgress(summary, 100, true, failedMeets.length > 0 ? `${failedMeets.length} meet(s) failed` : null);
     res.end();
 
   } catch (error) {
