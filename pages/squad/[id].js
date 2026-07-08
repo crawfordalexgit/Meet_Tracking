@@ -8,7 +8,7 @@ import PremiumOrb from '../../components/PremiumOrb';
 import TalentIntelligenceCard from '../../components/TalentIntelligenceCard';
 import AggregateBlockTracker from '../../components/AggregateBlockTracker';
 import SquadQualificationPredictor from '../../components/SquadQualificationPredictor';
-import { calculateReliability, calculateSquadHealth, generateSquadNarrative } from '../../lib/analytics-utils';
+import { calculateReliability, calculateSquadHealth, generateSquadNarrative, computeSquadStats } from '../../lib/analytics-utils';
 import { getKentBenchmark } from '../../lib/qualifying-times';
 import { 
   ResponsiveContainer, 
@@ -337,14 +337,25 @@ export default function SquadDetail({
 
       const activeNonExempt = swimmerStats.filter(s => !s.is_exempt);
 
+      // Canonical, shared computation — the SAME helper the squads registry uses,
+      // so both pages render identical training/volume/meets/health for this squad.
+      const shared = computeSquadStats(squadData, rawSwimmers, {
+        attendance: rawAttendance,
+        sessions: sessionsData,
+        results: rawResults,
+        memberships,
+        exemptions: exemptionsData,
+        period
+      });
+
       const statsObj = {
         athletes: squadSwimmers.length,
-        avgVelocity: Math.round(activeNonExempt.reduce((a,b) => a+b.velocity, 0) / (activeNonExempt.length || 1)),
-        peakStandard: Math.round(activeNonExempt.reduce((a,b) => a+b.peakWA, 0) / (activeNonExempt.length || 1)),
+        avgVelocity: shared.avgVelocity,
+        peakStandard: shared.avgPts,
         totalPoints: activeNonExempt.reduce((a,b) => a+b.totalPoints, 0),
-        avgConsistency: Math.round(activeNonExempt.reduce((a,b) => a+b.trainingPct, 0) / (activeNonExempt.length || 1)),
-        avgVolume: Math.round(activeNonExempt.reduce((a,b) => a+b.volumePct, 0) / (activeNonExempt.length || 1)),
-        complianceRate: Math.round((activeNonExempt.filter(s => s.isMet).length / (activeNonExempt.length || 1)) * 100),
+        avgConsistency: shared.training,
+        avgVolume: shared.volume,
+        complianceRate: shared.compliance,
         totalRaces: squadResults.length,
         targetMeets: squadData.target_meets,
         avgAge,
@@ -582,7 +593,7 @@ export default function SquadDetail({
                       <div style={{ fontSize: '0.8rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', marginBottom: '1.5rem', letterSpacing: '0.1em' }}>Squad Technical Standard</div>
                       <div style={{ display: 'flex', gap: '2rem', alignItems: 'end', marginBottom: '1.5rem' }}>
                          <div>
-                            <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>{squad.county_standard || 350}</div>
+                            <div style={{ fontSize: '3.5rem', fontWeight: 900, color: 'rgba(255,255,255,0.2)' }}>{squad.county_standard ?? '—'}</div>
                             <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8 }}>COUNTY TARGET</div>
                          </div>
                          <div>

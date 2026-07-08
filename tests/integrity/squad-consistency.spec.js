@@ -15,7 +15,6 @@ const registry = P('squads.js');
 const detail = P('squad/[id].js');
 
 test('squad HEALTH is computed by the shared helper on both pages, not an inline formula', () => {
-  test.fail(); // known bug F11 — remove when the shared computation lands
   // detail already uses calculateSquadHealth; registry must too (not inline weights).
   const registryUsesShared = /calculateSquadHealth/.test(registry);
   const registryHasInlineWeights = /\*\s*0\.[0-9]+/.test(registry); // e.g. training * 0.2
@@ -25,7 +24,6 @@ test('squad HEALTH is computed by the shared helper on both pages, not an inline
 });
 
 test('both pages average the same swimmer set (active/non-exempt) for squad stats', () => {
-  test.fail(); // known bug F11
   // detail filters to activeNonExempt before averaging; registry averages all.
   const detailFiltersExempt = /activeNonExempt|is_exempt|isExempt/.test(detail);
   const registryFiltersExempt = /activeNonExempt|is_exempt|isExempt/.test(registry);

@@ -5,7 +5,7 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { fetchAllRows } from '../lib/paginate';
-import { calculateReliability, calculateSquadHealth, normalizeName, normalizeEvent, getPreferredName, getCategoryBenchmark } from '../lib/analytics-utils';
+import { computeSquadStats, calculateSquadHealth, normalizeName, normalizeEvent, getPreferredName, getCategoryBenchmark } from '../lib/analytics-utils';
 import Head from 'next/head';
 import PremiumOrb from '../components/PremiumOrb';
 import SquadIntelligenceCard from '../components/SquadIntelligenceCard';
@@ -187,11 +187,6 @@ export default function Dashboard({ session }) {
     const now = new Date();
     const periodTs = now.getTime() - periodDays * 86400000;
     const periodStart = new Date(periodTs);
-    const halfPeriod  = Math.floor(periodDays / 2);
-    const velRecentTs = now.getTime() - halfPeriod * 86400000;
-    const velPriorTs  = now.getTime() - periodDays * 86400000;
-    const velRecentStart = new Date(velRecentTs);
-    const velPriorStart  = new Date(velPriorTs);
 
     const periodResults = results.filter(r => r._ts >= periodTs);
     const periodPbs = pbs.filter(p => new Date(p.date).getTime() >= periodTs);
@@ -210,22 +205,11 @@ export default function Dashboard({ session }) {
     const totalPBs = dedupedGlobalPbs.length;
 
     // OPTIMIZATION: Pre-index data for fast lookups
-    const attendanceBySwimmer = {};
-    attendance.forEach(a => {
-      if (!attendanceBySwimmer[a.swimmer_id]) attendanceBySwimmer[a.swimmer_id] = [];
-      attendanceBySwimmer[a.swimmer_id].push(a);
-    });
-
     const resultsBySwimmer = {};
     periodResults.forEach(r => {
       if (!resultsBySwimmer[r.swimmer_id]) resultsBySwimmer[r.swimmer_id] = [];
       resultsBySwimmer[r.swimmer_id].push(r);
     });
-
-    T('pre-grouping start');
-    const membershipsBySwimmer = {};
-    (memberships || []).forEach(m => { (membershipsBySwimmer[m.swimmer_id] ||= []).push(m); });
-    T('pre-grouping done');
 
     const swimmersWithPBs = new Set(periodPbs.map(p => p.swimmer_id)).size;
     const activeSwimmersCount = swimmers.filter(s => s.is_active !== false).length;
@@ -289,53 +273,29 @@ export default function Dashboard({ session }) {
       const sqSwimmers = swimmers.filter(s => s.squad_id === sq.id && s.is_active !== false);
       if (!sqSwimmers.length) return null;
 
-      let totalConsistency = 0, totalVolume = 0, totalMeets = 0;
-      sqSwimmers.forEach(sw => {
-        const swAtt = attendanceBySwimmer[sw.id] || [];
-        const swRes = resultsBySwimmer[sw.id] || [];
-        const swWithSquad = { ...sw, squads: sq };
-        const rel = calculateReliability(swWithSquad, swAtt, sessions, swRes, periodDays, exemptions, membershipsBySwimmer[sw.id] || []);
-
-        totalConsistency += rel.percentage;
-        totalVolume += rel.volumePct;
-        totalMeets += rel.complianceRate;
+      // Canonical, shared computation — identical to /squads and /squad/[id].
+      const s = computeSquadStats(sq, sqSwimmers, {
+        attendance,
+        sessions,
+        results,
+        memberships,
+        exemptions,
+        period: periodDays
       });
 
-      const num = sqSwimmers.length;
-      const avg = arr => arr.length ? arr.reduce((a, b) => a + Number(b), 0) / arr.length : 0;
-      const swimmerVelocities = sqSwimmers.filter(s => !s.is_exempt).map(sw => {
-        const swRes = resultsBySwimmer[sw.id] || [];
-        const recentPts = swRes.filter(r => r._ts >= velRecentTs).map(r => r.wa_pts || 0);
-        const priorPts  = swRes.filter(r => r._ts >= velPriorTs && r._ts < velRecentTs).map(r => r.wa_pts || 0);
-        if (!recentPts.length && !priorPts.length) return null;
-        return avg(recentPts) - avg(priorPts);
-      }).filter(v => v !== null);
-
-      const velocity = swimmerVelocities.length ? Math.round(swimmerVelocities.reduce((a,b) => a + b, 0) / swimmerVelocities.length) : 0;
-
-      const squadStats = {
-        avgVelocity: velocity,
-        avgConsistency: Math.round(totalConsistency / num),
-        avgVolume: Math.round(totalVolume / num),
-        complianceRate: Math.round(totalMeets / num),
-        athletes: num
-      };
-
-      const health = calculateSquadHealth(squadStats, sq);
-
-      return { 
-        id: sq.id, 
-        name: sq.name, 
-        count: num, 
-        overall: health.total,
-        meets: squadStats.complianceRate, 
-        training: squadStats.avgConsistency, 
-        volume: squadStats.avgVolume,
-        velocity,
-        avgPts: Math.round(avg(sqSwimmers.map(s => {
-          const swRes = resultsBySwimmer[s.id] || [];
-          return swRes.length ? Math.max(...swRes.map(r => r.wa_pts || 0)) : 0;
-        })))
+      return {
+        id: sq.id,
+        name: sq.name,
+        count: sqSwimmers.filter(sw => !sw.is_exempt).length,
+        overall: calculateSquadHealth(
+          { avgTraining: s.training, avgVolume: s.volume, avgVelocity: s.avgVelocity, complianceRate: s.compliance },
+          sq
+        ).total,
+        meets: s.meets,
+        training: s.training,
+        volume: s.volume,
+        velocity: s.avgVelocity,
+        avgPts: s.avgPts
       };
     }).filter(Boolean);
     T('squadKPIs done');
@@ -1115,9 +1075,9 @@ export default function Dashboard({ session }) {
           {/* Column 2: Pathway Progression */}
           <div style={{ padding: '1.8rem', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', borderLeft: '3px solid var(--accent-cyan)' }}>
             <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-cyan)', letterSpacing: '0.1em', marginBottom: '0.8rem' }}>PATHWAY PIPELINE ({targetYear})</div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.8rem', lineHeight: 1.2 }}>{(qualifiers?.county || 0) + (qualifiers?.regional || 0)} Active Qualifiers</h3>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.8rem', lineHeight: 1.2 }}>{(qualifiers?.county ?? 0) + (qualifiers?.regional ?? 0)} Active Qualifiers</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-              The {targetYear} pathway pipeline is expanding. We currently project <strong style={{ color: 'var(--accent-teal)' }}>{qualifiers?.regional || 0}</strong> Regional (SE) and <strong style={{ color: 'var(--accent-cyan)' }}>{qualifiers?.county || 0}</strong> County (Kent) qualifiers. Immediate focus must shift to marginal-gain technical interventions to convert borderline County times into Regional cuts.
+              The {targetYear} pathway pipeline is expanding. We currently project <strong style={{ color: 'var(--accent-teal)' }}>{qualifiers?.regional ?? 0}</strong> Regional (SE) and <strong style={{ color: 'var(--accent-cyan)' }}>{qualifiers?.county ?? 0}</strong> County (Kent) qualifiers. Immediate focus must shift to marginal-gain technical interventions to convert borderline County times into Regional cuts.
             </p>
           </div>
 
@@ -1126,7 +1086,11 @@ export default function Dashboard({ session }) {
             <div style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--accent-emerald)', letterSpacing: '0.1em', marginBottom: '0.8rem' }}>PERFORMANCE VELOCITY</div>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 800, marginBottom: '0.8rem', lineHeight: 1.2 }}>{(stats.avgVelocity || 0) > 0 ? "+" : ""}{stats.avgVelocity || 0} WA Point Growth</h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-              The elite conversion rate remains highly resilient. Athletes attending meets are demonstrating a strong <strong style={{ color: 'var(--accent-emerald)' }}>+{(stats.avgVelocity || 0)} pt</strong> acceleration in FINA/WA velocity. Meet compliance currently tracks at <strong>{stats.complianceRate || 0}%</strong>, securing vital competitive exposure.
+              {(stats.avgVelocity || 0) > 0 ? (
+                <>The elite conversion rate is holding up. Athletes attending meets are converting into a <strong style={{ color: 'var(--accent-emerald)' }}>+{stats.avgVelocity} pt</strong> acceleration in FINA/WA velocity. Meet compliance currently tracks at <strong>{stats.complianceRate || 0}%</strong>, securing vital competitive exposure.</>
+              ) : (
+                <>Performance velocity is flat this period at <strong style={{ color: 'var(--text-secondary)' }}>{stats.avgVelocity || 0} pt</strong>; recent racing is not yet outpacing the seasonal baseline. Meet compliance currently tracks at <strong>{stats.complianceRate || 0}%</strong>.</>
+              )}
             </p>
           </div>
         </div>
@@ -1188,7 +1152,12 @@ export default function Dashboard({ session }) {
                   <span>🎯</span> Pathway Forecast & Acceleration
                 </h4>
                 <p style={{ fontSize: "0.9rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: "0 0 1rem 0" }}>
-                  Swimmers demonstrate a highly resilient performance velocity of <strong style={{ color: "var(--accent-emerald)" }}>+{stats.avgVelocity || 0} WA pts</strong>. The target roster projects <strong style={{ color: "var(--accent-cyan)" }}>{qualifiers?.county || 0} County</strong> and <strong style={{ color: "var(--accent-teal)" }}>{qualifiers?.regional || 0} Regional</strong> qualifiers.
+                  {(stats.avgVelocity || 0) > 0 ? (
+                    <>Swimmers demonstrate a resilient performance velocity of <strong style={{ color: "var(--accent-emerald)" }}>+{stats.avgVelocity} WA pts</strong>. </>
+                  ) : (
+                    <>Squad performance velocity is flat this period at <strong style={{ color: "var(--text-secondary)" }}>{stats.avgVelocity || 0} WA pts</strong>, with racing not yet exceeding the seasonal baseline. </>
+                  )}
+                  The target roster projects <strong style={{ color: "var(--accent-cyan)" }}>{qualifiers?.county ?? 0} County</strong> and <strong style={{ color: "var(--accent-teal)" }}>{qualifiers?.regional ?? 0} Regional</strong> qualifiers.
                 </p>
                 <div style={{ background: "rgba(6, 182, 212, 0.03)", border: "1px solid rgba(6, 182, 212, 0.15)", borderRadius: "12px", padding: "1rem" }}>
                   <div style={{ fontSize: "0.75rem", fontWeight: 900, color: "var(--accent-cyan)", textTransform: "uppercase", marginBottom: "0.6rem", letterSpacing: "0.05em" }}>Tactical Action Items</div>
@@ -1227,7 +1196,11 @@ export default function Dashboard({ session }) {
               </div>
             </div>
             <div style={{ height: '320px', width: '100%' }}>
-              {isClient && (
+              {isClient && ((clubTrend || []).length === 0 ? (
+                <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 700, opacity: 0.7 }}>
+                  No performance data for this period
+                </div>
+              ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={(clubTrend || []).map(d => ({ ...d, date: d.label, pace: d.avg, efficiency: d.trend }))} margin={{ top: 20, right: 20, bottom: 20, left: -20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
@@ -1245,7 +1218,7 @@ export default function Dashboard({ session }) {
                     </ReferenceLine>
                   </LineChart>
                 </ResponsiveContainer>
-              )}
+              ))}
             </div>
           </div>
 
@@ -1280,7 +1253,7 @@ export default function Dashboard({ session }) {
             {/* National Orb */}
             <div className="text-center">
               <div style={{ width: '70px', height: '70px', borderRadius: '50%', border: '3px solid var(--accent-amber)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.5rem', boxShadow: 'inset 0 0 20px rgba(251, 191, 36, 0.15), 0 0 15px rgba(251, 191, 36, 0.2)' }}>
-                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-amber)', textShadow: '0 0 10px rgba(251, 191, 36, 0.5)' }}>{qualifiers?.national || 6}</span>
+                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-amber)', textShadow: '0 0 10px rgba(251, 191, 36, 0.5)' }}>{qualifiers?.national ?? 0}</span>
               </div>
               <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>National Top 40</div>
             </div>
@@ -1288,7 +1261,7 @@ export default function Dashboard({ session }) {
             {/* Regional Orb */}
             <div className="text-center">
               <div style={{ width: '70px', height: '70px', borderRadius: '50%', border: '3px solid var(--accent-cyan)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.5rem', boxShadow: 'inset 0 0 20px rgba(6, 182, 212, 0.15), 0 0 15px rgba(6, 182, 212, 0.2)' }}>
-                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textShadow: '0 0 10px rgba(6, 182, 212, 0.5)' }}>23</span>
+                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-cyan)', textShadow: '0 0 10px rgba(6, 182, 212, 0.5)' }}>{stats.achievementSummary?.regional_count ?? 0}</span>
               </div>
               <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Regional Top 30</div>
             </div>
@@ -1296,7 +1269,7 @@ export default function Dashboard({ session }) {
             {/* County Orb */}
             <div className="text-center">
               <div style={{ width: '70px', height: '70px', borderRadius: '50%', border: '3px solid rgba(255,255,255,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.5rem', boxShadow: 'inset 0 0 20px rgba(255, 255, 255, 0.1), 0 0 15px rgba(255, 255, 255, 0.1)' }}>
-                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff', textShadow: '0 0 10px rgba(255, 255, 255, 0.3)' }}>16</span>
+                <span style={{ fontSize: '1.8rem', fontWeight: 900, color: '#fff', textShadow: '0 0 10px rgba(255, 255, 255, 0.3)' }}>{stats.achievementSummary?.county_count ?? 0}</span>
               </div>
               <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>County Top 10</div>
             </div>
@@ -1305,11 +1278,11 @@ export default function Dashboard({ session }) {
           <div className="flex gap-4">
              {/* Predictor boxes */}
              <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/predictor?level=county&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff' }}>{qualifiers?.county || 27}</div>
+                <div style={{ fontSize: '2.5rem', fontWeight: 900, color: '#fff' }}>{qualifiers?.county ?? 0}</div>
                 <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: '4px' }}>County Predictor</div>
              </div>
              <div className="text-center cursor-pointer hover-glow" onClick={() => router.push(`/predictor?level=regional&year=${targetYear}`)} style={{ flex: 1, padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{qualifiers?.regional || 9}</div>
+                <div style={{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{qualifiers?.regional ?? 0}</div>
                 <div style={{ fontSize: '0.6rem', fontWeight: 900, opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent-cyan)', marginTop: '4px' }}>Regional Predictor</div>
              </div>
           </div>
@@ -1470,7 +1443,7 @@ export default function Dashboard({ session }) {
                         <div className="row-rank">0{idx + 1}</div>
                         <div className="row-name">{sw.full_name}</div>
                         <div className="row-dots"></div>
-                        <div className="row-pts">+{sw.improvement} <span style={{ fontSize: '0.6rem', opacity: 0.8 }}>PTS</span></div>
+                        <div className="row-pts">{sw.improvement > 0 ? '+' : ''}{sw.improvement} <span style={{ fontSize: '0.6rem', opacity: 0.8 }}>PTS</span></div>
                      </div>
                    ))
                  }
