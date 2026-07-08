@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { fetchAllRows } from '../lib/paginate';
-import { calculateReliability } from '../lib/analytics-utils';
+import { computeSquadStats, calculateSquadHealth } from '../lib/analytics-utils';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 
@@ -238,19 +238,15 @@ export default function SquadsRegistry({ session }) {
       // 2. Map KPIs
       const kpis = squadsArr.map(s => {
         const squadSwimmers = swimmersArr.filter(sw => sw.squad_id === s.id);
-        
-        let totalTraining = 0, totalVolume = 0, totalMeets = 0, totalPts = 0;
-        
-        squadSwimmers.forEach(sw => {
-          const swMem = membershipsArr.filter(m => m.swimmer_id === sw.id);
-          const swRes = resultsArr.filter(r => r.swimmer_id === sw.id);
-          const swAtt = attendanceArr.filter(a => a.swimmer_id === sw.id);
-          
-          const rel = calculateReliability(sw, swAtt, sessionsArr, swRes, period, exemptionsArr, swMem);
-          totalTraining += rel.percentage;
-          totalVolume += rel.volumePct;
-          totalMeets += rel.complianceRate;
-          totalPts += (swRes.length ? Math.max(...swRes.map(r => r.wa_pts || 0)) : 0);
+
+        // Canonical, shared computation (identical to the squad detail page).
+        const stats = computeSquadStats(s, squadSwimmers, {
+          attendance: attendanceArr,
+          sessions: sessionsArr,
+          results: resultsArr,
+          memberships: membershipsArr,
+          exemptions: exemptionsArr,
+          period
         });
 
         const squadRanks = currentRankings.filter(r => squadSwimmers.some(sw => sw.id === r.swimmer_id));
@@ -260,23 +256,25 @@ export default function SquadsRegistry({ session }) {
           counties: new Set(squadRanks.filter(r => r.district === 'Kent' && r.rank <= 10).map(r => r.swimmer_id)).size
         };
 
-        const count = squadSwimmers.length || 1;
-        const stats = {
-          training: Math.round(totalTraining / count),
-          volume: Math.round(totalVolume / count),
-          meets: Math.round(totalMeets / count),
-          avgPts: Math.round(totalPts / count)
+        // Health via the shared calculateSquadHealth so the registry and detail agree.
+        const overall = calculateSquadHealth(
+          { avgTraining: stats.training, avgVolume: stats.volume, avgVelocity: stats.avgVelocity, complianceRate: stats.compliance },
+          s
+        ).total;
+
+        // Count reflects the same set the stats average over (active, non-exempt).
+        const count = squadSwimmers.filter(sw => sw.is_active !== false && !sw.is_exempt).length;
+
+        return {
+          ...s,
+          training: stats.training,
+          volume: stats.volume,
+          meets: stats.meets,
+          avgPts: stats.avgPts,
+          achievements,
+          overall,
+          count
         };
-
-        // Standard CoachesEye health weight (20% reliability, 10% volume, 40% competition, 30% progress/points)
-        const overall = Math.round(
-          (stats.training * 0.2) + 
-          (stats.volume * 0.1) + 
-          (stats.meets * 0.4) + 
-          (Math.min(100, stats.avgPts / 6) * 0.3)
-        );
-
-        return { ...s, ...stats, achievements, overall, count: squadSwimmers.length };
       });
 
       setSquads(kpis);
