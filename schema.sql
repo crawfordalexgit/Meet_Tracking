@@ -165,6 +165,25 @@ ON public.swimmer_pbs FOR SELECT
 TO authenticated 
 USING (true);
 
+-- 7b. Relay Lineups (Kent Relays team picker — saved team selections)
+CREATE TABLE IF NOT EXISTS public.relay_lineups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    meet_code TEXT NOT NULL,            -- e.g. 'KT26'
+    event_key TEXT NOT NULL,            -- '13U-F-MEDLEY'
+    team_letter TEXT NOT NULL,          -- 'A' | 'B' | 'C' ...
+    legs JSONB NOT NULL,                -- [{ stroke, swimmer_id, time_seconds }] ordered by leg
+    entry_time_seconds FLOAT,
+    is_locked BOOLEAN DEFAULT false,    -- locked teams are never touched by "auto-optimise all"
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    UNIQUE(meet_code, event_key, team_letter)
+);
+ALTER TABLE public.relay_lineups ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Relay lineups readable by authenticated."
+ON public.relay_lineups FOR SELECT
+TO authenticated
+USING (true);
+-- Writes go through the service-role API route (pages/api/relay-lineups.js).
+
 -- --- TRAINING ATTENDANCE SYSTEM ---
 
 -- Add advanced training targets to squads
