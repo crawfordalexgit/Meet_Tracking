@@ -64,10 +64,6 @@ test('dynamic pages: swimmer, squad, meet detail load clean', async ({ page }) =
 });
 
 test('unauthenticated visit to /dashboard redirects to login', async ({ browser }) => {
-  // KNOWN GAP: /dashboard has no client-side auth redirect — anonymous visitors
-  // see the empty dashboard shell (data blocked by RLS, but UI should bounce
-  // to /login). Finding F8 in Reports/TEST-FINDINGS-2026-07-08.md.
-  test.fail();
   const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } });
   const page = await ctx.newPage();
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' });
