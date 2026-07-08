@@ -2,21 +2,18 @@
 import { test, expect } from '@playwright/test';
 import { getServiceClient } from '../helpers/supabase';
 
-test('dashboard squad card navigates to squad page', async ({ page }) => {
+test('squad card navigates to squad page', async ({ page }) => {
+  // NB: the dashboard's squad cards live inside a hidden `squadsVisible` overlay
+  // (toggled by a button). The /squads page renders the same SquadCard grid
+  // unconditionally, so it's the reliable place to verify card → /squad/[id].
   test.setTimeout(300_000);
   const supabase = getServiceClient();
   const { data: squads } = await supabase.from('squads').select('id, name').eq('is_squad', true);
   test.skip(!squads?.length, 'no squads');
 
-  await page.goto('/dashboard', { waitUntil: 'domcontentloaded' });
+  await page.goto('/squads', { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle', { timeout: 120_000 }).catch(() => {});
-  // the dashboard keeps AI-compiling after load; scroll to the squad grid and
-  // give it time to render before asserting.
-  await page.mouse.wheel(0, 3000);
-  await page.waitForTimeout(3000);
 
-  // Any is_squad squad card is fine — the test verifies squad cards navigate,
-  // not one specific squad. Click the first one that renders.
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let clicked = false;
   for (const sq of squads.filter(s => s.name)) {
@@ -27,8 +24,8 @@ test('dashboard squad card navigates to squad page', async ({ page }) => {
       break;
     }
   }
-  expect(clicked, `no squad card rendered on the dashboard (tried ${squads.length} squads)`).toBe(true);
-  await page.waitForURL(/\/squad\//, { timeout: 30_000 }).catch(() => {});
+  expect(clicked, `no squad card rendered on /squads (tried ${squads.length} squads)`).toBe(true);
+  await page.waitForURL(/\/squad\//, { timeout: 30_000 });
 });
 
 test('nav sidebar reaches every section', async ({ page }) => {
