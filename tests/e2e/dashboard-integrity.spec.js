@@ -64,16 +64,23 @@ test('Squad Performance Trends chart renders data (or an explicit empty state)',
 });
 
 test('achievement cohort numbers are plausible against the roster size', async ({ page }) => {
-  // Sanity guard against hardcoded cohort numbers: County/Regional/National
-  // ranked counts cannot exceed the number of swimmers shown club-wide.
+  // These count DISTINCT swimmers who rank in a county/regional/national top-N
+  // for any of their events — so the count can exceed N (many events, many
+  // swimmers). The real guard is: it must not exceed the club's swimmer count,
+  // and must be a non-negative integer (catches hardcoded/garbage values).
+  const { getServiceClient } = await import('../helpers/supabase.js');
+  const { count: rosterSize } = await getServiceClient()
+    .from('swimmers').select('id', { count: 'exact', head: true });
+
   const body = await page.locator('body').innerText();
   const national = body.match(/(\d+)\s*National Top 40/i);
   const regional = body.match(/(\d+)\s*Regional Top 30/i);
   const county = body.match(/(\d+)\s*County Top 10/i);
   test.skip(!national || !regional || !county, 'cohort orbs not found');
 
-  // Top-N cohorts must respect their own ceilings (40/30/10).
-  expect(Number(national[1]), 'National Top 40 exceeds 40').toBeLessThanOrEqual(40);
-  expect(Number(regional[1]), 'Regional Top 30 exceeds 30').toBeLessThanOrEqual(30);
-  expect(Number(county[1]), 'County Top 10 exceeds 10').toBeLessThanOrEqual(10);
+  for (const [label, m] of [['National', national], ['Regional', regional], ['County', county]]) {
+    const n = Number(m[1]);
+    expect(Number.isInteger(n) && n >= 0, `${label} cohort is not a valid count: ${m[1]}`).toBe(true);
+    expect(n, `${label} cohort (${n}) exceeds the whole roster (${rosterSize})`).toBeLessThanOrEqual(rosterSize);
+  }
 });

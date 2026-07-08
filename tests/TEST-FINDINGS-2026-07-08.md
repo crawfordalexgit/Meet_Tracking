@@ -9,8 +9,9 @@ Automated suite built and run against the live app + DB. This report lists every
 | Headline | Swimmers show no meets (results empty) | **Fully root-caused (see F9)** — scrape now persists, reports errors, AND dedupes heats/finals; needs a full local scrape to repopulate |
 | F9 | Scrape blocked by UNIQUE(swimmer_id, meet_id, event) | ✅ **Fixed** — scraper dedupes to fastest per event ([lib/scrape-utils.js]) |
 | F10 | GUI "Update Swim England" abandons the meet-scrape SSE stream | ⏳ **Open** — fire-and-forget; shows "Complete!" before scrape finishes (UX, not data-loss locally) |
-| F11 | Squad stats differ between /squads registry and /squad/[id] detail | ⏳ **Open** — each page computes training/volume/health/compliance its own way (different swimmer set, compliance definition, and health formula). Guarded by `tests/integrity/squad-consistency.spec.js` |
-| squad-standard | `squad.county_standard \|\| 350` fabricates a standard when unset | ⏳ **Open** (D1-class) — pages/squad/[id].js:585 |
+| F11 | Squad stats differ between /squads registry and /squad/[id] detail | ✅ **Fixed & verified** — one shared `computeSquadStats()` now drives /squads, /squad/[id] AND the dashboard (squad-consistency 2/2) |
+| F12 | 25 swimmers have SE PBs but no results (scraper name-match residual, was 88) | ⏳ **Open** — scraper matches by exact member_id/name; doesn't use `generateNameAliases` |
+| squad-standard | `squad.county_standard \|\| 350` fabricates a standard when unset | ✅ **Fixed** — now `?? '—'` |
 | S1 | download-report no auth | ✅ **Fixed & verified** (test:api 78/78) |
 | S2 | sync-attendance localhost bypass | ✅ **Fixed & verified** |
 | F1 | reconcile-pbs 401 self-call | ✅ **Fixed** (now a direct `lib/reconcile-pbs.js` call) |
@@ -21,7 +22,7 @@ Automated suite built and run against the live app + DB. This report lists every
 | F6 | sync-scm cascade-delete risk | ⏳ **Open** — not yet addressed |
 | F7 | schema.sql drift | ⏳ **Open** |
 | F8 | no login redirect | ✅ **Fixed & verified** (pages-smoke 14/14) |
-| **D1–D5** | **Dashboard fake/placeholder numbers** | ⏳ **Open — newly found (see below)** |
+| **D1–D5** | **Dashboard fake/placeholder numbers** | ✅ **Fixed & verified** (dashboard-integrity 4/4, v1.0.185) |
 
 All fixes merged to master (v1.0.181), then dashboard-integrity coverage added (v1.0.182).
 
