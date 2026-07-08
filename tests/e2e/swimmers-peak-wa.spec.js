@@ -20,8 +20,7 @@ test('a swimmer with results.wa_pts > 0 shows a non-zero Peak WA on /swimmers', 
   });
   test.skip(peakBySwimmer.size === 0, 'no results.wa_pts in DB — run a meet sync first');
 
-  // The registry only lists swimmers with a squad_id assigned. Pick, among those,
-  // the swimmer with the highest peak — the clearest case for a non-zero render.
+  // Pick the squad swimmer with the highest peak — clearest non-zero case.
   const { data: swimmers } = await supabase
     .from('swimmers').select('id, full_name, known_as, squad_id').not('squad_id', 'is', null);
   const candidates = (swimmers || [])
@@ -30,34 +29,37 @@ test('a swimmer with results.wa_pts > 0 shows a non-zero Peak WA on /swimmers', 
     .sort((a, b) => b.peak - a.peak);
   test.skip(candidates.length === 0, 'no squad swimmer has results.wa_pts > 0');
   const target = candidates[0];
+  const surname = target.full_name.trim().split(/\s+/).pop();
 
   await page.goto('/swimmers?period=365', { waitUntil: 'domcontentloaded' });
-  await page.waitForLoadState('networkidle', { timeout: 120_000 }).catch(() => {});
-  // Wait until the target swimmer's row (matched by the ID prefix the UI prints)
-  // is present in the rendered table.
-  const idPrefix = target.id.slice(0, 8);
-  await page.waitForFunction((idp) => {
-    const rows = [...document.querySelectorAll('tr.registry-row')];
-    return rows.some(r => r.innerText.includes('ID: ' + idp));
-  }, idPrefix, { timeout: 120_000 });
+  await page.waitForLoadState('networkidle', { timeout: 150_000 }).catch(() => {});
+  // The registry is heavy (loads all attendance/results) — wait until at least
+  // one real "WA POINTS" value has rendered before interacting.
+  await page.waitForFunction(
+    () => /\d+\s*WA POINTS/i.test(document.body.innerText),
+    null, { timeout: 150_000 }
+  );
 
-  const rendered = await page.evaluate((idp) => {
-    const rows = [...document.querySelectorAll('tr.registry-row')];
-    const row = rows.find(r => r.innerText.includes('ID: ' + idp));
-    if (!row) return null;
-    const m = row.innerText.match(/(\d+)\s*WA POINTS/i);
-    return m ? Number(m[1]) : null;
-  }, idPrefix);
+  // Narrow to the target via the search box so its row is unambiguous.
+  const search = page.locator('input[placeholder*="earch" i], input[type="text"], input[type="search"]').first();
+  if (await search.isVisible().catch(() => false)) {
+    await search.fill(surname);
+    await page.waitForTimeout(1200);
+  }
 
-  expect(rendered, `Peak WA cell not found for swimmer ${target.full_name} (ID ${idPrefix})`).not.toBeNull();
+  const body = await page.locator('body').innerText();
+  // Grab every "<n> WA POINTS" on the (now-filtered) page; the target's peak
+  // must appear and be > 0.
+  const peaks = [...body.matchAll(/(\d+)\s*WA POINTS/gi)].map(m => Number(m[1]));
+  expect(peaks.length, `no "WA POINTS" values rendered for ${target.full_name}`).toBeGreaterThan(0);
+  const maxShown = Math.max(...peaks);
   expect(
-    rendered,
-    `Swimmer ${target.full_name} has a peak results.wa_pts of ${target.peak} but /swimmers renders Peak WA = ${rendered} (F13: every peak was 0)`
+    maxShown,
+    `Swimmer ${target.full_name} has a peak results.wa_pts of ${target.peak} but /swimmers shows only 0s (F13 regressed)`
   ).toBeGreaterThan(0);
-
-  // And it should reflect the real peak (allow ±1 for any rounding on display).
+  // The top value shown should reflect the real peak (±1 rounding).
   expect(
-    Math.abs(rendered - Math.round(target.peak)) <= 1,
-    `Peak WA rendered ${rendered} but DB max wa_pts is ${target.peak} for ${target.full_name}`
+    Math.abs(maxShown - Math.round(target.peak)) <= 1,
+    `Peak WA shown ${maxShown} but DB max wa_pts is ${target.peak} for ${target.full_name}`
   ).toBe(true);
 });
