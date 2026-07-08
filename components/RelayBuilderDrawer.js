@@ -12,11 +12,12 @@ import { formatTime } from '../lib/relays/kent-relays-config';
 
 const strokeColor = { Back: '#38bdf8', Breast: '#f472b6', Fly: '#fbbf24', Free: '#34d399' };
 
-function teamValidity(team, composition) {
+function teamValidity(team, composition, unavailableIds) {
   const filled = team.legs.filter((l) => l.swimmer);
   if (filled.length < 4) return { ok: false, msg: `${filled.length}/4 legs filled` };
   const ids = new Set(filled.map((l) => l.swimmer.id));
   if (ids.size < 4) return { ok: false, msg: 'duplicate swimmer' };
+  if (filled.some((l) => unavailableIds.has(l.swimmer.id))) return { ok: false, msg: 'swimmer unavailable' };
   if (composition === '2M2F') {
     const f = filled.filter((l) => l.swimmer.sex === 'F').length;
     if (f !== 2) return { ok: false, msg: 'needs exactly 2 female + 2 male' };
@@ -26,8 +27,8 @@ function teamValidity(team, composition) {
 }
 
 export default function RelayBuilderDrawer({
-  event, teams, eligible, usage, cap,
-  onSwap, onToggleLock, onReoptimise, onAddTeam, onRemoveTeam, onClose,
+  event, teams, eligible, usage, cap, unavailableIds = new Set(),
+  onSwap, onToggleLock, onReoptimise, onAddTeam, onRemoveTeam, onMarkUnavailable, onClose,
 }) {
   const { band, cat, relay } = event;
 
@@ -41,13 +42,16 @@ export default function RelayBuilderDrawer({
   function optionsForLeg(team, leg) {
     const stroke = leg.stroke;
     const currentId = leg.swimmer?.id;
-    return eligible
+    const list = eligible
       .filter((p) => p.times[stroke] != null)
       .filter((p) => {
         const owner = inThisEvent.get(p.id);
         return p.id === currentId || owner == null || owner === undefined;
       })
       .sort((a, b) => a.times[stroke] - b.times[stroke]);
+    // Keep the currently-assigned swimmer visible even if now unavailable/ineligible.
+    if (leg.swimmer && !list.some((p) => p.id === leg.swimmer.id)) list.unshift(leg.swimmer);
+    return list;
   }
 
   const benchByStroke = (stroke) =>
@@ -80,7 +84,7 @@ export default function RelayBuilderDrawer({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
         {teams.map((team) => {
-          const valid = teamValidity(team, cat.composition);
+          const valid = teamValidity(team, cat.composition, unavailableIds);
           const total = team.legs.reduce((a, l) => a + (l.time || 0), 0);
           return (
             <div key={team.letter} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', padding: '1.25rem', background: team.locked ? 'rgba(6,182,212,0.04)' : 'transparent' }}>
@@ -112,21 +116,32 @@ export default function RelayBuilderDrawer({
               <div style={{ display: 'grid', gap: '8px' }}>
                 {team.legs.map((leg, li) => {
                   const opts = optionsForLeg(team, leg);
+                  const legOut = leg.swimmer && unavailableIds.has(leg.swimmer.id);
                   return (
-                    <div key={li} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 90px', alignItems: 'center', gap: '12px' }}>
+                    <div key={li} style={{ display: 'grid', gridTemplateColumns: '90px 1fr auto 90px', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '0.7rem', fontWeight: 900, color: strokeColor[leg.stroke], textTransform: 'uppercase', letterSpacing: '0.05em' }}>{leg.stroke}</span>
                       <select
                         value={leg.swimmer?.id || ''}
                         onChange={(e) => onSwap(team.letter, li, e.target.value)}
-                        style={{ width: '100%', padding: '8px 10px', background: 'rgba(13,17,23,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', color: '#fff', fontSize: '0.78rem', cursor: 'pointer' }}
+                        style={{ width: '100%', padding: '8px 10px', background: legOut ? 'rgba(244,63,94,0.1)' : 'rgba(13,17,23,0.9)', border: `1px solid ${legOut ? 'rgba(244,63,94,0.4)' : 'rgba(255,255,255,0.1)'}`, borderRadius: '8px', color: '#fff', fontSize: '0.78rem', cursor: 'pointer' }}
                       >
                         <option value="">— pick swimmer —</option>
                         {opts.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} · {p.age}y · {p.sex} · {formatTime(p.times[leg.stroke])}{p.converted?.[leg.stroke] ? ' (LC est)' : ''}
+                            {p.name} · {p.age}y · {p.sex} · {formatTime(p.times[leg.stroke])}{p.converted?.[leg.stroke] ? ' (LC est)' : ''}{unavailableIds.has(p.id) ? ' — UNAVAILABLE' : ''}
                           </option>
                         ))}
                       </select>
+                      {leg.swimmer ? (
+                        <button
+                          onClick={() => onMarkUnavailable?.(leg.swimmer.id)}
+                          title={legOut ? 'Marked unavailable' : 'Mark this swimmer unavailable'}
+                          className="period-btn"
+                          style={{ fontSize: '0.6rem', padding: '4px 7px', color: legOut ? 'var(--accent-rose)' : undefined }}
+                        >
+                          {legOut ? '🚫 out' : '🚫'}
+                        </button>
+                      ) : <span />}
                       <span style={{ fontSize: '0.82rem', fontWeight: 900, textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: leg.time ? 1 : 0.3, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5 }}>
                         {leg.swimmer?.converted?.[leg.stroke] && (
                           <span style={{ fontSize: '0.5rem', fontWeight: 900, padding: '1px 4px', borderRadius: 4, background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }} title="Estimated from a long-course time — no short-course PB on record">LC</span>
