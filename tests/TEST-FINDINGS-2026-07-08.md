@@ -1,6 +1,25 @@
-# Test Suite Findings — 2026-07-08 (v1.0.178)
+# Test Suite Findings — 2026-07-08 (v1.0.182)
 
 Automated suite built and run against the live app + DB. This report lists every confirmed defect, most severe first, each with the test that reproduces it.
+
+## STATUS (updated after fix sessions)
+
+| ID | Finding | Status |
+|---|---|---|
+| Headline | Swimmers show no meets (results empty) | **Code fixed** (scrape now persists + reports errors); needs a live scrape to repopulate — run `npm run test:backup` then `npm run test:destructive` |
+| S1 | download-report no auth | ✅ **Fixed & verified** (test:api 78/78) |
+| S2 | sync-attendance localhost bypass | ✅ **Fixed & verified** |
+| F1 | reconcile-pbs 401 self-call | ✅ **Fixed** (now a direct `lib/reconcile-pbs.js` call) |
+| F2 | scrape insert errors swallowed | ✅ **Fixed** (surfaced in SSE + summary) |
+| F3 | swimmer page level/type query | ✅ **Fixed & verified** |
+| F4 | generateNameAliases surname bug | ✅ **Fixed & verified** (test:unit 34/34) |
+| F5 | duplicate meets | Withdrawn (normal per Alex) |
+| F6 | sync-scm cascade-delete risk | ⏳ **Open** — not yet addressed |
+| F7 | schema.sql drift | ⏳ **Open** |
+| F8 | no login redirect | ✅ **Fixed & verified** (pages-smoke 14/14) |
+| **D1–D5** | **Dashboard fake/placeholder numbers** | ⏳ **Open — newly found (see below)** |
+
+All fixes merged to master (v1.0.181), then dashboard-integrity coverage added (v1.0.182).
 
 ## THE HEADLINE: why swimmers show no meets
 
@@ -39,6 +58,20 @@ Automated suite built and run against the live app + DB. This report lists every
 | F6 | Low | `sync-scm` deletes swimmers absent from SCM; `results.swimmer_id ON DELETE CASCADE` silently destroys their history. Not the current cause of the missing-meets bug, but a standing data-loss risk | pages/api/sync-scm.js cleanup + schema.sql:122 | destructive sync-scm test guards UUID stability |
 | F7 | Low | `schema.sql` drifted from live DB (live `issue_upvotes` has no `id` column; `swimmers.created_at` absent; live `results` HAS `date`/`splits` columns that schema.sql lacks) | schema.sql | discovered via test runs |
 | F8 | Medium | No client-side auth guard on `/dashboard` (and likely other pages): anonymous visitors see the full dashboard shell instead of being redirected to /login. Data is blocked by RLS, but the UI should bounce | pages/dashboard.js | tests/e2e/pages-smoke.spec.js (expected-fail) |
+
+## Dashboard display-integrity bugs (found 2026-07-08, round 2)
+
+Prompted by a screenshot: the Cockpit shows numbers that contradict each other. These are **independent of the results-empty root cause** — the hardcoded/fallback numbers would mislead even with a full database. All reproduced by new tests; all currently FAIL.
+
+| # | Severity | Finding | Where | Reproducing test |
+|---|---|---|---|---|
+| D1 | High | **County Predictor shows `27` while the pipeline projects `0` County qualifiers** (Regional: `9` vs `0`). `{qualifiers?.county || 27}` — a legitimate `0` is falsy so the hardcoded fallback renders as if real | pages/dashboard.js:1308, 1312 | tests/e2e/dashboard-integrity.spec.js (cross-panel) + tests/integrity/dashboard-source.spec.js (`|| N`) |
+| D2 | High | **Regional Top 30 = `23` and County Top 10 = `16` are hardcoded literals** in the JSX — never reflect the `rankings` table | pages/dashboard.js:1291, 1299 | tests/integrity/dashboard-source.spec.js (data-driven check) |
+| D3 | High | **County Top 10 shows `16`** — impossible, exceeds its own ceiling of 10. Proof the number is fabricated | pages/dashboard.js:1299 | tests/e2e/dashboard-integrity.spec.js (cohort ceilings) |
+| D4 | Medium | **Narrative renders "strong +0 pt acceleration … remains highly resilient"** while every metric is 0 — hardcoded rosy template, no zero/negative guard. "+0 PTS" appears 6× across the page | pages/dashboard.js:1129 (+ squad cards) | tests/e2e/dashboard-integrity.spec.js (narrative) + tests/integrity/dashboard-source.spec.js (guard) |
+| D5 | Medium | **Squad Performance Trends chart renders blank** — 0 plotted curves, no empty-state message (recharts still draws axes/legend) | pages/dashboard.js:1232 | tests/e2e/dashboard-integrity.spec.js (chart-has-data) |
+
+**Why the first suite missed these:** the smoke tests checked page *loads* + body text length + DB truth, but never (a) that rendered numbers agree across panels, (b) that charts actually plot a series, or (c) that copy degrades sanely on empty data. Those three coverage classes were added in v1.0.182.
 
 ## Suite results (safe projects)
 
