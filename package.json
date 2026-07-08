@@ -1,6 +1,6 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.183",
+  "version": "1.0.184",
   "description": "",
   "scripts": {
     "dev": "next dev",
@@ -21,6 +21,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@google/generative-ai": "^0.24.1",
     "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.105.4",

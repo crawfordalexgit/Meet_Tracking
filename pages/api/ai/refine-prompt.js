@@ -1,9 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import fs from 'fs';
 import path from 'path';
 import { requireAdminAuth } from '../../../lib/api-auth';
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_KEY);
+import { generateText } from '../../../lib/ai_provider';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -17,8 +15,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
     const metaPromptPath = path.join(process.cwd(), 'lib', 'prompts', 'meta_prompter.md');
     const metaPrompt = fs.readFileSync(metaPromptPath, 'utf8');
 
@@ -36,27 +32,11 @@ export default async function handler(req, res) {
       "${feedback}"
     `;
 
-    let attempts = 0;
-    const maxAttempts = 3;
-    let updatedPrompt = '';
-
-    while (attempts < maxAttempts) {
-      try {
-        const result = await model.generateContent([metaPrompt, userMessage]);
-        updatedPrompt = (await result.response).text();
-        break; // Success
-      } catch (error) {
-        attempts++;
-        console.error(`Refine Prompt Attempt ${attempts} failed:`, error.message);
-        
-        if ((error.message.includes('429') || error.message.includes('503')) && attempts < maxAttempts) {
-          const delay = attempts * 2000;
-          await new Promise(r => setTimeout(r, delay));
-          continue;
-        }
-        throw error;
-      }
-    }
+    const updatedPrompt = await generateText({
+      systemPrompt: metaPrompt,
+      userPrompt: userMessage,
+      logLabel: 'REFINE PROMPT'
+    });
 
     const cleanedPrompt = updatedPrompt.replace(/^```markdown\n/, '').replace(/\n```$/, '').trim();
 
