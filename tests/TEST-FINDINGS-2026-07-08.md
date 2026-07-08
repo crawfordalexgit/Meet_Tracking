@@ -6,7 +6,7 @@ Automated suite built and run against the live app + DB. This report lists every
 
 | ID | Finding | Status |
 |---|---|---|
-| Headline | Swimmers show no meets (results empty) | **Fully root-caused (see F9)** — scrape now persists, reports errors, AND dedupes heats/finals; needs a full local scrape to repopulate |
+| Headline | Swimmers show no meets (results empty) | ✅ **RESOLVED & verified** — full local scrape imported 124 meets / 4,396 results (table 823→5,219, latest 2024-12→2026-07); swimmer pages now show meets (verified on Charles Dunstan, 48 meets). Root cause was F9 (heat/final dedupe) + the scrape reliability fixes |
 | F9 | Scrape blocked by UNIQUE(swimmer_id, meet_id, event) | ✅ **Fixed** — scraper dedupes to fastest per event ([lib/scrape-utils.js]) |
 | F10 | GUI "Update Swim England" abandons the meet-scrape SSE stream | ⏳ **Open** — fire-and-forget; shows "Complete!" before scrape finishes (UX, not data-loss locally) |
 | F11 | Squad stats differ between /squads registry and /squad/[id] detail | ✅ **Fixed & verified** — one shared `computeSquadStats()` now drives /squads, /squad/[id] AND the dashboard (squad-consistency 2/2) |

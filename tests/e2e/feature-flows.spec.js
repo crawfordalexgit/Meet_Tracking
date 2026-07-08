@@ -5,24 +5,29 @@ import { getServiceClient } from '../helpers/supabase';
 test('dashboard squad card navigates to squad page', async ({ page }) => {
   test.setTimeout(300_000);
   const supabase = getServiceClient();
-  const { data: squads } = await supabase.from('squads').select('id, name').eq('is_squad', true).limit(3);
+  const { data: squads } = await supabase.from('squads').select('id, name').eq('is_squad', true);
   test.skip(!squads?.length, 'no squads');
-
-  // Squad cards are driven by results-based KPIs; with no recent results the
-  // intelligence matrix renders no squad cards (same root cause as the
-  // missing-meets bug). Skip until a successful meet sync restores results.
-  const cutoff = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
-  const { count } = await supabase.from('results').select('id', { count: 'exact', head: true }).gte('date', cutoff);
-  test.skip(!count, 'no results in the last year — dashboard squad cards empty (see TEST-FINDINGS report)');
 
   await page.goto('/dashboard', { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle', { timeout: 120_000 }).catch(() => {});
+  // the dashboard keeps AI-compiling after load; scroll to the squad grid and
+  // give it time to render before asserting.
+  await page.mouse.wheel(0, 3000);
+  await page.waitForTimeout(3000);
 
-  const squadNamed = squads.find(s => s.name);
-  // squad names may render in different case (e.g. "BRONZE" -> "Bronze")
-  const card = page.getByText(new RegExp(squadNamed.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')).first();
-  await expect(card, `squad ${squadNamed.name} not on dashboard`).toBeVisible({ timeout: 30_000 });
-  await card.click();
+  // Any is_squad squad card is fine — the test verifies squad cards navigate,
+  // not one specific squad. Click the first one that renders.
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let clicked = false;
+  for (const sq of squads.filter(s => s.name)) {
+    const card = page.getByText(new RegExp(esc(sq.name), 'i')).first();
+    if (await card.isVisible().catch(() => false)) {
+      await card.click();
+      clicked = true;
+      break;
+    }
+  }
+  expect(clicked, `no squad card rendered on the dashboard (tried ${squads.length} squads)`).toBe(true);
   await page.waitForURL(/\/squad\//, { timeout: 30_000 }).catch(() => {});
 });
 
@@ -37,9 +42,12 @@ test('nav sidebar reaches every section', async ({ page }) => {
     ['Roadmap', '/feedback'],
     ['Config', '/settings'],
   ]) {
-    // target the nav <a> specifically — the same word can appear in page content
+    // target the nav <a> specifically — the same word can appear in page content.
+    // Heavy pages keep AI-compiling and can jank the main thread, so allow a
+    // generous commit window between clicks.
     await page.getByRole('link', { name: label, exact: true }).first().click();
-    await page.waitForURL(new RegExp(path.replace('/', '\\/')), { timeout: 30_000, waitUntil: 'commit' });
+    await page.waitForURL(new RegExp(path.replace('/', '\\/')), { timeout: 90_000, waitUntil: 'commit' });
+    await page.waitForTimeout(500);
   }
 });
 
