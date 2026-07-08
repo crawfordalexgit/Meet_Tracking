@@ -1,10 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { requireAuth } from '../../lib/api-auth';
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  if (!await requireAuth(req, res)) return;
 
   const { file } = req.query;
 
