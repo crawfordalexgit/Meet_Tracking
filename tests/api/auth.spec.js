@@ -34,11 +34,10 @@ const ROUTES = [
   ['/api/reports', 'GET'],
   ['/api/scrape-meets', 'POST'],
   ['/api/scrape-rankings', 'POST'],
-  // NOTE: /api/sync-attendance is deliberately excluded from the anonymous
-  // probe. It bypasses auth entirely when Host includes "localhost"
-  // (pages/api/sync-attendance.js:14) — so probing it here STARTS a real SCM
-  // sync. The bypass is a dev convenience but also means any local process can
-  // trigger syncs; PATCH/405 coverage below still applies.
+  // sync-attendance previously bypassed auth on localhost (started a real SCM
+  // sync when probed). Fixed: only the CRON_SECRET path bypasses now, so the
+  // anonymous probe correctly returns 401.
+  ['/api/sync-attendance', 'POST'],
   ['/api/sync-join-dates', 'GET'],
   ['/api/sync-pbs', 'POST'],
   ['/api/sync-scm', 'POST'],
@@ -52,11 +51,6 @@ const ROUTES = [
 test.describe('401 without a token', () => {
   for (const [route, method] of ROUTES) {
     test(`${method} ${route}`, async ({ request }) => {
-      if (route.startsWith('/api/download-report')) {
-        // KNOWN BUG (pages/api/download-report.js): no auth guard at all —
-        // any anonymous caller can download report PDFs (minors' data).
-        test.fail();
-      }
       const res = await request.fetch(route, { method, data: {} });
       expect(res.status(), `${route} must 401 for anonymous callers`).toBe(401);
     });
