@@ -37,7 +37,7 @@ module.exports = async () => {
   // Replicate what supabase-js persists in the browser: sb-<ref>-auth-token in localStorage.
   const url = requireEnv('NEXT_PUBLIC_SUPABASE_URL');
   const projectRef = new URL(url).hostname.split('.')[0];
-  const baseURL = process.env.TEST_BASE_URL || 'http://localhost:3000';
+  const baseURL = process.env.TEST_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 
   const storageState = {
     cookies: [],

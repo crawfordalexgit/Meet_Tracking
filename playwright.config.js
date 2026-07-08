@@ -7,6 +7,12 @@ const path = require('path');
 
 const STORAGE_STATE = path.join(__dirname, 'tests', '.auth', 'state.json');
 
+// Port is configurable so parallel worktrees / fix sessions don't collide on
+// :3000. Override with PORT=3010 (the dev server is started with -p PORT and
+// baseURL/global-setup follow it).
+const PORT = process.env.PORT || 3000;
+const BASE_URL = process.env.TEST_BASE_URL || `http://localhost:${PORT}`;
+
 module.exports = defineConfig({
   testDir: './tests',
   globalSetup: './tests/global-setup.js',
@@ -16,14 +22,16 @@ module.exports = defineConfig({
   workers: 4,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'tests/.report' }]],
   use: {
-    baseURL: process.env.TEST_BASE_URL || 'http://localhost:3000',
+    baseURL: BASE_URL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: true,
+    command: `npm run dev -- -p ${PORT}`,
+    url: BASE_URL,
+    // Reuse only the default port; a custom PORT means "give me a clean isolated
+    // server" so verification never reuses a fix session's stale build.
+    reuseExistingServer: !process.env.PORT,
     timeout: 180_000,
   },
   projects: [
