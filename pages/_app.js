@@ -19,6 +19,10 @@ export default function MyApp({ Component, pageProps }) {
   const isPublicRoute = PUBLIC_PATHS.includes(router.pathname);
 
   useEffect(() => {
+    // Missing NEXT_PUBLIC_SUPABASE_* at build time leaves the client null — bail
+    // out so we render the config-error screen below instead of crashing on .auth.
+    if (!supabase) return;
+
     // 1. Grab the session if they just returned from Google
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -63,6 +67,24 @@ export default function MyApp({ Component, pageProps }) {
     setIsPending(false);
     router.push('/login');
   };
+
+  // Database client never initialised (missing env vars in this deployment).
+  // Show a clear message rather than a blank white-screen React crash.
+  if (!supabase) {
+    return (
+      <ThemeProvider>
+        <Head><title>Configuration error | CoachesEye</title></Head>
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', textAlign: 'center' }}>
+          <div className="glass-card" style={{ maxWidth: '520px', padding: '3rem' }}>
+            <h1 style={{ fontSize: '1.6rem', marginBottom: '1rem', color: 'var(--accent-rose)' }}>Configuration error</h1>
+            <p style={{ color: 'rgba(255,255,255,0.65)', lineHeight: 1.6 }}>
+              This deployment can&apos;t reach its database. The <code>NEXT_PUBLIC_SUPABASE_URL</code> and <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> environment variables are missing. Add them to the hosting environment and redeploy.
+            </p>
+          </div>
+        </div>
+      </ThemeProvider>
+    );
+  }
 
   // Hold back protected pages until the session is known (undefined) and while
   // an anonymous visitor (null) is being redirected to /login.
