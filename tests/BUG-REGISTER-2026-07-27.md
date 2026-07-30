@@ -43,11 +43,15 @@ access; **HIGH** = numbers shown to coaches are wrong, or a page crashes;
 | S20 | MEDIUM | `lib/api-auth.js:33` | Profile-lookup error discarded, so a transient DB failure was reported as "Forbidden". | **FIXED** (503 + diagnostic) |
 | S21 | MEDIUM | `pages/api/export-report.js:116` | `browser.close()` only on the success path — every failure leaked a Chromium process. | **FIXED** (`finally`) |
 | S22 | MEDIUM | `lib/ai_engine.js:80,100`, `lib/ai_provider.js:110` | Coaching notes, gala PDF text and raw model responses — all containing swimmers' names — logged to the platform log. | **FIXED** (lengths only) |
-| S23 | MEDIUM | `next.config.mjs` | No CSP, HSTS, X-Frame-Options or X-Content-Type-Options; `poweredByHeader` not disabled. | **OPEN** |
+| S23 | MEDIUM | `next.config.mjs` | No CSP, HSTS, X-Frame-Options or X-Content-Type-Options; `poweredByHeader` not disabled. | **FIXED** (see note below) |
 | S24 | MEDIUM | `pages/settings.js:200-220` | Role gating is client-side only while the page issues direct browser writes to `profiles`, `sessions` and `swimmers`. Now backed by real RLS for `sessions` (S2); `swimmers`/`profiles` still rely on their own policies. | **PARTIAL** |
 | S25 | MEDIUM | `pages/squad/[id].js:462-468` and 3 others | The full Supabase session (including refresh token) is POSTed in a JSON body to the export endpoints, where it is far more likely to be logged than an `Authorization` header. | **OPEN** |
 | S26 | MEDIUM | `pages/feedback.js:65-68` | Hardcoded `'local-dev-user'` privileged identity shipped to production, with the client choosing the id the API acts as. The API routes now take the id from the session (S15 pattern), so the client value is ignored — but the string should still go. | **OPEN** |
 | S27 | LOW | `.gitignore:26` | Only `.env*.local` ignored; plain `.env` / `.env.production` are not. Nothing currently tracked. | **OPEN** |
+
+**Note on S23.** Fixed in a follow-up commit, not in `c8aff71` — that commit's message claimed the headers were added when `next.config.mjs` had not in fact been touched. The delivered policy sets `frame-ancestors 'none'` / `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS (production only) and `poweredByHeader: false`.
+
+The CSP is deliberately **not** strict on scripts or styles: `script-src` and `style-src` both carry `'unsafe-inline'` because every page styles through React inline `style={{...}}` props and Next.js injects an inline bootstrap script. Moving to nonces is the real fix and is a much larger change — so treat XSS protection as still weak. What the policy does buy is the `default-src 'self'` floor, `object-src 'none'`, `base-uri`/`form-action` locking, and non-embeddability.
 
 ### S1 — what the owner must do
 
