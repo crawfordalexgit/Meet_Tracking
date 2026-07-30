@@ -22,6 +22,7 @@ import {
 export default function ReportsCenter({ session }) {
   // Navigation & Loading States
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [activeTab, setActiveTab] = useState('briefings');
   const [normalizeWA, setNormalizeWA] = useState(false);
 
@@ -30,8 +31,10 @@ export default function ReportsCenter({ session }) {
   // Selection Filters
   const [squadId, setSquadId] = useState('all');
   const [period, setPeriod] = useState('365');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // Defaults set here rather than in a mount effect, so the fetch effect below
+  // can key off the filters without racing the initial date assignment.
+  const [startDate, setStartDate] = useState(() => new Date(Date.now() - 365 * 86400000).toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [isCustomDate, setIsCustomDate] = useState(false);
 
   // Loaded Data
@@ -81,14 +84,13 @@ export default function ReportsCenter({ session }) {
     }
   };
 
-  // Run on page load
+  // Refetch whenever a filter changes. This used to be a mount-only effect, so
+  // choosing a different squad or reporting period changed the controls but
+  // kept showing the original all-squads / 365-day payload.
   useEffect(() => {
-    // Set default dates to 365 days ago
-    const start = new Date(new Date() - 365 * 86400000);
-    setStartDate(start.toISOString().split('T')[0]);
-    setEndDate(new Date().toISOString().split('T')[0]);
     fetchReport();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [squadId, period, isCustomDate, startDate, endDate]);
 
   // Fetch report payload from Next.js API
   const fetchReport = async () => {
@@ -110,18 +112,24 @@ export default function ReportsCenter({ session }) {
       const data = await res.json();
       if (data.success) {
         setReportData(data);
+        setLoadError(null);
         if (data.squads) setSquads(data.squads);
         if (data.savedReports) setSavedPdfs(data.savedReports);
-        
+
         // Fetch saved AI briefings
         if (squadId !== 'all') {
           fetchAiReport(squadId);
         } else {
           setAiReport(null);
         }
+      } else {
+        // A non-success payload used to leave the previous report on screen as
+        // though the new filter had been applied.
+        setLoadError(data.error || 'The report could not be generated.');
       }
     } catch (e) {
       console.error('Failed to load compliance report data:', e);
+      setLoadError(e.message || 'Could not load the compliance report.');
     } finally {
       setLoading(false);
     }
@@ -216,13 +224,17 @@ export default function ReportsCenter({ session }) {
   const CustomScatterTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const info = payload[0].payload;
+      // Numbers coerced before .toFixed(): a swimmer row missing efficiency /
+      // teiDelta made simply HOVERING the scatter chart throw.
+      const tei = Number.isFinite(info.x) ? info.x : 0;
+      const teiDelta = Number.isFinite(info.y) ? info.y : 0;
       return (
         <div className="glass-card p-4 text-xs font-semibold" style={{ background: 'rgba(6, 11, 20, 0.95)', border: '1px solid rgba(255,255,255,0.1)' }}>
           <p className="text-white text-sm font-bold uppercase mb-1">{info.name}</p>
           <p className="text-cyan-400 mb-1">Primary Discipline: <span className="text-white font-bold">{info.primaryGroup}</span></p>
-          <p className="text-emerald-400">TEI (Perf): <span className="font-bold">{info.x.toFixed(2)}</span> pts/hr <span className="text-white/40">({info.peakPoints} pts)</span></p>
-          <p className="text-pink-400">TEI-Δ (Improv): <span className="font-bold">{info.y >= 0 ? `+${info.y.toFixed(3)}` : info.y.toFixed(3)}</span> pts/hr <span className="text-white/40">({info.deltaWA >= 0 ? `+${info.deltaWA}` : info.deltaWA} pts)</span></p>
-          <p className="text-amber-400 mt-1">Banked Hours: <span className="text-white font-bold">{Math.round(info.totalHours)}h</span></p>
+          <p className="text-emerald-400">TEI (Perf): <span className="font-bold">{tei.toFixed(2)}</span> pts/hr <span className="text-white/40">({info.peakPoints} pts)</span></p>
+          <p className="text-pink-400">TEI-Δ (Improv): <span className="font-bold">{teiDelta >= 0 ? `+${teiDelta.toFixed(3)}` : teiDelta.toFixed(3)}</span> pts/hr <span className="text-white/40">({info.deltaWA >= 0 ? `+${info.deltaWA}` : info.deltaWA} pts)</span></p>
+          <p className="text-amber-400 mt-1">Banked Hours: <span className="text-white font-bold">{Math.round(info.totalHours || 0)}h</span></p>
         </div>
       );
     }
@@ -235,10 +247,14 @@ export default function ReportsCenter({ session }) {
     return [...normalizedSwimmersData]
       .filter(s => s.pbCount > 0 || s.wa_pts > 0)
       .map(s => {
-        const totalRaces = s.pbCount + (s.avgPoints > 0 ? Math.round(s.totalHours / 12) : 2);
-        const convRate = totalRaces > 0 ? Math.round((s.pbCount / totalRaces) * 100) : 0;
+        // Real swim count from the API. The previous denominator was
+        // `pbCount + round(totalHours / 12)` — an invented number presented on
+        // a leaderboard as a measured conversion rate.
+        const totalRaces = s.raceCount ?? 0;
+        const convRate = totalRaces > 0 ? Math.round((s.pbCount / totalRaces) * 100) : null;
         return { ...s, totalRaces, convRate };
       })
+      .filter(s => s.convRate !== null)
       .sort((a, b) => b.convRate - a.convRate);
   }, [normalizedSwimmersData]);
 
@@ -507,6 +523,12 @@ export default function ReportsCenter({ session }) {
         <div className="flex flex-col items-center justify-center py-32 gap-6">
           <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-cyan-400"></div>
           <div className="text-xs font-black tracking-widest uppercase text-cyan-400/80">Synthesizing Analytical Datasets...</div>
+        </div>
+      ) : loadError ? (
+        <div className="glass-card text-center p-12" style={{ borderLeft: '4px solid var(--accent-rose)', maxWidth: '560px', margin: '3rem auto' }}>
+          <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--accent-rose)' }}>Couldn&apos;t build this report</h3>
+          <p className="text-sm opacity-70 mb-6">{loadError}</p>
+          <button className="period-btn" onClick={fetchReport}>Retry</button>
         </div>
       ) : reportData ? (
         <div className="space-y-12">
@@ -783,8 +805,8 @@ export default function ReportsCenter({ session }) {
                             <span className="text-[9px] text-white/40 italic">{sw.primaryGroup} Discipline</span>
                           </div>
                           <div className="flex gap-4 items-center">
-                            <span className="text-emerald-400 font-black">TEI: {sw.efficiency.toFixed(2)}</span>
-                            <span className="text-emerald-300 font-bold">TEI-Δ: +{sw.teiDelta.toFixed(3)}</span>
+                            <span className="text-emerald-400 font-black">TEI: {(sw.efficiency || 0).toFixed(2)}</span>
+                            <span className="text-emerald-300 font-bold">TEI-Δ: +{(sw.teiDelta || 0).toFixed(3)}</span>
                           </div>
                         </div>
                       ))}
@@ -948,12 +970,12 @@ export default function ReportsCenter({ session }) {
                           </td>
                           <td className="p-4 font-black">
                             <span className={sw.efficiency >= (reportData.avgTEI || 2.0) ? 'text-emerald-400' : 'text-rose-400'}>
-                              {sw.efficiency.toFixed(2)} pts/hr
+                              {(sw.efficiency || 0).toFixed(2)} pts/hr
                             </span>
                           </td>
                           <td className="p-4 font-black">
                             <span className={sw.teiDelta > 0 ? 'text-emerald-400' : sw.teiDelta < 0 ? 'text-rose-400' : 'text-white/40'}>
-                              {sw.teiDelta >= 0 ? `+${sw.teiDelta.toFixed(3)}` : sw.teiDelta.toFixed(3)} pts/hr
+                              {(sw.teiDelta || 0) >= 0 ? `+${(sw.teiDelta || 0).toFixed(3)}` : (sw.teiDelta || 0).toFixed(3)} pts/hr
                             </span>
                           </td>
                           <td className="p-4 text-right">

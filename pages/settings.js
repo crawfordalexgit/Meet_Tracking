@@ -5,6 +5,7 @@ import { authedFetch } from '../lib/api-client';
 import { useRouter } from 'next/router';
 import toast from 'react-hot-toast';
 import { useTheme } from '../lib/ThemeContext';
+import { fetchAllRows } from '../lib/paginate';
 
 export default function Settings({ session, scmApiKey }) {
   const router = useRouter();
@@ -220,12 +221,13 @@ export default function Settings({ session, scmApiKey }) {
   };
 
   const loadData = async () => {
-    const [profilesRes, squadsRes, csRes, meetsRes, swimmersRes, exemptRes, sessionsRes] = await Promise.all([
+    // swimmersArr is a plain array (paginated); the rest are Supabase responses.
+    const [profilesRes, squadsRes, csRes, meetsRes, swimmersArr, exemptRes, sessionsRes] = await Promise.all([
       supabase.from('profiles').select('*').order('email'),
       supabase.from('squads').select('*').order('name'),
       supabase.from('coach_squads').select('*'),
       supabase.from('meets').select('*').gte('date', new Date(Date.now() - 450 * 86400000).toISOString().split('T')[0]).order('date', { ascending: false }),
-      supabase.from('swimmers').select('*, squads(name)').order('full_name'),
+      fetchAllRows(supabase, 'swimmers', { select: '*, squads(name)', filter: q => q.order('full_name') }),
       supabase.from('club_exemptions').select('*').order('start_date', { ascending: false }),
       supabase.from('sessions').select('*').order('day_of_week').order('start_time')
     ]);
@@ -234,7 +236,7 @@ export default function Settings({ session, scmApiKey }) {
     if (squadsRes.data) setSquads(squadsRes.data);
     if (csRes.data) setCoachSquads(csRes.data);
     if (meetsRes.data) setMeets(meetsRes.data);
-    if (swimmersRes.data) setSwimmers(swimmersRes.data);
+    if (swimmersArr) setSwimmers(swimmersArr);
     if (exemptRes.data) setClubExemptions(exemptRes.data);
     if (sessionsRes.data) {
       const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];

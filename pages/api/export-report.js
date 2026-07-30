@@ -1,6 +1,8 @@
 import puppeteerCore from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
 import { requireAuth } from '../../lib/api-auth';
+import { getSelfOrigin } from '../../lib/self-origin';
+import { isUuid } from '../../lib/validate';
 
 const ALLOWED_STORAGE_KEYS = /^(sb-[a-zA-Z0-9\-]+-auth-token|print-insight-cache|print-report-config)$/;
 
@@ -13,8 +15,18 @@ export default async function handler(req, res) {
 
   const { meetId, meetName, type, squadId, storage } = req.body;
 
+  // Both ids are interpolated into the URL Puppeteer loads. Anything other than
+  // a UUID can inject an extra path segment, query or fragment and redirect the
+  // render — with the caller's session already injected into the page.
+  if (meetId != null && !isUuid(meetId)) {
+    return res.status(400).json({ error: 'Invalid meetId: expected a UUID' });
+  }
+  if (squadId != null && !isUuid(squadId)) {
+    return res.status(400).json({ error: 'Invalid squadId: expected a UUID' });
+  }
+
+  let browser;
   try {
-    let browser;
     if (process.env.NODE_ENV === 'production' || process.env.CHROMIUM_EXECUTABLE_PATH) {
       browser = await puppeteerCore.launch({
         args: chromium.args,
@@ -46,10 +58,10 @@ export default async function handler(req, res) {
       }
     }
 
-    // Determine the target URL based on the environment
-    const protocol = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers.host;
-    const baseUrl = `${protocol}://${host}`;
+    // Origin comes from server config, never from request headers: the caller's
+    // Supabase session (including the refresh token) is injected into whatever
+    // origin this page loads, so a forged Host header would exfiltrate it.
+    const baseUrl = getSelfOrigin();
 
     let targetUrl = baseUrl;
     if (type === 'meet' && meetId) {
@@ -113,8 +125,6 @@ export default async function handler(req, res) {
       margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' }
     });
 
-    await browser.close();
-
     // Stream the PDF back to the client for download
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="report.pdf"`);
@@ -127,5 +137,9 @@ export default async function handler(req, res) {
   } catch (error) {
     console.error('API: PDF Export Failed:', error);
     return res.status(500).json({ error: error.message });
+  } finally {
+    // Without this, any failure between launch and close leaks a Chromium
+    // process for the lifetime of the warm lambda.
+    if (browser) await browser.close().catch(() => {});
   }
 }

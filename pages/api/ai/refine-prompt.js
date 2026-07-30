@@ -3,15 +3,25 @@ import path from 'path';
 import { requireAdminAuth } from '../../../lib/api-auth';
 import { generateText } from '../../../lib/ai_provider';
 
+const SAFE_FACET_RE = /^[a-z0-9_]+$/;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   if (!await requireAdminAuth(req, res)) return;
 
   const { currentPrompt, dna, originalOutput, feedback } = req.body;
-  
+
   if (!currentPrompt || !feedback) {
     return res.status(400).json({ error: 'Current prompt and feedback required' });
+  }
+
+  // This route WRITES ${facet}.md. prompts/save.js and prompts/rollback.js both
+  // validate the facet; without the same check here, "../../pages/api/x" is an
+  // arbitrary file write inside the deployment.
+  const facet = req.body.facet || 'training';
+  if (!SAFE_FACET_RE.test(facet)) {
+    return res.status(400).json({ error: 'Invalid facet' });
   }
 
   try {
@@ -45,12 +55,12 @@ export default async function handler(req, res) {
     const historyDir = path.join(promptsDir, '_history');
     if (!fs.existsSync(historyDir)) fs.mkdirSync(historyDir, { recursive: true });
 
-    const currentPath = path.join(promptsDir, `${req.body.facet || 'training'}.md`);
-    
+    const currentPath = path.join(promptsDir, `${facet}.md`);
+
     // Backup existing
     if (fs.existsSync(currentPath)) {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const backupPath = path.join(historyDir, `${req.body.facet || 'training'}_${timestamp}.md`);
+      const backupPath = path.join(historyDir, `${facet}_${timestamp}.md`);
       fs.copyFileSync(currentPath, backupPath);
     }
 

@@ -30,7 +30,10 @@ export default function Login({ session }) {
       });
       if (error) throw error;
     } catch (error) {
-      setMessage(error.message);
+      // The renderer reads message.text / message.type. Setting a bare string
+      // here rendered an EMPTY box styled as a success — a failed Google
+      // sign-in told the user nothing had gone wrong.
+      setMessage({ type: 'error', text: error.message || 'Google sign-in failed. Please try again.' });
       setLoading(false);
     }
   };

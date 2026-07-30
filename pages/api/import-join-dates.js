@@ -1,12 +1,15 @@
 import { getServiceSupabase } from '../../lib/supabase';
-import { requireAuth } from '../../lib/api-auth';
+import { requireAdminAuth } from '../../lib/api-auth';
+import { escapeLikePattern } from '../../lib/validate';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!await requireAuth(req, res)) return;
+  // Bulk-rewrites squad_join_date, which shifts every swimmer's reliability
+  // analysis window. Admin only.
+  if (!await requireAdminAuth(req, res)) return;
 
   const { data } = req.body; // Expecting an array of { member_id, squad_join_date }
   
@@ -32,7 +35,9 @@ export default async function handler(req, res) {
       if (member_id) {
         query = query.eq('member_id', member_id.toString());
       } else if (full_name) {
-        query = query.ilike('full_name', full_name.trim());
+        // Escape LIKE wildcards: an unescaped "%" matches every row, and this
+        // is an UPDATE — it would rewrite the whole table's join dates.
+        query = query.ilike('full_name', escapeLikePattern(full_name.trim()));
       } else {
         continue;
       }

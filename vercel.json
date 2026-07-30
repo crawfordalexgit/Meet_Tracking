@@ -4,5 +4,24 @@
       "path": "/api/sync-attendance",
       "schedule": "0 2 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "pages/api/sync-attendance.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/sync-scm.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/sync-pbs.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/sync-join-dates.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/sync-session-memberships.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/scrape-meets.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/scrape-rankings.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/reconcile-pbs.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/reports.js": { "maxDuration": 120, "memory": 2048 },
+    "pages/api/squad-stats.js": { "maxDuration": 120, "memory": 2048 },
+    "pages/api/parse-pdf.js": { "maxDuration": 120, "memory": 1024 },
+    "pages/api/ai/scrape-gala-url.js": { "maxDuration": 300, "memory": 2048 },
+    "pages/api/ai/gala-engine-v2.js": { "maxDuration": 300, "memory": 1024 },
+    "pages/api/ai/analyze.js": { "maxDuration": 120, "memory": 1024 },
+    "pages/api/export-report.js": { "maxDuration": 120, "memory": 2048 },
+    "pages/api/generate-pdf.js": { "maxDuration": 120, "memory": 2048 },
+    "pages/api/export/meet-word.js": { "maxDuration": 120, "memory": 1024 }
+  }
 }

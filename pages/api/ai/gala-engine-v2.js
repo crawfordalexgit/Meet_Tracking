@@ -2,6 +2,8 @@ import { getServiceSupabase } from '../../../lib/supabase';
 import { analyzeMeet } from '../../../lib/ai_engine';
 import { normalizeName, normalizeEvent, timeToSeconds, getPreferredName } from '../../../lib/analytics-utils';
 import { requireAuth } from '../../../lib/api-auth';
+import { isUuid } from '../../../lib/validate';
+import { fetchAllRows } from '../../../lib/paginate';
 
 export const config = {
   api: {
@@ -31,6 +33,13 @@ export default async function handler(req, res) {
     let parentId = meet.id;
     if (meet.parent_id) {
       parentId = meet.parent_id;
+    }
+
+    // parentId is interpolated into the PostgREST .or() filter below and this
+    // is a service-role client — an unvalidated value rewrites the expression
+    // and selects arbitrary rows.
+    if (!isUuid(parentId)) {
+      return res.status(400).json({ error: 'Invalid meet id: expected a UUID' });
     }
 
     const { data: familyMeetsData } = await supabase
@@ -130,7 +139,11 @@ export default async function handler(req, res) {
     // eliminating false positives from partial substring matches (e.g. "garfield" inside "ingarfield").
     const detectedMedals = [];
     let currentEvent = 'Unknown Event';
-    const { data: allSwimmersRaw } = await supabase.from('swimmers').select('id, full_name, known_as, is_ranked_member');
+    // Paginated: swimmers past the 1000-row cap never matched a medal line and
+    // were silently omitted from the medal count.
+    const allSwimmersRaw = await fetchAllRows(supabase, 'swimmers', {
+      select: 'id, full_name, known_as, is_ranked_member',
+    });
     const allSwimmers = (allSwimmersRaw || []).filter(s => s.is_ranked_member !== false);
 
     if (pdfText) {

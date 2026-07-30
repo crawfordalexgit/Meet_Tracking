@@ -33,10 +33,32 @@ The dev server starts automatically (`webServer` in playwright.config.js); if on
 
 ## Known expected failures (encoded in the suite on purpose)
 
-These tests FAIL until the underlying bug is fixed — they are the bug report:
+These tests FAIL until the underlying bug is fixed — they are the bug report.
 
-1. `tests/api/auth.spec.js` → `GET /api/download-report` — route has **no auth**; anyone can download report PDFs.
-2. `tests/unit/analytics-utils.spec.js` → `generateNameAliases` — for "First Last" names the lastName fallback grabs the whole name (lib/analytics-utils.js:53), so alias matching never works.
-3. `tests/integrity/db-invariants.spec.js` — whichever invariants are currently violated in the live DB (e.g. swimmers with PBs but zero results = the missing-meets symptom).
-4. `pages/api/scrape-meets.js:270` — post-scrape `reconcile-pbs` call sends no auth header → always 401. Covered by the destructive suite's reconcile test comment.
-5. `pages/swimmer/[id].js:460` — meets query omits `level`/`type` columns, so open-vs-internal meet counts are wrong; `.limit(500)` window checked by integrity test.
+**Refreshed 2026-07-28.** Four of the five entries previously listed here were
+already fixed and had been left in place, which made the list read as five open
+bugs when only one was real. Current state:
+
+1. `tests/integrity/db-invariants.spec.js` — **OPEN.** Whichever invariants are
+   currently violated in the live DB. The standing one is F12: swimmers with
+   Swim England PBs but zero results, because the meet scraper matches on exact
+   `member_id`/name and never calls `generateNameAliases`.
+
+Fixed and removed from this list:
+
+- `GET /api/download-report` auth — the route now requires auth.
+- `generateNameAliases` for "First Last" names — surname extraction handles both
+  orders (pinned by `tests/unit/analytics-utils.spec.js`).
+- `scrape-meets` → `reconcile-pbs` 401 — the PDF upload path now calls
+  `reconcilePbs()` in-process instead of making an unauthenticated self-request
+  (`pages/api/parse-pdf.js`).
+- `pages/swimmer/[id].js` meets query columns — `level`/`type` are selected.
+
+Full triage of everything found in the 2026-07-27 pre-launch audit, including
+what is fixed and what is still open, is in `BUG-REGISTER-2026-07-27.md`.
+
+## Running the unit suite without a database
+
+`npm run test:unit` uses `playwright.unit.config.js`, which has no `globalSetup`
+and no `webServer`, so the pure unit specs run without `TEST_USER_EMAIL` or a
+live database. The other projects still need both.

@@ -1,6 +1,7 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { calculateReliability } from '../../lib/analytics-utils';
 import { requireAuth } from '../../lib/api-auth';
+import { fetchAllRows } from '../../lib/paginate';
 import fs from 'fs';
 import path from 'path';
 
@@ -18,21 +19,13 @@ export default async function handler(req, res) {
   try {
     const supabase = getServiceSupabase();
 
-    // 1. Fetch all static baseline tables in parallel
-    // fetchAll is defined later in this function — inline a quick fetchAll for the static tables
-    const fetchStatic = async (table, select = '*', filter = null) => {
-      let all = []; let page = 0; let more = true;
-      while (more && page < 20) {
-        let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-        if (filter) q = filter(q);
-        const { data } = await q;
-        if (!data || data.length === 0) break;
-        all = [...all, ...data];
-        if (data.length < 1000) more = false;
-        page++;
-      }
-      return all;
-    };
+    // 1. Fetch all static baseline tables in parallel.
+    // Uses the shared paginator: the two hand-rolled loops this file used called
+    // .range() with NO .order(), so Postgres was free to return rows in a
+    // different sequence per page and silently duplicate or drop rows across
+    // page boundaries. They also swallowed errors and returned partial arrays.
+    const fetchStatic = (table, select = '*', filter = null) =>
+      fetchAllRows(supabase, table, { select, filter, maxPages: 20 });
 
     const [squads, sessions, exemptionsRes, benchmarksRes] = await Promise.all([
       fetchStatic('squads', '*', q => q.eq('is_squad', true).order('name')),
@@ -66,33 +59,31 @@ export default async function handler(req, res) {
     const swimmerIds = swimmers.map(s => s.id);
 
     // 3. Fetch training attendance, results, memberships, and rankings in bulk
-    const fetchAll = async (table, select = '*', filter = null) => {
-      let allData = [];
-      let page = 0;
-      let hasMore = true;
-      while (hasMore) {
-        let q = supabase.from(table).select(select).range(page * 1000, (page + 1) * 1000 - 1);
-        if (filter) q = filter(q);
-        const { data, error } = await q;
-        if (error) throw error;
-        allData = [...allData, ...data];
-        if (data.length < 1000) hasMore = false;
-        else page++;
-        if (page > 50) break;
-      }
-      return allData;
-    };
+    const fetchAll = (table, select = '*', filter = null) =>
+      fetchAllRows(supabase, table, { select, filter, maxPages: 50 });
 
     // Calculate dates based on selectors or period
     const now = new Date();
+    // Validated: an unparseable startDate/period produced an Invalid Date whose
+    // .toISOString() throws RangeError, surfacing bad input as a 500.
     let startTime;
     if (startDate) {
       startTime = new Date(startDate);
+      if (isNaN(startTime.getTime())) {
+        return res.status(400).json({ error: 'Invalid startDate' });
+      }
     } else {
-      startTime = new Date(now.getTime() - (parseInt(period) * 24 * 60 * 60 * 1000));
+      const periodDaysParam = parseInt(period, 10);
+      if (period != null && !Number.isFinite(periodDaysParam)) {
+        return res.status(400).json({ error: 'Invalid period' });
+      }
+      startTime = new Date(now.getTime() - ((periodDaysParam || 365) * 24 * 60 * 60 * 1000));
     }
-    
+
     let endTime = endDate ? new Date(endDate) : now;
+    if (isNaN(endTime.getTime())) {
+      return res.status(400).json({ error: 'Invalid endDate' });
+    }
     const periodDays = Math.max(7, Math.round((endTime - startTime) / (24 * 60 * 60 * 1000)));
 
     const startStr = startTime.toISOString().split('T')[0];
@@ -276,6 +267,10 @@ export default async function handler(req, res) {
         peakPoints,
         avgPoints,
         pbCount,
+        // The real number of swims in the period. The reports page used to
+        // invent this as `pbCount + round(totalHours / 12)` and present the
+        // resulting ratio as a measured "PB Conversion Rate".
+        raceCount: swRes.length,
         efficiency, // TEI Performance Efficiency
         teiDelta, // TEI-Δ Improvement Efficiency
         deltaWA,
@@ -378,6 +373,7 @@ export default async function handler(req, res) {
         const course = r.course || 'SC';
         const key = `${r.event}_${course}`;
         const timeSec = parseTimeToSeconds(r.time);
+        if (timeSec === null) return; // unparseable — cannot be compared to a standard
         if (!eventBestTimes[key] || timeSec < eventBestTimes[key].seconds) {
           eventBestTimes[key] = { event: r.event, course, seconds: timeSec, timeStr: r.time, date: r.date };
         }
@@ -505,11 +501,14 @@ export default async function handler(req, res) {
   }
 }
 
+// Returns null — NOT 0 — for missing or unparseable times. A 0 here beats every
+// benchmark, so every swimmer with a bad time was counted as having achieved
+// County, Regional AND National standards.
 function parseTimeToSeconds(timeStr) {
-  if (!timeStr) return 0;
-  const parts = timeStr.split(':');
-  if (parts.length === 2) {
-    return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
-  }
-  return parseFloat(parts[0]);
+  if (!timeStr || typeof timeStr !== 'string') return null;
+  const parts = timeStr.trim().split(':');
+  const seconds = parts.length === 2
+    ? parseFloat(parts[0]) * 60 + parseFloat(parts[1])
+    : parseFloat(parts[0]);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
 }

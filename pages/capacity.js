@@ -13,6 +13,7 @@ export default function CapacityDashboard({ session }) {
   const router = useRouter();
   const [isClient, setIsClient] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [memberships, setMemberships] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -150,12 +151,15 @@ export default function CapacityDashboard({ session }) {
 
   const fetchData = async () => {
     setLoading(true);
+    setLoadError(null);
+    try {
     const startDate = new Date(Date.now() - periodDays * 86400000).toISOString();
-    const [sessRes, allMemberships, allAttendance, swimRes, squadsRes, allModelerAttendance, exemptionsRes, resultsRes, settingsRes] = await Promise.all([
+    // swimmersArr is a plain array (paginated); sessRes/squadsRes are responses.
+    const [sessRes, allMemberships, allAttendance, swimmersArr, squadsRes, allModelerAttendance, exemptionsRes, resultsRes, settingsRes] = await Promise.all([
       supabase.from('sessions').select('*').order('day_of_week').order('start_time'),
       fetchPaged('session_memberships', 'session_id, swimmer_id'),
       fetchPaged('training_attendance', 'session_id, swimmer_id, date', q => q.eq('status', 'present').gte('date', startDate)),
-      supabase.from('swimmers').select('id, full_name, year_of_birth, squads(id, name, target_hours_per_week, target_sessions_per_week, swimmers_per_lane, require_weekend)'),
+      fetchPaged('swimmers', 'id, full_name, year_of_birth, squads(id, name, target_hours_per_week, target_sessions_per_week, swimmers_per_lane, require_weekend)'),
       supabase.from('squads').select('id, name, swimmers_per_lane, target_sessions_per_week, target_hours_per_week, require_weekend, is_squad'),
       fetchPaged('training_attendance', 'session_id, swimmer_id, date, status', q => q.gte('date', startDate)),
       supabase.from('club_exemptions').select('*'),
@@ -167,7 +171,7 @@ export default function CapacityDashboard({ session }) {
     if (sessRes.data) setSessions(sessRes.data);
     if (allMemberships) setMemberships(allMemberships);
     if (allAttendance) setAttendance(allAttendance);
-    if (swimRes.data) setSwimmers(swimRes.data);
+    if (swimmersArr) setSwimmers(swimmersArr);
     if (squadsRes.data) {
       setDbSquads(squadsRes.data);
       const devSquad = squadsRes.data.find(s => s.name === 'AGE DEVELOPMENT');
@@ -185,7 +189,14 @@ export default function CapacityDashboard({ session }) {
       const row = settingsRes.data.find(r => r.key === 'shared_sessions_config');
       if (row && row.value) setSharedSessionsConfig(row.value);
     }
-    setLoading(false);
+    } catch (err) {
+      // A single rejected query in the Promise.all used to skip setLoading(false)
+      // entirely, leaving the page stuck on its loading state with no message.
+      console.error('Capacity data load failed:', err);
+      setLoadError(err.message || 'Could not load capacity data.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateLanes = async (id, lanes) => {
@@ -1518,6 +1529,12 @@ export default function CapacityDashboard({ session }) {
           <div className="flex flex-col items-center justify-center py-32 gap-6">
             <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-cyan-400"></div>
             <div className="text-xs font-black tracking-widest uppercase text-cyan-400/80">Loading Sessions...</div>
+          </div>
+        ) : loadError ? (
+          <div className="glass-card" style={{ maxWidth: '520px', margin: '4rem auto', padding: '3rem', textAlign: 'center' }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-rose)', marginBottom: '1rem' }}>Couldn&apos;t load capacity data</h2>
+            <p style={{ opacity: 0.7, fontSize: '0.9rem', marginBottom: '2rem' }}>{loadError}</p>
+            <button className="period-btn" onClick={fetchData}>Retry</button>
           </div>
         ) : (
           <>

@@ -32,15 +32,35 @@ CREATE TABLE public.profiles (
     role TEXT NOT NULL CHECK (role IN ('admin', 'headcoach', 'coach')) DEFAULT 'coach'
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
--- Profiles are viewable by all authenticated users (or restrict to self + admins)
-CREATE POLICY "Profiles are viewable by authenticated users." 
-ON public.profiles FOR SELECT 
-TO authenticated 
-USING (true);
-CREATE POLICY "Admins can update profiles." 
-ON public.profiles FOR UPDATE 
-TO authenticated 
-USING ( (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'admin' );
+
+-- Reads the caller's role without recursing through profiles' own RLS.
+-- A profiles policy that selects from profiles raises
+-- "infinite recursion detected in policy for relation profiles".
+CREATE OR REPLACE FUNCTION public.current_user_role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT role FROM public.profiles WHERE id = auth.uid();
+$$;
+REVOKE ALL ON FUNCTION public.current_user_role() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.current_user_role() TO authenticated;
+
+-- Self + admins only: this table holds every user's email and role.
+CREATE POLICY "Profiles viewable by self or admins"
+ON public.profiles FOR SELECT
+TO authenticated
+USING (
+    id = auth.uid()
+    OR public.current_user_role() IN ('admin', 'headcoach')
+);
+CREATE POLICY "Profiles updatable by admins"
+ON public.profiles FOR UPDATE
+TO authenticated
+USING (public.current_user_role() = 'admin')
+WITH CHECK (public.current_user_role() = 'admin');
 
 -- Automatically create a profile when a new user signs up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -229,10 +249,36 @@ CREATE TABLE IF NOT EXISTS public.training_attendance (
 ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.training_attendance ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read on sessions" ON public.sessions FOR SELECT USING (true);
-CREATE POLICY "Allow public read on training_attendance" ON public.training_attendance FOR SELECT USING (true);
-CREATE POLICY "Allow service role all on sessions" ON public.sessions FOR ALL USING (true);
-CREATE POLICY "Allow service role all on training_attendance" ON public.training_attendance FOR ALL USING (true);
+-- NOTE: service_role bypasses RLS entirely, so it needs GRANTs, not policies.
+-- A policy with no TO clause applies to PUBLIC (including anon) — see
+-- migrations/2026-07-27_rls-hardening.sql.
+CREATE POLICY "Sessions readable by authenticated"
+ON public.sessions FOR SELECT
+TO authenticated
+USING (true);
+-- Lane allocation on /capacity is a coach task, so UPDATE stays open to
+-- authenticated users; INSERT/DELETE are admin-only.
+CREATE POLICY "Sessions updatable by authenticated"
+ON public.sessions FOR UPDATE
+TO authenticated
+USING (true)
+WITH CHECK (true);
+CREATE POLICY "Sessions insertable by admins"
+ON public.sessions FOR INSERT
+TO authenticated
+WITH CHECK (public.current_user_role() IN ('admin', 'headcoach'));
+CREATE POLICY "Sessions deletable by admins"
+ON public.sessions FOR DELETE
+TO authenticated
+USING (public.current_user_role() IN ('admin', 'headcoach'));
+GRANT ALL ON public.sessions TO service_role;
+
+-- Attendance is written only by server routes on the service_role client.
+CREATE POLICY "Attendance readable by authenticated"
+ON public.training_attendance FOR SELECT
+TO authenticated
+USING (true);
+GRANT ALL ON public.training_attendance TO service_role;
 
 -- 8. Technical Intel Feedback (The Training Loop)
 CREATE TABLE IF NOT EXISTS public.swimmer_ai_feedback (
@@ -327,10 +373,11 @@ CREATE TABLE public.user_issues (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 ALTER TABLE public.user_issues ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Issues can be inserted by authenticated users."
+-- Bind the row to the caller so attribution cannot be forged.
+CREATE POLICY "Issues can be inserted by their author"
 ON public.user_issues FOR INSERT
 TO authenticated
-WITH CHECK (true);
+WITH CHECK (user_id = auth.uid());
 CREATE POLICY "Issues can be viewed by authenticated users."
 ON public.user_issues FOR SELECT
 TO authenticated
@@ -351,10 +398,10 @@ CREATE TABLE IF NOT EXISTS public.issue_upvotes (
 );
 ALTER TABLE public.issue_upvotes ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Upvotes can be inserted by authenticated users."
+CREATE POLICY "Upvotes can be inserted by their author"
 ON public.issue_upvotes FOR INSERT
 TO authenticated
-WITH CHECK (true);
+WITH CHECK (user_id = auth.uid());
 
 CREATE POLICY "Upvotes can be viewed by authenticated users."
 ON public.issue_upvotes FOR SELECT
@@ -383,3 +430,35 @@ VALUES ('pathway_transition', '{"struggling_consistency_threshold": 60, "struggl
 ON CONFLICT (key) DO NOTHING;
 
 
+
+-- ============================================================================
+-- 16. Indexes
+--
+-- Added 2026-07-27. This file previously contained no indexes at all, so every
+-- lookup below was a sequential scan — a direct contributor to the ~40s
+-- /squads and /swimmers page loads. Kept in sync with
+-- migrations/2026-07-27_indexes.sql.
+-- ============================================================================
+
+CREATE INDEX IF NOT EXISTS idx_results_swimmer_id     ON public.results (swimmer_id);
+CREATE INDEX IF NOT EXISTS idx_results_meet_id        ON public.results (meet_id);
+CREATE INDEX IF NOT EXISTS idx_results_date           ON public.results (date DESC);
+CREATE INDEX IF NOT EXISTS idx_results_swimmer_date   ON public.results (swimmer_id, date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_swimmer_date ON public.training_attendance (swimmer_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_date         ON public.training_attendance (date DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_session_id   ON public.training_attendance (session_id);
+
+CREATE INDEX IF NOT EXISTS idx_swimmer_pbs_swimmer_id ON public.swimmer_pbs (swimmer_id);
+
+CREATE INDEX IF NOT EXISTS idx_swimmers_squad_id    ON public.swimmers (squad_id);
+CREATE INDEX IF NOT EXISTS idx_swimmers_scm_numeric ON public.swimmers (scm_numeric_id);
+
+CREATE INDEX IF NOT EXISTS idx_memberships_swimmer_id ON public.session_memberships (swimmer_id);
+CREATE INDEX IF NOT EXISTS idx_memberships_session_id ON public.session_memberships (session_id);
+
+CREATE INDEX IF NOT EXISTS idx_meets_date      ON public.meets (date DESC);
+CREATE INDEX IF NOT EXISTS idx_meets_parent_id ON public.meets (parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_ai_reports_squad_created ON public.ai_reports (squad_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_insights_swimmer_created ON public.swimmer_insights (swimmer_id, created_at DESC);

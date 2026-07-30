@@ -74,12 +74,14 @@ export default function ForesightTimeline({ insights, pbs = {} }) {
                   transition: 'all 0.3s'
                 }}>
                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontStyle: 'italic', marginBottom: '1rem', lineHeight: '1.5' }}>
-                     "{insight.full_report.foresight}"
+                     {/* Optional chain: a swimmer_insights row with a null
+                         full_report crashed the whole timeline. */}
+                     "{insight.full_report?.foresight || '—'}"
                    </div>
                    
                    <div style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', color: 'var(--accent-cyan)', marginBottom: '8px', opacity: 0.6 }}>Strategic Targets:</div>
                    <div className="space-y-2">
-                      {(insight.full_report.recommendations || []).slice(0, 5).map((rec, i) => (
+                      {(insight.full_report?.recommendations || []).slice(0, 5).map((rec, i) => (
                         <div key={i} style={{ 
                           fontSize: '0.7rem', 
                           display: 'flex', 

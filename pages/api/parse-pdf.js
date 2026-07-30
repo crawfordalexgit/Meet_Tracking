@@ -1,6 +1,8 @@
 import fs from 'fs';
 import { getServiceSupabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/api-auth';
+import { isUuid } from '../../lib/validate';
+import { reconcilePbs } from '../../lib/reconcile-pbs';
 
 export const config = {
   api: {
@@ -8,25 +10,50 @@ export const config = {
   },
 };
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB — a long meet results PDF
+const ALLOWED_EXTENSIONS = /\.(pdf|txt|md)$/i;
+const ALLOWED_MIMETYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'application/octet-stream', // some browsers send this for .md
+]);
+
+// formidable's `filter` runs per part, before the bytes are written to disk.
+const uploadFilter = ({ originalFilename, mimetype }) => {
+  if (!originalFilename || !ALLOWED_EXTENSIONS.test(originalFilename)) return false;
+  return !mimetype || ALLOWED_MIMETYPES.has(mimetype);
+};
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   if (!await requireAuth(req, res)) return;
 
+  let uploadedPath = null;
   try {
     const formidableMod = require('formidable');
     console.log(">>> PDF API: Formidable keys:", Object.keys(formidableMod));
     
+    // Bound the upload: without these, the whole body is written to disk and
+    // then read into memory with readFileSync — trivial memory exhaustion.
+    const formOptions = {
+      maxFiles: 1,
+      maxFileSize: MAX_UPLOAD_BYTES,
+      maxTotalFileSize: MAX_UPLOAD_BYTES,
+      filter: uploadFilter,
+    };
+
     // Defensive check for formidable v2 vs v3
     let form;
     if (typeof formidableMod === 'function') {
-      form = formidableMod({});
+      form = formidableMod(formOptions);
     } else if (formidableMod.formidable) {
-      form = formidableMod.formidable({});
+      form = formidableMod.formidable(formOptions);
     } else if (formidableMod.default) {
-      form = formidableMod.default({});
+      form = formidableMod.default(formOptions);
     } else if (formidableMod.IncomingForm) {
-      form = new formidableMod.IncomingForm();
+      form = new formidableMod.IncomingForm(formOptions);
     } else {
       throw new Error("Could not find formidable constructor");
     }
@@ -53,7 +80,12 @@ export default async function handler(req, res) {
 
     if (!file) {
       console.error(">>> PDF API: No file found in request");
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'No file uploaded, or the file type is not supported (.pdf, .txt, .md)' });
+    }
+    uploadedPath = file.filepath;
+
+    if (meetId && !isUuid(meetId)) {
+      return res.status(400).json({ error: 'Invalid meetId: expected a UUID' });
     }
 
     console.log(`>>> PDF API: Extracting from ${file.filepath} (Meet: ${meetId || 'None'}). Type: ${uploadType}`);
@@ -112,12 +144,31 @@ export default async function handler(req, res) {
     }
 
     console.log(`>>> PDF API: Success! Extracted ${cleanText.length} chars.`);
-    // Trigger PB Reconciler in the background
-    fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/reconcile-pbs`, { method: 'POST' }).catch(console.error);
+
+    // Reconcile PBs in-process. This used to POST to /api/reconcile-pbs with no
+    // Authorization header, so it always 401'd and PBs were never reconciled
+    // after an upload — the rejection was only console.error'd.
+    if (meetId) {
+      try {
+        await reconcilePbs(getServiceSupabase());
+      } catch (pbErr) {
+        console.error(">>> PDF API: PB reconciliation failed:", pbErr.message);
+      }
+    }
+
     return res.status(200).json({ text: cleanText });
 
   } catch (error) {
     console.error(">>> PDF API ERROR:", error);
+    if (error.code === 'ETOOBIG' || /maxFileSize|maxTotalFileSize/i.test(error.message || '')) {
+      return res.status(413).json({ error: `File too large. Maximum is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` });
+    }
     return res.status(500).json({ error: error.message || 'Failed to parse PDF' });
+  } finally {
+    // formidable writes to /tmp; without this the warm instance's writable
+    // quota fills up over time.
+    if (uploadedPath) {
+      try { fs.unlinkSync(uploadedPath); } catch { /* already gone */ }
+    }
   }
 }

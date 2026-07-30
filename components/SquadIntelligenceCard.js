@@ -17,10 +17,16 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
 
   const fetchLatestInsight = async () => {
     try {
-      let query = supabase.from('ai_reports').select('*').order('created_at', { ascending: false });
+      // Filter on `type` in BOTH branches. Filtering only by squad_id meant a
+      // TalentIntelligenceCard report (type:'talent') written against the same
+      // squad could be loaded here, and its different shape then crashed the
+      // render below.
+      let query = supabase.from('ai_reports')
+        .select('*')
+        .eq('type', type)
+        .order('created_at', { ascending: false });
       if (squadId) query = query.eq('squad_id', squadId);
-      else if (type === 'club') query = query.eq('type', 'club');
-      
+
       const { data, error } = await query.limit(10);
       if (error) throw error;
       
@@ -91,6 +97,23 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
     );
   }
 
+  // A report that doesn't carry the expected object shape (older schema, partial
+  // write, truncated model response) used to take the whole squad page down
+  // rather than degrading this one panel.
+  if (!insight || typeof insight.summary !== 'object' || insight.summary === null) {
+    return (
+      <div className="glass-card animate-fade-in no-print" style={{ padding: '3rem', textAlign: 'center' }}>
+        <div className="section-title" style={{ justifyContent: 'center', marginBottom: '1rem' }}>COACHESEYE INTELLIGENCE LAB</div>
+        <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '1.5rem' }}>
+          This squad&apos;s stored audit can&apos;t be displayed — it was saved in an older or incomplete format.
+        </p>
+        <button className="btn-premium-intel mini" onClick={generateInsight}>GENERATE A NEW AUDIT</button>
+      </div>
+    );
+  }
+
+  const swot = insight.summary.swot || {};
+
   return (
     <div className="glass-card animate-fade-in" style={{ position: 'relative', overflow: 'visible', padding: '3.5rem' }}>
       <div className="flex justify-between items-center mb-12">
@@ -113,11 +136,11 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 mb-12">
           <div className="lg:col-span-2">
              <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1.5rem', opacity: 0.5 }}>GROUP PERFORMANCE PROFILE</div>
-             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '2rem' }}>{insight.summary.assessment}</p>
-             
+             <p style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, marginBottom: '2rem' }}>{insight.summary.assessment || '—'}</p>
+
              <div className="section-title" style={{ fontSize: '0.65rem', marginBottom: '1.5rem', opacity: 0.5 }}>TECHNICAL REVIEW</div>
              <div style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6 }}>
-                {insight.analysis.split('\n').map((p, i) => <p key={i} style={{ marginBottom: '1.2rem' }}>{p}</p>)}
+                {String(insight.analysis || '').split('\n').filter(Boolean).map((p, i) => <p key={i} style={{ marginBottom: '1.2rem' }}>{p}</p>)}
              </div>
           </div>
 
@@ -126,19 +149,19 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
             <div className="space-y-8">
               <div>
                 <div style={{ fontSize: '0.7rem', color: '#10b981', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Strengths</div>
-                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.strengths}</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{swot.strengths || '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Weaknesses</div>
-                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.weaknesses}</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{swot.weaknesses || '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Opportunities</div>
-                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.opportunities}</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{swot.opportunities || '—'}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: '#f59e0b', fontWeight: 950, textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.1em' }}>Threats</div>
-                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{insight.summary.swot.threats}</div>
+                <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)', lineHeight: 1.5 }}>{swot.threats || '—'}</div>
               </div>
             </div>
           </div>
@@ -157,7 +180,7 @@ export default function SquadIntelligenceCard({ squadId, squadName, stats, strok
           <div>
             <div className="section-title" style={{ fontSize: '0.65rem' }}>SQUAD TRAINING FOCUS</div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '1rem' }}>
-              {insight.recommendations.map((rec, i) => (
+              {(insight.recommendations || []).map((rec, i) => (
                 <li key={i} style={{ fontSize: '0.85rem', opacity: 0.8, lineHeight: 1.6, display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
                   <div style={{ minWidth: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-cyan)', marginTop: '8px', boxShadow: '0 0 10px var(--accent-cyan)' }}></div>
                   <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 500 }}>{rec}</span>

@@ -6,12 +6,21 @@ import {
   toLocalISO 
 } from '../lib/analytics-utils';
 
-export default function WeeklyWorkloadModal({ isOpen, onClose, week, attendance, sessions, exemptions, swimmer, results }) {
-  if (!isOpen || !week) return null;
+// Defaults matter here: the memos below now run on every render, including
+// before the parent's fetch has resolved.
+export default function WeeklyWorkloadModal({
+  isOpen, onClose, week,
+  attendance = [], sessions = [], exemptions = [], swimmer = {}, results = [],
+}) {
+  // NOTE: the early return lives BELOW the hooks on purpose. This component is
+  // mounted unconditionally by pages/swimmer/[id].js, so returning before the
+  // useMemo calls changed the hook count from 0 to 2 the moment a coach clicked
+  // a week — "Rendered more hooks than during the previous render", which
+  // unmounted the whole athlete profile.
 
   // Aligned Monday date from weekKey (Format: "W-YYYY-MM-DD")
   const monDate = useMemo(() => {
-    const parts = week.weekKey.split('-');
+    const parts = (week?.weekKey || '').split('-');
     if (parts.length === 4) {
       const year = parseInt(parts[1], 10);
       const month = parseInt(parts[2], 10) - 1;
@@ -19,7 +28,7 @@ export default function WeeklyWorkloadModal({ isOpen, onClose, week, attendance,
       return new Date(year, month, day);
     }
     return new Date();
-  }, [week.weekKey]);
+  }, [week?.weekKey]);
 
   // Generate day-by-day logs for the 7 days of the week (Mon-Sun)
   const dailyLogs = useMemo(() => {
@@ -123,6 +132,9 @@ export default function WeeklyWorkloadModal({ isOpen, onClose, week, attendance,
     return logs;
   }, [monDate, attendance, sessions, exemptions, swimmer, results]);
 
+  // Safe to bail out now that every hook has run.
+  if (!isOpen || !week) return null;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="glass-card workload-modal animate-scale-in" onClick={e => e.stopPropagation()}>
@@ -153,14 +165,14 @@ export default function WeeklyWorkloadModal({ isOpen, onClose, week, attendance,
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="summary-pill">
             <span className="pill-title">Training Sessions</span>
-            <span className="pill-val">{week.trainingSessions} <span className="pill-unit">Sess</span></span>
-            <span className="pill-sub">{week.trainingHours.toFixed(1)} hrs</span>
+            <span className="pill-val">{week.trainingSessions || 0} <span className="pill-unit">Sess</span></span>
+            <span className="pill-sub">{(week.trainingHours || 0).toFixed(1)} hrs</span>
           </div>
 
           <div className="summary-pill">
             <span className="pill-title">Gala Racing</span>
-            <span className="pill-val">{week.galaSessions} <span className="pill-unit">Sess</span></span>
-            <span className="pill-sub">{week.galaHours.toFixed(1)} hrs</span>
+            <span className="pill-val">{week.galaSessions || 0} <span className="pill-unit">Sess</span></span>
+            <span className="pill-sub">{(week.galaHours || 0).toFixed(1)} hrs</span>
           </div>
 
           <div className="summary-pill">
@@ -173,7 +185,7 @@ export default function WeeklyWorkloadModal({ isOpen, onClose, week, attendance,
             <span className="pill-title" style={{ color: '#0096ff' }}>Weekly Compliance</span>
             <span className="pill-val" style={{ color: '#0096ff' }}>{week.compliance}%</span>
             <span className="pill-sub" style={{ color: '#0096ff' }}>
-              Target: {week.totalHours.toFixed(1)} / {week.target.toFixed(1)} hrs
+              Target: {(week.totalHours || 0).toFixed(1)} / {(week.target || 0).toFixed(1)} hrs
             </span>
           </div>
         </div>

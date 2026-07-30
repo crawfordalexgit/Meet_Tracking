@@ -56,10 +56,25 @@ export default async function handler(req, res) {
             .filter(m => m.session_id);
 
           if (memberships.length > 0) {
-            // Clear and replace
+            // Snapshot, then clear and replace. Leaving a swimmer with zero
+            // memberships is not a neutral failure: downstream reliability maths
+            // reads "no expected sessions" as 100% attendance.
+            const { data: previousMemberships } = await supabase
+              .from('session_memberships')
+              .select('*')
+              .eq('swimmer_id', swimmer.id);
+
             await supabase.from('session_memberships').delete().eq('swimmer_id', swimmer.id);
             const { error } = await supabase.from('session_memberships').insert(memberships);
-            if (error) throw error;
+            if (error) {
+              if (previousMemberships?.length) {
+                const { error: restoreError } = await supabase.from('session_memberships').insert(previousMemberships);
+                if (restoreError) {
+                  console.error(`Failed to restore memberships for ${swimmer.full_name}:`, restoreError);
+                }
+              }
+              throw error;
+            }
             results.push({ swimmer: swimmer.full_name, sessions: memberships.length });
           } else {
             results.push({ swimmer: swimmer.full_name, sessions: 0, warning: 'No matching sessions found in DB' });

@@ -24,10 +24,15 @@ CREATE TABLE IF NOT EXISTS rankings (
 -- Enable RLS
 ALTER TABLE rankings ENABLE ROW LEVEL SECURITY;
 
--- Allow public read access (respecting dashboard visibility)
-CREATE POLICY "Allow public read access to rankings" ON rankings
-    FOR SELECT USING (true);
+-- Authenticated read only. A policy with no TO clause applies to PUBLIC
+-- (including anon, whose key ships in the client bundle) — see
+-- migrations/2026-07-27_rls-hardening.sql.
+CREATE POLICY "Rankings readable by authenticated" ON rankings
+    FOR SELECT TO authenticated USING (true);
 
--- Allow service role full access
-CREATE POLICY "Allow service role full access to rankings" ON rankings
-    FOR ALL USING (true) WITH CHECK (true);
+-- service_role bypasses RLS; it needs the GRANT, not a policy.
+GRANT ALL ON rankings TO service_role;
+
+-- Indexes (added 2026-07-27; see migrations/2026-07-27_indexes.sql).
+CREATE INDEX IF NOT EXISTS idx_rankings_swimmer_id    ON rankings (swimmer_id);
+CREATE INDEX IF NOT EXISTS idx_rankings_snapshot_date ON rankings (snapshot_date DESC);

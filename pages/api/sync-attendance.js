@@ -1,6 +1,7 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { fetchScmNumericIds, fetchSwimmerAttendance } from '../../lib/scm-scraper';
 import { requireAuth } from '../../lib/api-auth';
+import { fetchAllRows } from '../../lib/paginate';
 import * as cheerio from 'cheerio';
 
 export default async function handler(req, res) {
@@ -12,6 +13,15 @@ export default async function handler(req, res) {
   // otherwise require an authenticated user for both GET and POST triggers.
   const isCron = !!process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
   if (!isCron) {
+    // A misconfigured CRON_SECRET makes the nightly job 401 silently, forever.
+    // Vercel stamps x-vercel-cron on scheduled invocations, so we can tell the
+    // difference between "someone is poking this route" and "the cron is broken".
+    if (req.headers['x-vercel-cron'] && !process.env.CRON_SECRET) {
+      console.error(
+        'ATTENDANCE CRON MISCONFIGURED: a scheduled invocation arrived but CRON_SECRET is not set in this environment. ' +
+        'The nightly attendance sync will 401 on every run until it is configured.'
+      );
+    }
     if (!await requireAuth(req, res)) return;
   }
 
@@ -131,11 +141,12 @@ export default async function handler(req, res) {
       sessionMap[s.name.toLowerCase().trim()] = s.id;
     });
 
-    // 3. Get swimmers to sync
-    const { data: swimmers } = await supabase
-      .from('swimmers')
-      .select('id, full_name, scm_numeric_id')
-      .not('scm_numeric_id', 'is', null);
+    // 3. Get swimmers to sync (paginated — a truncated list silently skips
+    // every swimmer past the 1000-row cap)
+    const swimmers = await fetchAllRows(supabase, 'swimmers', {
+      select: 'id, full_name, scm_numeric_id',
+      filter: q => q.not('scm_numeric_id', 'is', null),
+    });
 
     if (!swimmers || swimmers.length === 0) {
       sendProgress({ message: "No swimmers found with SCM Numeric IDs. Run SCM Sync first.", progress: 100 });

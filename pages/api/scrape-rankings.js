@@ -117,15 +117,17 @@ export default async function handler(req, res) {
         const endDate = `31/12/${currentYear}`;
         const snapshotDate = new Date().toISOString().split('T')[0];
         
-        // Clean existing rankings for today's snapshot to avoid same-day duplication
-        sendProgress("Cleaning today's snapshot rankings...", 2);
-        const { error: delErr } = await supabase
-            .from('rankings')
-            .delete()
-            .eq('snapshot_date', snapshotDate);
-        if (delErr) {
-            console.error("Warning cleaning current snapshot rankings:", delErr.message);
-        }
+        // NOTE: today's snapshot is deliberately NOT deleted up front.
+        //
+        // This scrape makes thousands of sequential requests and frequently does
+        // not finish inside the function's time limit. Deleting first meant a
+        // scrape that died half way left the day's rankings permanently empty or
+        // partial, and every dashboard read that gap as "no ranked swimmers".
+        //
+        // The insert below is already an upsert on the snapshot's unique key, so
+        // re-running is safe without a pre-delete. Rows that are no longer ranked
+        // are cleaned up AFTER a successful scrape, using the run timestamp.
+        const runStartedAt = new Date().toISOString();
 
         const results = [];
         const benchmarksToSync = []; // Collect benchmark thresholds
@@ -270,6 +272,7 @@ export default async function handler(req, res) {
 
         sendProgress(`Scraping complete. Found ${results.length} results. Saving to database...`, 98);
 
+        let upsertFailed = false;
         if (results.length > 0) {
             for (let i = 0; i < results.length; i += 100) {
                 const chunk = results.slice(i, i + 100);
@@ -279,7 +282,21 @@ export default async function handler(req, res) {
                         throw new Error("Rankings table not found. Please run the SQL schema first.");
                     }
                     console.error("Upsert Error:", error);
+                    upsertFailed = true;
                 }
+            }
+
+            // Only now, with every row written, remove today's rows that this run
+            // did not refresh (swimmers who dropped out of the rankings).
+            if (!upsertFailed) {
+                const { error: pruneErr } = await supabase
+                    .from('rankings')
+                    .delete()
+                    .eq('snapshot_date', snapshotDate)
+                    .lt('last_updated', runStartedAt);
+                if (pruneErr) console.error("Warning pruning stale snapshot rankings:", pruneErr.message);
+            } else {
+                console.warn("Skipping stale-row prune: at least one upsert chunk failed, so the snapshot is incomplete.");
             }
         }
 

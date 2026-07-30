@@ -32,7 +32,24 @@ function render(templateFile, data) {
 function summaryData(clubName, clubCode, teams) {
   const counts = {}; // `${g}_${band}_${relay}` → n
   for (const b of AGE_BANDS) for (const r of RELAYS) for (const c of CATEGORIES) counts[`${c.key.toLowerCase()}_${b.key}_${r.key}`] = 0;
-  for (const t of teams) counts[`${(t.catKey || '').toLowerCase()}_${t.bandKey}_${t.relayKey}`]++;
+
+  // A team whose keys don't match any known category/band/relay used to hit
+  // `undefined++` → NaN, and the NaN propagated into the sub-totals and the fee
+  // on the official Kent entry form. Unrecognised teams are now rejected loudly
+  // rather than silently corrupting the form.
+  const unknown = [];
+  for (const t of teams) {
+    const key = `${(t.catKey || '').toLowerCase()}_${t.bandKey}_${t.relayKey}`;
+    if (!(key in counts)) {
+      unknown.push(key);
+      continue;
+    }
+    counts[key]++;
+  }
+  if (unknown.length) {
+    throw new Error(`Unrecognised relay team(s): ${[...new Set(unknown)].join(', ')}. Check the category, age band and relay keys.`);
+  }
+
   const data = { clubName: clubName || '', clubCode: clubCode || '' };
   let subM = 0, subF = 0, subX = 0;
   for (const [k, n] of Object.entries(counts)) {
@@ -69,6 +86,19 @@ export default async function handler(req, res) {
   if (!user) return;
 
   const { form = 'summary', clubName = '', clubCode = '', teams = [] } = req.body || {};
+
+  // This output is submitted to an external body — validate the shape rather
+  // than letting malformed input render blank cells or throw inside docxtemplater.
+  if (!Array.isArray(teams)) {
+    return res.status(400).json({ error: 'teams must be an array' });
+  }
+  if (teams.length > 200) {
+    return res.status(400).json({ error: 'Too many teams for a single entry form' });
+  }
+  if (teams.some(t => !t || typeof t !== 'object')) {
+    return res.status(400).json({ error: 'Every team must be an object' });
+  }
+
   try {
     let buffer, filename;
     if (form === 'declaration') {

@@ -11,7 +11,7 @@
  */
 
 import { getServiceSupabase } from '../../lib/supabase';
-import { requireAuth } from '../../lib/api-auth';
+import { requireAuth, requireAdminAuth } from '../../lib/api-auth';
 
 const TABLE = 'relay_lineups';
 
@@ -21,8 +21,14 @@ function tableMissing(error) {
 }
 
 export default async function handler(req, res) {
-  const user = await requireAuth(req, res);
-  if (!user) return;
+  // Reads are open to any signed-in coach; writes go through the service-role
+  // client and overwrite the lineups that get submitted on the official entry
+  // form, so they are restricted to admins and head coaches.
+  if (req.method === 'GET') {
+    if (!await requireAuth(req, res)) return;
+  } else if (!await requireAdminAuth(req, res)) {
+    return;
+  }
 
   const supabase = getServiceSupabase();
 

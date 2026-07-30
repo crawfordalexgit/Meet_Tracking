@@ -46,9 +46,12 @@ test('maxPages caps runaway fetches', async () => {
   expect(rows).toHaveLength(2000);
 });
 
-test('error mid-pagination returns rows so far', async () => {
-  const rows = await fetchAllRows(fakeClient(makeRows(3000), { failOnPage: 1 }), 't');
-  expect(rows).toHaveLength(1000);
+test('error mid-pagination throws instead of returning a partial array', async () => {
+  // Changed in the 2026-07-27 audit. Returning "rows so far" hands the caller a
+  // truncated array that is indistinguishable from a complete one, which is
+  // exactly how silently-wrong data reached the UI.
+  await expect(fetchAllRows(fakeClient(makeRows(3000), { failOnPage: 1 }), 't'))
+    .rejects.toThrow(/failed on page 1/);
 });
 
 test('missing client returns empty array', async () => {

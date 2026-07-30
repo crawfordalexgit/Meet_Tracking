@@ -249,12 +249,31 @@ export default async function handler(req, res) {
             // UNIQUE(swimmer_id, meet_id, event) constraint doesn't reject the meet.
             const dedupedResults = dedupeFastestPerEvent(resultsWithSplits);
 
+            // Snapshot before deleting. There is no transaction here and four
+            // workers run concurrently, so a failed insert used to leave the
+            // meet with zero results and only log the fact.
+            const { data: previousResults } = await supabase
+              .from('results')
+              .select('*')
+              .eq('meet_id', meetId);
+
             await supabase.from('results').delete().eq('meet_id', meetId);
             const { error: resultsError } = await supabase.from('results').insert(dedupedResults);
             if (resultsError) {
               console.error(`Failed to insert results for ${meetMeta.name}:`, resultsError);
-              failedMeets.push({ name: meetMeta.name, error: `results insert failed: ${resultsError.message}` });
-              sendProgress(`⚠ Results insert failed for ${meetMeta.name}: ${resultsError.message}`, progressPercent);
+
+              // Put back what was there rather than leaving the meet empty.
+              let restoreNote = '';
+              if (previousResults?.length) {
+                const { error: restoreError } = await supabase.from('results').insert(previousResults);
+                restoreNote = restoreError
+                  ? ` — RESTORE ALSO FAILED (${restoreError.message}); this meet's results are now missing`
+                  : ` — previous ${previousResults.length} results restored`;
+                if (restoreError) console.error(`Failed to restore previous results for ${meetMeta.name}:`, restoreError);
+              }
+
+              failedMeets.push({ name: meetMeta.name, error: `results insert failed: ${resultsError.message}${restoreNote}` });
+              sendProgress(`⚠ Results insert failed for ${meetMeta.name}: ${resultsError.message}${restoreNote}`, progressPercent);
             } else {
               totalResultsScraped += dedupedResults.length;
             }

@@ -10,27 +10,44 @@ export const config = {
 
 const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB — a gala photo
+
+// Runs per part, before any bytes are written to disk.
+const uploadFilter = ({ originalFilename, mimetype }) => {
+  const ext = (originalFilename?.split('.').pop() || '').toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) return false;
+  return !!mimetype && mimetype.startsWith('image/') && mimetype !== 'image/svg+xml';
+};
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   if (!await requireAuth(req, res)) return;
 
+  let uploadedPath = null;
   try {
     // Resolve formidable across v2/v3
     const formidableMod = require('formidable');
+    // Bound the upload: the file is read into memory with readFileSync below.
+    const formOptions = {
+      maxFiles: 1,
+      maxFileSize: MAX_UPLOAD_BYTES,
+      maxTotalFileSize: MAX_UPLOAD_BYTES,
+      filter: uploadFilter,
+    };
     let form;
-    if (typeof formidableMod === 'function') form = formidableMod({});
-    else if (formidableMod.formidable) form = formidableMod.formidable({});
-    else if (formidableMod.default) form = formidableMod.default({});
-    else if (formidableMod.IncomingForm) form = new formidableMod.IncomingForm();
+    if (typeof formidableMod === 'function') form = formidableMod(formOptions);
+    else if (formidableMod.formidable) form = formidableMod.formidable(formOptions);
+    else if (formidableMod.default) form = formidableMod.default(formOptions);
+    else if (formidableMod.IncomingForm) form = new formidableMod.IncomingForm(formOptions);
     else throw new Error('Could not find formidable constructor');
 
     const [fields, files] = await form.parse(req);
     const file = files.file?.[0];
     const meetId = fields.meetId?.[0];
 
-    if (!file) return res.status(400).json({ error: 'No file provided' });
+    if (!file) return res.status(400).json({ error: 'No image provided, or the file type is not supported' });
+    uploadedPath = file.filepath;
     if (!meetId) return res.status(400).json({ error: 'No meetId provided' });
 
     if (!UUID_RE.test(meetId)) {
@@ -49,9 +66,6 @@ export default async function handler(req, res) {
 
     const supabase = getServiceSupabase();
 
-    // Ensure the meet-photos bucket exists (create silently if not)
-    await supabase.storage.createBucket('meet-photos', { public: true }).catch(() => {});
-
     // Read file buffer and build storage path
     const fileBuffer = fs.readFileSync(file.filepath);
     const storagePath = `${meetId}/gala-photo.${fileExt}`;
@@ -61,7 +75,14 @@ export default async function handler(req, res) {
       .from('meet-photos')
       .upload(storagePath, fileBuffer, { contentType: mimeType, upsert: true });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      // The bucket is provisioned once as part of deployment, not per request.
+      if (/bucket not found/i.test(uploadError.message || '')) {
+        console.error(">>> PHOTO UPLOAD: the 'meet-photos' storage bucket does not exist. Create it (public) in the Supabase dashboard.");
+        return res.status(500).json({ error: "Storage is not configured: the 'meet-photos' bucket is missing." });
+      }
+      throw uploadError;
+    }
 
     // Get the public URL
     const { data: { publicUrl } } = supabase.storage
@@ -84,6 +105,13 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('>>> PHOTO UPLOAD ERROR:', error);
+    if (error.code === 'ETOOBIG' || /maxFileSize|maxTotalFileSize/i.test(error.message || '')) {
+      return res.status(413).json({ error: `Image too large. Maximum is ${MAX_UPLOAD_BYTES / 1024 / 1024} MB.` });
+    }
     return res.status(500).json({ error: error.message || 'Upload failed' });
+  } finally {
+    if (uploadedPath) {
+      try { fs.unlinkSync(uploadedPath); } catch { /* already gone */ }
+    }
   }
 }

@@ -1,10 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { getServiceSupabase } from '../../../lib/supabase';
 import { requireAuth } from '../../../lib/api-auth';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -12,15 +7,21 @@ export default async function handler(req, res) {
   const user = await requireAuth(req, res);
   if (!user) return;
 
-  const { swimmerId, coachId, originalInsight, coachCorrection, isPositive } = req.body;
+  const { swimmerId, originalInsight, coachCorrection, isPositive } = req.body;
 
   try {
+    // Lazily constructed so a missing env var surfaces as a request error
+    // rather than throwing at module import and breaking the route at boot.
+    const supabase = getServiceSupabase();
+
     const { data, error } = await supabase
       .from('swimmer_ai_feedback')
       .insert([
         {
           swimmer_id: swimmerId,
-          coach_id: coachId,
+          // Attributed to the authenticated caller, never a client-supplied id
+          // — this row is training data and its audit trail must hold.
+          coach_id: user.id,
           original_insight: originalInsight,
           coach_correction: coachCorrection,
           is_positive: isPositive

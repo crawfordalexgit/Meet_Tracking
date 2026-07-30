@@ -1,6 +1,7 @@
 import puppeteerCore from 'puppeteer-core';
 import chromium from '@sparticuz/chromium-min';
 import { requireAuth } from '../../lib/api-auth';
+import { getSelfOrigin, decodePathForValidation } from '../../lib/self-origin';
 
 const SAFE_PATH_RE = /^\/[a-zA-Z0-9\-_/[\]?=&.+,% ]*$/;
 const ALLOWED_CLIENT_AUTH_KEYS = /^(sb-[a-zA-Z0-9\-]+-auth-token|print-insight-cache|print-report-config)$/;
@@ -18,11 +19,13 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Missing targetPath parameter' });
     }
 
+    // Decode repeatedly: a single pass lets %252e%252e slip past the '..' check
+    // and still resolve to a traversal in the browser.
     let decodedPath;
     try {
-        decodedPath = decodeURIComponent(targetPath);
-    } catch {
-        return res.status(400).json({ error: 'Invalid targetPath encoding' });
+        decodedPath = decodePathForValidation(targetPath);
+    } catch (err) {
+        return res.status(400).json({ error: err.message });
     }
 
     if (!SAFE_PATH_RE.test(decodedPath) || decodedPath.includes('..') || decodedPath.includes('://')) {
@@ -33,9 +36,9 @@ export default async function handler(req, res) {
 
     try {
         // 1. Construct Absolute URL & Auth Bypass (Enforce Rule 5)
-        const protocol = req.headers['x-forwarded-proto'] || 'http';
-        const host = req.headers.host || 'localhost:3000';
-        const baseUrl = `${protocol}://${host}`;
+        // Origin comes from server config, never from request headers: the
+        // caller's session tokens get injected into whatever origin loads.
+        const baseUrl = getSelfOrigin();
         const printToken = process.env.PRINT_SECRET_TOKEN;
         if (!printToken) {
             return res.status(500).json({ error: 'Server misconfigured: PRINT_SECRET_TOKEN is not set' });

@@ -1027,7 +1027,12 @@ const [decayDistance, setDecayDistance] = useState('100');
       // Convert time 'MM:SS.ms' or 'SS.ms' to total seconds
       const timeParts = r.time?.split(':') || [];
       const seconds = timeParts.length === 2 ? (parseFloat(timeParts[0]) * 60 + parseFloat(timeParts[1])) : parseFloat(timeParts[0] || 9999);
-      
+
+      // Skip unparseable times. A NaN stored in lifetimeBestMap poisoned that
+      // event forever: every later `seconds < NaN` is false, so no further PB in
+      // that event was ever counted.
+      if (!Number.isFinite(seconds)) return;
+
       if (!lifetimeBestMap[r.event] || seconds < lifetimeBestMap[r.event]) {
         if (isWithinPeriod) seasonPBs++;
         lifetimeBestMap[r.event] = seconds;

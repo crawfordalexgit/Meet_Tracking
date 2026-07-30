@@ -4,6 +4,9 @@ import { parseResults } from '../../../lib/ai_engine';
 import { normalizeName, normalizeEvent, generateNameAliases } from '../../../lib/analytics-utils';
 import { calculateWAPoints } from '../../../lib/wa-points';
 import { requireAuth } from '../../../lib/api-auth';
+import { assertSafeUrl, isSafeUrl, safeFetch, attachSafeNavigationGuard } from '../../../lib/url-safety';
+import { isUuid } from '../../../lib/validate';
+import { fetchAllRows } from '../../../lib/paginate';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -33,6 +36,20 @@ export default async function handler(req, res) {
 
   const { url, meetId } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
+
+  // meetId is interpolated into a PostgREST .or() filter below and used with a
+  // service-role client — validate before it ever reaches a query string.
+  if (!isUuid(meetId)) {
+    return res.status(400).json({ error: 'Invalid meetId: expected a UUID' });
+  }
+
+  // SSRF guard. Reject before the SSE stream opens so the caller gets a real
+  // status code rather than an error smuggled inside a 200.
+  try {
+    await assertSafeUrl(url);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
 
   console.log(`>>> SCRAPER API: Received request for Meet ID: ${meetId}`);
 
@@ -71,7 +88,10 @@ export default async function handler(req, res) {
     
     const page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
-    
+    // Re-checks each document navigation, so a redirect cannot leave the
+    // allow-list after assertSafeUrl() passed on the original URL.
+    await attachSafeNavigationGuard(page);
+
     sendProgress('Navigating', 10, `Visiting landing page...`);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
 
@@ -108,7 +128,11 @@ export default async function handler(req, res) {
       return bFinal - aFinal;
     });
 
-    const { data: swimmers } = await supabase.from('swimmers').select('id, full_name, gender, legal_first_name, known_as');
+    // Paginated: swimmers past the 1000-row cap were never matched against the
+    // scraped results and their swims were silently dropped.
+    const swimmers = await fetchAllRows(supabase, 'swimmers', {
+      select: 'id, full_name, gender, legal_first_name, known_as',
+    });
     const normalizedSwimmers = swimmers.map(s => {
       const aliases = generateNameAliases(s);
       const nameParts = s.full_name?.split(',') || [];
@@ -126,10 +150,17 @@ export default async function handler(req, res) {
       sendProgress('Scanning Sessions', progress, `Auditing: ${link.text || 'Untitled Session'}`);
       
       try {
+        // Links come off a third-party page: re-validate each one before it is
+        // fetched or browsed.
+        if (!await isSafeUrl(link.href)) {
+          log(`>>> DEEP SCRAPER: Skipping blocked link: ${link.href}`);
+          continue;
+        }
+
         let sessionText = "";
         if (link.href.endsWith('.pdf')) {
           log(`>>> DEEP SCRAPER: Downloading PDF: ${link.href}`);
-          const response = await fetch(link.href);
+          const response = await safeFetch(link.href);
           const buffer = await response.arrayBuffer();
           const tempPath = path.join(os.tmpdir(), `scrape_${Date.now()}.pdf`);
           fs.writeFileSync(tempPath, Buffer.from(buffer));
@@ -139,6 +170,7 @@ export default async function handler(req, res) {
         } else {
           log(`>>> DEEP SCRAPER: Visiting Sub-page: ${link.href}`);
           const subPage = await browser.newPage();
+          await attachSafeNavigationGuard(subPage);
           await subPage.goto(link.href, { waitUntil: 'networkidle2', timeout: 30000 });
           sessionText = await subPage.evaluate(() => document.body.innerText);
           await subPage.close();

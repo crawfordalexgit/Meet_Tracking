@@ -1,6 +1,8 @@
 import { getServiceSupabase } from '../../../lib/supabase';
 import { requireAuth } from '../../../lib/api-auth';
 import { normalizeEvent, timeToSeconds } from '../../../lib/analytics-utils';
+import { fetchAllRows } from '../../../lib/paginate';
+import { isUuid } from '../../../lib/validate';
 import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
   Header, Footer, AlignmentType, BorderStyle, WidthType,
@@ -229,15 +231,22 @@ export default async function handler(req, res) {
 
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'Meet ID required' });
+  if (!isUuid(id)) return res.status(400).json({ error: 'Invalid meet id: expected a UUID' });
 
   const supabase = getServiceSupabase();
 
-  const [meetRes, resultsRes, reportRes] = await Promise.all([
+  // The whole body is wrapped: without a try/catch, a rejection anywhere below
+  // (Promise.all, Packer.toBuffer) left the request hanging with no response
+  // until the platform timeout.
+  try {
+  const [meetRes, resultsArr, reportRes] = await Promise.all([
     supabase.from('meets').select('*, children:meets(id, name), staff_text').eq('id', id).single(),
-    supabase.from('results')
-      .select('*, swimmers(id, full_name, known_as, squads(name))')
-      .eq('meet_id', id)
-      .order('event'),
+    // Paginated: meets with >1000 result rows silently lost rows from the
+    // exported report, understating PB and podium counts.
+    fetchAllRows(supabase, 'results', {
+      select: '*, swimmers(id, full_name, known_as, squads(name))',
+      filter: q => q.eq('meet_id', id).order('event'),
+    }),
     supabase.from('ai_reports')
       .select('content')
       .eq('meet_id', id)
@@ -249,7 +258,7 @@ export default async function handler(req, res) {
   const meet = meetRes.data;
   if (!meet) return res.status(404).json({ error: 'Meet not found' });
 
-  const results = resultsRes.data || [];
+  const results = resultsArr || [];
   const insight = reportRes.data?.[0]?.content || null;
 
   // Fetch swimmer PBs to compute active_is_pb (same logic as webpage augmentedResults)
@@ -591,4 +600,12 @@ export default async function handler(req, res) {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
   res.setHeader('Content-Disposition', `attachment; filename="${safeName}_Report.docx"`);
   res.send(buffer);
+
+  } catch (error) {
+    console.error('Meet Word export failed:', error);
+    if (!res.headersSent) {
+      return res.status(500).json({ error: 'Could not generate the Word report.' });
+    }
+    return res.end();
+  }
 }

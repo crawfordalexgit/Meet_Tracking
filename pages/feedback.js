@@ -10,6 +10,7 @@ export default function FeedbackBoard({ session }) {
   const [filterMode, setFilterMode] = useState('all'); // 'all', 'Bug', 'Feature Request', 'Data Discrepancy'
   const [sortBy, setSortBy] = useState('upvotes'); // 'upvotes', 'newest'
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Fetch issues and user upvotes
@@ -50,7 +51,10 @@ export default function FeedbackBoard({ session }) {
         }
       }
     } catch (err) {
+      // Surfaced, not just logged: a backend outage used to render the
+      // "No Submissions Found" empty state, which reads as "nothing to see".
       console.error('Error loading feedback board:', err);
+      setLoadError(err.message || 'Could not load the feedback board.');
     } finally {
       setLoading(false);
     }
@@ -255,6 +259,13 @@ export default function FeedbackBoard({ session }) {
           <div className="p-12 text-center opacity-50 flex flex-col items-center gap-4">
             <div className="animate-spin h-8 w-8 border-t-2 border-cyan-400 rounded-full"></div>
             <div className="text-xs font-black tracking-widest uppercase">Retrieving Feedback Board...</div>
+          </div>
+        ) : loadError ? (
+          <div className="glass-card text-center p-12" style={{ borderLeft: '4px solid var(--accent-rose)' }}>
+            <div className="text-4xl mb-4">⚠️</div>
+            <h3 className="text-xl font-bold mb-2" style={{ color: 'var(--accent-rose)' }}>Couldn&apos;t load the feedback board</h3>
+            <p className="text-sm opacity-70 mb-6">{loadError}</p>
+            <button className="period-btn" onClick={fetchFeedbackData}>Retry</button>
           </div>
         ) : sortedIssues.length === 0 ? (
           <div className="glass-card text-center p-12 opacity-60">

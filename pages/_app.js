@@ -26,11 +26,16 @@ export default function MyApp({ Component, pageProps }) {
     // 1. Grab the session if they just returned from Google
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      // checkProfile was defined but never called, so isPending could never
+      // become true and the "Account Pending" gate below was unreachable — a
+      // coach with no squad assignments got full operational access.
+      checkProfile(session);
     });
 
     // 2. Listen for any future login/logout events
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
+      checkProfile(session);
     });
 
     return () => subscription?.unsubscribe();
@@ -58,7 +63,10 @@ export default function MyApp({ Component, pageProps }) {
         setIsPending(false);
       }
     } catch (e) {
-      console.error(e);
+      // Fail open: a transient profile/coach_squads read failure must not lock
+      // an approved coach out behind the pending screen.
+      console.error('Could not check account approval status:', e);
+      setIsPending(false);
     }
   };
 

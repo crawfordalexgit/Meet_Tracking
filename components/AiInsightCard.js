@@ -501,19 +501,19 @@ export default function AiInsightCard({
             <div style={{ spaceY: '1.5rem' }}>
               <div className="mb-4">
                 <div style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Strengths</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.strengths) }} />
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown((insight.summary.swot || {}).strengths) }} />
               </div>
               <div className="mb-4">
                 <div style={{ fontSize: '0.6rem', color: 'var(--accent-rose)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Areas to work on</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.weaknesses) }} />
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown((insight.summary.swot || {}).weaknesses) }} />
               </div>
               <div className="mb-4">
                 <div style={{ fontSize: '0.6rem', color: 'var(--accent-cyan)', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Room to grow</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.opportunities) }} />
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown((insight.summary.swot || {}).opportunities) }} />
               </div>
               <div>
                 <div style={{ fontSize: '0.6rem', color: '#f59e0b', fontWeight: 900, textTransform: 'uppercase', marginBottom: 4 }}>Watch out for</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(insight.summary.swot.threats) }} />
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} dangerouslySetInnerHTML={{ __html: renderInlineMarkdown((insight.summary.swot || {}).threats) }} />
               </div>
             </div>
           </div>

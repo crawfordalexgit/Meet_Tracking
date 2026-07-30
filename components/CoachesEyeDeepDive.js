@@ -1,6 +1,11 @@
 import React, { useMemo } from 'react';
 
-export default function CoachesEyeDeepDive({ results, attendance, sessions, swimmer, squad, rel, insights = [] }) {
+// Array/object props default so this renders safely before the parent's fetch
+// resolves — every consumer passes them straight through from state.
+export default function CoachesEyeDeepDive({
+  results = [], attendance = [], sessions = [],
+  swimmer = {}, squad = {}, rel = {}, insights = [],
+}) {
   const latestReport = useMemo(() => {
     if (!insights || insights.length === 0) return null;
     return insights[0].full_report;

@@ -1,5 +1,6 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/api-auth';
+import { fetchAllRows } from '../../lib/paginate';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -16,12 +17,15 @@ export default async function handler(req, res) {
   try {
     const supabase = getServiceSupabase();
     
-    // 1. Fetch all swimmers and sessions to minimize DB calls
-    const { data: swimmers } = await supabase.from('swimmers').select('id, full_name');
-    const { data: existingSessions } = await supabase.from('sessions').select('id, name');
+    // 1. Fetch all swimmers and sessions to minimize DB calls (both paginated —
+    // truncation here made real records look like unmatched names and skip)
+    const [swimmers, existingSessions] = await Promise.all([
+      fetchAllRows(supabase, 'swimmers', { select: 'id, full_name' }),
+      fetchAllRows(supabase, 'sessions', { select: 'id, name' }),
+    ]);
 
     const sessionCache = {}; // name -> id
-    existingSessions.forEach(s => sessionCache[s.name.toLowerCase()] = s.id);
+    (existingSessions || []).forEach(s => { if (s.name) sessionCache[s.name.toLowerCase()] = s.id; });
 
     let importCount = 0;
     let skipCount = 0;

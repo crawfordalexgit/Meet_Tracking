@@ -57,6 +57,7 @@ function SquadCard({ squad, periodDays }) {
 export default function Dashboard({ session }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [data, setData] = useState({ swimmers: [], squads: [], results: [], attendance: [], sessions: [], meets: [], pbs: [], exemptions: [], rankings: [], memberships: [] });
   const [search, setSearch] = useState('');
   const [periodDays, setPeriodDays] = useState(365);
@@ -177,7 +178,14 @@ export default function Dashboard({ session }) {
       const enrichedResults = (results || []).map(r => ({ ...r, meets: meetsById[r.meet_id] || null, _ts: new Date(r.date).getTime() }));
 
       setData({ swimmers, squads, results: enrichedResults, attendance, sessions, meets, pbs: pbs || [], exemptions, rankings: rankings || [], memberships: memberships || [] });
-    } catch (e) { console.error(e); }
+      setLoadError(null);
+    } catch (e) {
+      // Previously swallowed: `data` stayed at its empty initial value and the
+      // cockpit rendered a complete-looking dashboard showing 0% health, 0 PBs
+      // and 0 qualifiers — indistinguishable from a club with no data.
+      console.error('Dashboard data load failed:', e);
+      setLoadError(e.message || 'Could not load dashboard data.');
+    }
     setLoading(false);
   };
 
@@ -267,7 +275,11 @@ export default function Dashboard({ session }) {
     });
     const strokeData = {};
     Object.entries(clubStrokes).forEach(([k, v]) => {
-      strokeData[k] = { avg: v.pts.reduce((a,b)=>a+b,0) / v.count, peak: Math.max(...v.pts), count: v.count };
+      // reduce, not Math.max(...v.pts): spreading every club-wide WA-points
+      // value as arguments blows the engine's stack (RangeError) at the row
+      // counts this page already handles.
+      const peak = v.pts.reduce((max, n) => (n > max ? n : max), 0);
+      strokeData[k] = { avg: v.count ? v.pts.reduce((a,b)=>a+b,0) / v.count : 0, peak, count: v.count };
     });
 
     T('squadKPIs start');
@@ -863,6 +875,18 @@ export default function Dashboard({ session }) {
         `}</style>
       </Head>
 
+      {loadError && (
+        <div className="glass-card no-print" style={{ marginBottom: '2rem', padding: '1.25rem 1.75rem', borderLeft: '4px solid var(--accent-rose)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem' }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: '0.8rem', color: 'var(--accent-rose)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Data could not be loaded</div>
+            <div style={{ fontSize: '0.85rem', opacity: 0.7, marginTop: '4px' }}>
+              The figures below are incomplete or stale. {loadError}
+            </div>
+          </div>
+          <button className="period-btn" onClick={fetchAll}>Retry</button>
+        </div>
+      )}
+
       <div className="profile-header no-print" style={{ marginBottom: '4rem', paddingBottom: '2rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div style={{ flex: 1 }}>
           <div className="flex items-center gap-6 mb-2">
@@ -1325,8 +1349,16 @@ export default function Dashboard({ session }) {
           <div className="insight-content">
             <div className="insight-value" style={{ color: 'var(--accent-cyan)' }}>{100 - stats.complianceRate}% <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>COMPLIANCE GAP</span></div>
             <div className="insight-description" style={{ fontSize: '0.85rem' }}>
-              <p className="mb-4">Critical Audit Findings: While overall health is high, we have identified a {100 - stats.complianceRate}% compliance deficit specifically in the 12-14 age bands. Training volume in the Development pathways has dropped by 8.4% month-over-month.</p>
-              <p>Tactical Impact: This volume deficit is creating a performance bottleneck, impacting technical progression across the development cycle. Immediate intervention in training consistency is recommended for the Development squads to restore performance momentum.</p>
+              {/* The prose here used to state a "12-14 age band" deficit, an
+                  "8.4% month-over-month" volume drop and a "42% Top-40 gap" —
+                  none of which were derived from any data. They were hardcoded
+                  strings rendered beside the real KPIs with the same authority.
+                  Only the computed compliance gap remains. */}
+              <p className="mb-4">
+                {stats.complianceRate}% of athletes are currently meeting their meet-attendance target,
+                leaving a {100 - stats.complianceRate}% compliance gap across the club.
+              </p>
+              <p>Use the squad cards below to see which squads carry that gap, and the athlete registry to identify the individuals driving it.</p>
             </div>
           </div>
         </div>
@@ -1342,8 +1374,15 @@ export default function Dashboard({ session }) {
           <div className="insight-content">
             <div className="insight-value" style={{ color: 'var(--accent-amber)' }}>{stats.achievementSummary?.national_count || 0} <span style={{ fontSize: '0.8rem', opacity: 0.8 }}>ELITE ENTRIES</span></div>
             <div className="insight-description" style={{ fontSize: '0.85rem' }}>
-              <p className="mb-4">Competitive Footprint Audit: National-tier entries remain stable but have failed to expand in the middle-distance categories. Our current footprint is heavily skewed towards sprint events (50m/100m).</p>
-              <p>Strategic Bottleneck: The rankings data highlights a 42% gap in Top-40 penetration for 200m+ events. Without a targeted focus on aerobic threshold training, the club risks technical stagnation in the long-distance performance brackets.</p>
+              {/* Same as the panel above: the "sprint-skewed footprint" and the
+                  "42% Top-40 penetration gap" were hardcoded claims, not
+                  measurements. Reporting only what is actually computed. */}
+              <p className="mb-4">
+                {stats.achievementSummary?.national_count || 0} athletes hold a national top-40 ranking,
+                {' '}{stats.achievementSummary?.regional_count || 0} a regional top-30, and
+                {' '}{stats.achievementSummary?.county_count || 0} a county top-10.
+              </p>
+              <p>Open the Predictor to see which athletes are closest to the next standard by event.</p>
             </div>
           </div>
         </div>

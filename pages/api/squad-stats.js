@@ -1,25 +1,13 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/api-auth';
 import { computeSquadStats, calculateSquadHealth } from '../../lib/analytics-utils';
+import { fetchAllRows } from '../../lib/paginate';
 
-async function fetchAll(client, table, select = '*', filter = null) {
-  const pageSize = 1000;
-  let all = [];
-  let page = 0;
-  while (page < 100) {
-    // .order('id') keeps .range() page boundaries stable — without it Postgres
-    // can duplicate/drop rows across pages under concurrent load.
-    let q = client.from(table).select(select).order('id').range(page * pageSize, (page + 1) * pageSize - 1);
-    if (filter) q = filter(q);
-    const { data, error } = await q;
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    all = all.concat(data);
-    if (data.length < pageSize) break;
-    page++;
-  }
-  return all;
-}
+// Thin adapter over the shared paginator. This used to be a local copy that
+// applied .order('id') BEFORE the caller's filter, so a caller-supplied sort
+// was demoted to a tiebreaker.
+const fetchAll = (client, table, select = '*', filter = null) =>
+  fetchAllRows(client, table, { select, filter });
 
 /**
  * Server-side squad KPI aggregation for the squad registry (pages/squads.js).
@@ -46,13 +34,16 @@ export default async function handler(req, res) {
       fetchAll(supabase, 'sessions', '*'),
       fetchAll(supabase, 'session_memberships', '*'),
       supabase.from('club_exemptions').select('*'),
-      supabase.from('rankings').select('*').order('snapshot_date', { ascending: false })
+      // Paginated: an unbounded rankings select is capped at 1000 rows, which
+      // silently truncated the latest snapshot and under-reported every
+      // National/Regional/County achievement count.
+      fetchAll(supabase, 'rankings', '*', q => q.order('snapshot_date', { ascending: false }))
     ]);
 
     if (squadsRes.error) throw squadsRes.error;
     const squadsArr = squadsRes.data || [];
     const exemptionsArr = exRes.data || [];
-    const rankings = rankingsRes.data || [];
+    const rankings = rankingsRes || [];
 
     const uniqueSnapshots = [...new Set(rankings.map(r => r.snapshot_date))].sort((a, b) => new Date(b) - new Date(a));
     const latestSnapshot = uniqueSnapshots[0] || null;

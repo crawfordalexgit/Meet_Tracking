@@ -1,6 +1,6 @@
 {
   "name": "open-meet-dashboard",
-  "version": "1.0.195",
+  "version": "1.0.197",
   "description": "",
   "scripts": {
     "dev": "next dev",
@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "test": "playwright test --project=unit --project=api --project=integrity --project=e2e",
-    "test:unit": "playwright test --project=unit",
+    "test:unit": "playwright test --config=playwright.unit.config.js",
     "test:api": "playwright test --project=api",
     "test:integrity": "playwright test --project=integrity",
     "test:e2e": "playwright test --project=e2e",
@@ -24,6 +24,7 @@
     "@anthropic-ai/sdk": "^0.110.0",
     "@google/generative-ai": "^0.24.1",
     "@sparticuz/chromium-min": "^149.0.0",
+    "pdf.js-extract": "^1.0.1",
     "@supabase/supabase-js": "^2.105.4",
     "cheerio": "^1.2.0",
     "diff": "^9.0.0",
@@ -45,7 +46,6 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "pdf-parse": "^2.4.5",
-    "pdf.js-extract": "^1.0.1",
     "pdf2json": "^4.0.3"
   }
 }

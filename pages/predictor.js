@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { normalizeEvent, timeToSeconds } from '../lib/analytics-utils';
+import { fetchAllRows } from '../lib/paginate';
 import { getBenchmarks } from '../lib/qualifying-times';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -371,6 +372,7 @@ export default function PredictorPage({ session: propSession }) {
   const [swimmers, setSwimmers]     = useState([]);
   const [allResults, setAllResults] = useState([]);
   const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState(null);
   const [selectedId, setSelectedId] = useState('');
   const [course, setCourse]         = useState('SC');
   const [search, setSearch]         = useState('');
@@ -400,13 +402,31 @@ export default function PredictorPage({ session: propSession }) {
     if (!session) return;
     async function fetchData() {
       setLoading(true);
-      const [{ data: swData }, { data: resData }] = await Promise.all([
-        supabase.from('swimmers').select('id, full_name, known_as, year_of_birth, gender, squads(name)').eq('is_active', true).order('full_name'),
-        supabase.from('results').select('swimmer_id, event, time, wa_pts, date, is_pb').order('date', { ascending: false }),
+      setLoadError(null);
+      try {
+      // Both paginated: the results table is well past PostgREST's 1000-row
+      // cap, and a truncated slice made getSwimmerPB() compute "personal bests"
+      // from an arbitrary subset.
+      const [swData, resData] = await Promise.all([
+        fetchAllRows(supabase, 'swimmers', {
+          select: 'id, full_name, known_as, year_of_birth, gender, squads(name)',
+          filter: q => q.eq('is_active', true).order('full_name'),
+        }),
+        fetchAllRows(supabase, 'results', {
+          select: 'swimmer_id, event, time, wa_pts, date, is_pb',
+          filter: q => q.order('date', { ascending: false }),
+        }),
       ]);
       setSwimmers(swData || []);
       setAllResults(resData || []);
-      setLoading(false);
+      } catch (err) {
+        // Without this, a rejected query skipped setLoading(false) and the page
+        // sat on "Loading swimmer data…" forever with no explanation.
+        console.error('Predictor data load failed:', err);
+        setLoadError(err.message || 'Could not load swimmer data.');
+      } finally {
+        setLoading(false);
+      }
     }
     fetchData();
   }, [session]);
@@ -473,6 +493,18 @@ export default function PredictorPage({ session: propSession }) {
       <Layout session={session}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}>
           <p style={{ opacity: 0.5, fontWeight: 700 }}>Loading swimmer data…</p>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Layout session={session}>
+        <div className="glass-card" style={{ maxWidth: '520px', margin: '4rem auto', padding: '3rem', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-rose)', marginBottom: '1rem' }}>Couldn&apos;t load swimmer data</h2>
+          <p style={{ opacity: 0.7, fontSize: '0.9rem', marginBottom: '2rem' }}>{loadError}</p>
+          <button className="period-btn" onClick={() => window.location.reload()}>Retry</button>
         </div>
       </Layout>
     );

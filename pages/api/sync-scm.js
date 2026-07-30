@@ -1,21 +1,28 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { fetchScmNumericIds, scmLogin, fetchSwimmerSquadJoinDate, fetchSwimmerSessions } from '../../lib/scm-scraper';
-import { requireAuth } from '../../lib/api-auth';
+import { requireAdminAuth } from '../../lib/api-auth';
+import { fetchAllRows } from '../../lib/paginate';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!await requireAuth(req, res)) return;
+  // This sync deletes every swimmer absent from the SCM response, which
+  // cascades to their results and attendance. Admin only.
+  if (!await requireAdminAuth(req, res)) return;
 
-  const scmApiKey = req.body.scmApiKey || process.env.SCM_API_KEY;
+  // The key comes from server config only. Accepting it from the body let any
+  // caller drive the sync with an arbitrary third-party credential.
+  const scmApiKey = process.env.SCM_API_KEY;
   const { includeWebTasks = false } = req.body;
   console.log('SCM SYNC REQUEST:', { hasApiKey: !!scmApiKey, includeWebTasks });
 
   if (!scmApiKey) {
-    return res.status(400).json({ error: 'Missing SCM API Key. Please provide it in the request or set SCM_API_KEY in environment.' });
+    return res.status(500).json({ error: 'Server misconfigured: SCM_API_KEY is not set.' });
   }
+
+  let cleanupWarning = null;
 
   try {
     let supabase = null;
@@ -193,10 +200,11 @@ export default async function handler(req, res) {
     // 4. Fetch existing swimmers to check for squad moves
     let existingSwimmers = [];
     if (supabase) {
-      const { data } = await supabase
-        .from('swimmers')
-        .select('member_id, squad_id, squad_join_date');
-      existingSwimmers = data || [];
+      // Paginated: truncation here silently reset squad_join_date to null on
+      // upsert for every swimmer past the 1000-row cap.
+      existingSwimmers = await fetchAllRows(supabase, 'swimmers', {
+        select: 'member_id, squad_id, squad_join_date',
+      });
     }
     
     const existingMap = new Map();
@@ -272,15 +280,26 @@ export default async function handler(req, res) {
       // 5. Cleanup: Delete swimmers from DB who are no longer active/present in SCM
       const activeMemberIds = finalSwimmersToInsert.map(s => s.member_id);
       if (activeMemberIds.length > 0) {
-        // Fetch all current IDs to find which ones to delete
-        const { data: allCurrentSwimmers } = await supabase.from('swimmers').select('member_id');
-        if (allCurrentSwimmers) {
+        // Fetch all current IDs to find which ones to delete. Paginated: a
+        // truncated list here computes the delete-diff against incomplete data.
+        const allCurrentSwimmers = await fetchAllRows(supabase, 'swimmers', { select: 'member_id' });
+        if (allCurrentSwimmers.length) {
           const activeIdsSet = new Set(activeMemberIds);
           const idsToDelete = allCurrentSwimmers
             .map(s => s.member_id)
             .filter(id => !activeIdsSet.has(id));
 
-          if (idsToDelete.length > 0) {
+          // Safety valve. Deleting a swimmer cascades to their results and
+          // attendance, so a partial or failed SCM response must not be able to
+          // wipe the club. If the diff looks like a bad payload rather than a
+          // handful of leavers, skip the cleanup and report it.
+          const deleteRatio = idsToDelete.length / allCurrentSwimmers.length;
+          const MAX_DELETE_RATIO = 0.1;
+          if (idsToDelete.length > 0 && deleteRatio > MAX_DELETE_RATIO) {
+            const msg = `SCM SYNC: refusing to delete ${idsToDelete.length} of ${allCurrentSwimmers.length} swimmers (${Math.round(deleteRatio * 100)}%). This looks like a partial SCM response, not a set of leavers. Skipping cleanup.`;
+            console.error(msg);
+            cleanupWarning = msg;
+          } else if (idsToDelete.length > 0) {
             console.log(`Cleaning up ${idsToDelete.length} inactive swimmers...`);
             await supabase.from('swimmers').delete().in('member_id', idsToDelete);
           }
@@ -373,9 +392,10 @@ export default async function handler(req, res) {
     }
 
 
-    return res.status(200).json({ 
-      success: true, 
-      message: `Synced ${finalSwimmersToInsert.length} swimmers, ${squadsToInsert.length} squads. Valid competitive squads found: ${validSquadNames.size}.` 
+    return res.status(200).json({
+      success: true,
+      message: `Synced ${finalSwimmersToInsert.length} swimmers, ${squadsToInsert.length} squads. Valid competitive squads found: ${validSquadNames.size}.`,
+      ...(cleanupWarning ? { warning: cleanupWarning } : {})
     });
   } catch (error) {
     console.error('SCM Sync Error:', error);

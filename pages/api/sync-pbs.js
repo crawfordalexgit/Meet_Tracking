@@ -2,6 +2,7 @@ import { getServiceSupabase } from '../../lib/supabase';
 import * as cheerio from 'cheerio';
 import { extractSwimId, fetchSplits } from '../../lib/rankings-scraper';
 import { requireAuth } from '../../lib/api-auth';
+import { fetchAllRows } from '../../lib/paginate';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -28,12 +29,11 @@ export default async function handler(req, res) {
 
   try {
     sendProgress('Fetching swimmers list...', 5);
-    let query = supabase.from('swimmers').select('id, member_id, full_name');
-    if (swimmerId) {
-      query = query.eq('id', swimmerId);
-    }
-    const { data: swimmers, error: swimmerError } = await query;
-    if (swimmerError) throw swimmerError;
+    // Paginated: an unbounded select caps at 1000 rows and silently skips the rest.
+    const swimmers = await fetchAllRows(supabase, 'swimmers', {
+      select: 'id, member_id, full_name',
+      filter: swimmerId ? (q => q.eq('id', swimmerId)) : null,
+    });
 
     let synced = 0;
     let errors = 0;

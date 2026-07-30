@@ -7,6 +7,7 @@ import { authedFetch } from '../../../lib/api-client';
 import Link from 'next/link';
 import Head from 'next/head';
 import { normalizeName, normalizeEvent, getCategoryBenchmark, timeToSeconds, getPreferredName, generateNameAliases } from '../../../lib/analytics-utils';
+import { fetchAllRows } from '../../../lib/paginate';
 
 export default function MeetReport({ session }) {
   const router = useRouter();
@@ -201,16 +202,20 @@ export default function MeetReport({ session }) {
     try {
       const currentYear = new Date().getFullYear();
       
-      const { data: baselineData } = await supabase
-        .from('results')
-        .select('wa_pts, swimmers(squad_id), meets!inner(date)')
-        .in('swimmers.squad_id', squadIds)
-        .gte('meets.date', `${currentYear}-01-01`);
+      // swimmers!inner: filtering an embedded relation without !inner returns
+      // the non-matching rows too, with swimmers: null, which then bucketed
+      // them under the key "undefined" and skewed every squad baseline.
+      // Paginated because the club-wide result set is well past 1000 rows.
+      const baselineData = await fetchAllRows(supabase, 'results', {
+        select: 'wa_pts, swimmers!inner(squad_id), meets!inner(date)',
+        filter: q => q.in('swimmers.squad_id', squadIds).gte('meets.date', `${currentYear}-01-01`),
+      });
 
       if (baselineData) {
         const baselines = {};
         baselineData.forEach(r => {
           const sId = r.swimmers?.squad_id;
+          if (!sId) return;
           if (!baselines[sId]) baselines[sId] = { total: 0, count: 0 };
           baselines[sId].total += (r.wa_pts || 0);
           baselines[sId].count++;
@@ -560,13 +565,14 @@ export default function MeetReport({ session }) {
             // Standard comparison (allow equal PBs)
             isPb = true;
           }
-        } else if (resultSeconds > 0) {
-          // If no record exists for this event+course combination, it's a PB for this context
-          isPb = true;
         }
+        // No swimmer_pbs record for this event+course means we have no baseline
+        // to compare against — NOT that this swim beat one. Claiming a PB here
+        // marked every first-ever swim as a personal best and inflated the
+        // meet's headline PB count and PB-conversion rate.
       }
-      
-      return { ...r, active_is_pb: isPb };
+
+      return { ...r, active_is_pb: isPb, isFirstSwim: !coursePb };
     });
   }, [results, pbs, meet]);
 
@@ -1434,7 +1440,10 @@ export default function MeetReport({ session }) {
                   </div>
                   
                   <div className="space-y-4">
-                    {insight.summary.split('\n\n').map((para, i) => (
+                    {/* Guarded: a stored report whose content lacks a string
+                        summary (older schema, partial write, truncated model
+                        response) used to crash the whole meet page on load. */}
+                    {String(insight.summary || '').split('\n\n').filter(Boolean).map((para, i) => (
                       <p key={i} style={{ fontSize: '1.1rem', lineHeight: '1.8', color: 'rgba(255,255,255,0.9)', fontWeight: 500 }}>
                         {stripEmojis(para)}
                       </p>
@@ -1926,7 +1935,9 @@ export default function MeetReport({ session }) {
                       {r.meets?.name?.replace('Kent County Championships 2026', 'Session')}
                     </td>
                   )}
-                  <td style={{ fontSize: '0.75rem', fontWeight: 800, opacity: 0.8 }}>{r.swimmers.squads?.name}</td>
+                  {/* r.swimmers?. — a result row whose swimmer was deleted or
+                      merged comes back with swimmers: null and crashed the table. */}
+                  <td style={{ fontSize: '0.75rem', fontWeight: 800, opacity: 0.8 }}>{r.swimmers?.squads?.name}</td>
                   <td style={{ fontSize: '0.8rem', fontWeight: 500 }}>{r.event}</td>
                   <td style={{ textAlign: 'center', fontWeight: 950, fontSize: '1rem' }}>{r.time}</td>
                       <td style={{ padding: '1.2rem', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>

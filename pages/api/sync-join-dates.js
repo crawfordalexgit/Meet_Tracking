@@ -1,18 +1,25 @@
-import { createClient } from '@supabase/supabase-js';
+import { getServiceSupabase } from '../../lib/supabase';
 import { scmLogin, fetchSwimmerSquadJoinDate } from '../../lib/scm-scraper';
-import { requireAuth } from '../../lib/api-auth';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { requireAdminAuth } from '../../lib/api-auth';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!await requireAuth(req, res)) return;
+  // Rewrites squad_join_date club-wide, which shifts every swimmer's
+  // reliability analysis window. Admin only.
+  if (!await requireAdminAuth(req, res)) return;
+
+  // Constructed per-request: a module-scope createClient() throws at import
+  // time when the env vars are missing, breaking the route at boot instead of
+  // failing with a clear error.
+  let supabase;
+  try {
+    supabase = getServiceSupabase();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 
   // Set up Server-Sent Events for progress tracking
   res.writeHead(200, {

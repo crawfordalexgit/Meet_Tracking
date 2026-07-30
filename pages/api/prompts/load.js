@@ -1,13 +1,14 @@
 import fs from 'fs';
 import path from 'path';
-import { requireAuth } from '../../../lib/api-auth';
+import { requireAdminAuth } from '../../../lib/api-auth';
 
 const SAFE_FACET_RE = /^[a-z0-9_]+$/;
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  if (!await requireAuth(req, res)) return;
+  // Same resource as prompts/save and prompts/rollback, so the same gate.
+  if (!await requireAdminAuth(req, res)) return;
 
   const { facet } = req.query;
   if (!facet) return res.status(400).json({ error: 'Facet required' });

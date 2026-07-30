@@ -64,6 +64,7 @@ export default function RelaysPage({ session: propSession }) {
   const router = useRouter();
   const [session, setSession] = useState(propSession || null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [rawSwimmers, setRawSwimmers] = useState([]);
   const [rawPbs, setRawPbs] = useState(null);       // { [id]: pbRows } — null until loaded
   const [savedRaw, setSavedRaw] = useState(null);   // saved lineups (unresolved swimmer ids)
@@ -127,8 +128,10 @@ export default function RelaysPage({ session: propSession }) {
     if (!session) return;
     (async () => {
       setLoading(true);
-      const [{ data: swData }, pbs] = await Promise.all([
-        supabase.from('swimmers').select('id, full_name, known_as, year_of_birth, gender'),
+      setLoadError(null);
+      try {
+      const [swData, pbs] = await Promise.all([
+        fetchAllRows(supabase, 'swimmers', { select: 'id, full_name, known_as, year_of_birth, gender' }),
         fetchAllRows(supabase, 'swimmer_pbs', { select: 'swimmer_id,event,course,time_seconds', filter: (q) => q.in('course', ['S', 'L']) }),
       ]);
       const bySwimmer = {};
@@ -144,7 +147,14 @@ export default function RelaysPage({ session: propSession }) {
       setSavedRaw(saved);
       setRawSwimmers(swData || []);
       setRawPbs(bySwimmer);
-      setLoading(false);
+      } catch (err) {
+        // A rejected Promise.all used to skip setLoading(false), hanging the
+        // page on "Loading roster and short-course times…" indefinitely.
+        console.error('Relay roster load failed:', err);
+        setLoadError(err.message || 'Could not load the relay roster.');
+      } finally {
+        setLoading(false);
+      }
     })();
   }, [session]);
 
@@ -357,6 +367,12 @@ export default function RelaysPage({ session: propSession }) {
       </tbody></table>`).join('');
     const anyConverted = teams.some((t) => t.converted);
     const w = window.open('', '_blank');
+    // Null check: with a popup blocker enabled window.open returns null and
+    // Print threw "Cannot read properties of null".
+    if (!w) {
+      alert('Your browser blocked the print window. Allow pop-ups for this site and try again.');
+      return;
+    }
     w.document.write(`<html><head><title>${MEET.name} — ${CLUB_NAME}</title>
       <style>body{font-family:Arial,sans-serif;padding:24px;color:#111}h1{margin:0 0 4px}h3{margin:18px 0 6px;font-size:14px}
       table{border-collapse:collapse;width:100%;font-size:12px}th,td{border:1px solid #ccc;padding:5px 8px;text-align:left}
@@ -373,6 +389,18 @@ export default function RelaysPage({ session: propSession }) {
 
   if (loading) {
     return <Layout session={session}><div style={{ display: 'flex', justifyContent: 'center', minHeight: '50vh', alignItems: 'center' }}><p style={{ opacity: 0.5, fontWeight: 700 }}>Loading roster and short-course times…</p></div></Layout>;
+  }
+
+  if (loadError) {
+    return (
+      <Layout session={session}>
+        <div className="glass-card" style={{ maxWidth: '520px', margin: '4rem auto', padding: '3rem', textAlign: 'center' }}>
+          <h2 style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--accent-rose)', marginBottom: '1rem' }}>Couldn&apos;t load the relay roster</h2>
+          <p style={{ opacity: 0.7, fontSize: '0.9rem', marginBottom: '2rem' }}>{loadError}</p>
+          <button className="period-btn" onClick={() => window.location.reload()}>Retry</button>
+        </div>
+      </Layout>
+    );
   }
 
   const selectedEvent = selected ? EVENTS.find((e) => e.key === selected) : null;
