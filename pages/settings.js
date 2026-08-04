@@ -110,7 +110,20 @@ export default function Settings({ session, scmApiKey }) {
       setMasterSyncState({ active: true, step: 2, message: 'Phase 2: Syncing Training Attendance...' });
       await authedFetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scmApiKey: scmKey }) });
 
-      setMasterSyncState({ active: false, step: 3, message: 'Daily Master Sync Complete! System is up to date.' });
+      // Phase 3 is client-batched rather than a single request: it scrapes SCM
+      // per swimmer, which is why /api/sync-scm skips this work by default.
+      setMasterSyncState({ active: true, step: 3, message: 'Phase 3: Syncing Session Memberships...' });
+      const { total, failedBatches } = await runSessionMembershipSync((done, all) => {
+        setMasterSyncState({ active: true, step: 3, message: `Phase 3: Syncing Session Memberships (${done}/${all})...` });
+      });
+
+      setMasterSyncState({
+        active: false,
+        step: 4,
+        message: failedBatches > 0
+          ? `Master Sync finished with ${failedBatches} failed membership batch(es) of ${total} swimmers — re-run Session Memberships.`
+          : 'Daily Master Sync Complete! System is up to date.'
+      });
       loadData();
       setTimeout(() => setMasterSyncState({ active: false, step: 0, message: '' }), 5000);
     } catch (error) {
@@ -559,44 +572,71 @@ export default function Settings({ session, scmApiKey }) {
     }
   };
 
+  /**
+   * Scrapes every swimmer's SCM sessions and rewrites session_memberships.
+   *
+   * Batched at 5 swimmers per request because the endpoint logs into SCM and
+   * scrapes a page per swimmer — the same cost that keeps this work out of
+   * /api/sync-scm, where a single all-swimmers pass would time out.
+   *
+   * Shared by the Settings card and Master Sync. onProgress(done, total) drives
+   * whichever progress UI is showing. Returns { total, failedBatches } so a
+   * partial run reports itself instead of claiming success.
+   */
+  const runSessionMembershipSync = async (onProgress) => {
+    const { data: swimmers } = await supabase
+      .from('swimmers')
+      .select('id')
+      .not('scm_numeric_id', 'is', null);
+
+    if (!swimmers || swimmers.length === 0) {
+      throw new Error('No swimmers with SCM IDs found. Run SCM Sync first.');
+    }
+
+    const batchSize = 5;
+    const total = swimmers.length;
+    let failedBatches = 0;
+
+    for (let i = 0; i < total; i += batchSize) {
+      const batch = swimmers.slice(i, i + batchSize).map(s => s.id);
+      onProgress?.(i, total);
+
+      try {
+        const res = await authedFetch('/api/sync-session-memberships', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ swimmerIds: batch })
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.warn(`Session membership batch error: ${errData.error || res.status}`);
+          failedBatches++;
+        }
+      } catch (err) {
+        // A dropped batch shouldn't abandon the remaining swimmers.
+        console.warn(`Session membership batch failed: ${err.message}`);
+        failedBatches++;
+      }
+    }
+
+    onProgress?.(total, total);
+    return { total, failedBatches };
+  };
+
   const handleSyncSessionMemberships = async () => {
     setIsSessionSyncing(true);
     setSessionSyncStatus({ type: 'info', text: 'Starting Session Sync...' });
     setSessionSyncProgress(0);
 
     try {
-      const { data: swimmers } = await supabase
-        .from('swimmers')
-        .select('id')
-        .not('scm_numeric_id', 'is', null);
+      const { total, failedBatches } = await runSessionMembershipSync((done, all) => {
+        setSessionSyncProgress(Math.round((done / all) * 100));
+        setSessionSyncStatus({ type: 'info', text: `Syncing Sessions: ${done}/${all} swimmers...` });
+      });
 
-      if (!swimmers || swimmers.length === 0) {
-        throw new Error('No swimmers with SCM IDs found. Run SCM Sync first.');
-      }
-
-      const batchSize = 5;
-      const total = swimmers.length;
-      
-      for (let i = 0; i < total; i += batchSize) {
-        const batch = swimmers.slice(i, i + batchSize).map(s => s.id);
-        const progress = Math.round((i / total) * 100);
-        setSessionSyncProgress(progress);
-        setSessionSyncStatus({ type: 'info', text: `Syncing Sessions: ${i}/${total} swimmers...` });
-
-        const res = await authedFetch('/api/sync-session-memberships', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ swimmerIds: batch })
-        });
-
-        if (!res.ok) {
-          const errData = await res.json();
-          console.warn(`Batch error: ${errData.error}`);
-        }
-      }
-
-      setSessionSyncProgress(100);
-      setSessionSyncStatus({ type: 'success', text: `Successfully synced memberships for ${total} swimmers.` });
+      setSessionSyncStatus(failedBatches > 0
+        ? { type: 'error', text: `Synced ${total} swimmers, but ${failedBatches} batch(es) failed — see console and re-run.` }
+        : { type: 'success', text: `Successfully synced memberships for ${total} swimmers.` });
       loadData();
     } catch (err) {
       setSessionSyncStatus({ type: 'error', text: err.message });
@@ -1026,7 +1066,7 @@ export default function Settings({ session, scmApiKey }) {
                   <div>
                     <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-primary)' }}>Daily System Sync</h2>
                     <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                      Runs SCM member sync followed by training attendance in one click.
+                      Runs SCM member sync, training attendance, then session memberships in one click.
                     </p>
                   </div>
                 </div>
@@ -1036,9 +1076,10 @@ export default function Settings({ session, scmApiKey }) {
                   {[
                     { step: 1, label: 'SCM Baseline' },
                     { step: 2, label: 'Attendance' },
-                    { step: 3, label: 'Complete' }
+                    { step: 3, label: 'Memberships' },
+                    { step: 4, label: 'Complete' }
                   ].map(({ step, label }) => {
-                    const done = masterSyncState.step > step || masterSyncState.step === 3;
+                    const done = masterSyncState.step > step || masterSyncState.step === 4;
                     const active = masterSyncState.step === step && masterSyncState.active;
                     return (
                       <div key={step} style={{
@@ -1097,7 +1138,7 @@ export default function Settings({ session, scmApiKey }) {
                       fontSize: '0.9rem',
                       color: masterSyncState.message.startsWith('Error')
                         ? '#f87171'
-                        : masterSyncState.step === 3
+                        : masterSyncState.step === 4
                         ? 'var(--accent-emerald)'
                         : 'var(--accent-cyan)',
                       fontWeight: 600
@@ -1155,6 +1196,21 @@ export default function Settings({ session, scmApiKey }) {
                   {isJoinDateSyncing && (
                     <div className="progress-bg mt-4">
                       <div className="progress-fill" style={{ width: `${joinDateSyncProgress}%` }}></div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Session Membership Sync */}
+                <div className="card">
+                  <h3>🏊 Session Memberships</h3>
+                  <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Scrape each swimmer&apos;s registered sessions from SCM. Run after any session is split, renamed or re-allocated.</p>
+                  {sessionSyncStatus && <div className={`alert ${sessionSyncStatus.type === 'error' ? 'alert-error' : 'alert-success'}`}>{sessionSyncStatus.text}</div>}
+                  <button onClick={handleSyncSessionMemberships} className="btn btn-secondary w-full" disabled={isSessionSyncing}>
+                    {isSessionSyncing ? 'Syncing…' : 'Sync Session Memberships'}
+                  </button>
+                  {isSessionSyncing && (
+                    <div className="progress-bg mt-4">
+                      <div className="progress-fill" style={{ width: `${sessionSyncProgress}%` }}></div>
                     </div>
                   )}
                 </div>

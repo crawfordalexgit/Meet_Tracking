@@ -123,7 +123,40 @@ export default function Dashboard({ session }) {
       setMasterSyncState({ active: true, message: 'Phase 2: Syncing Attendance...' });
       await authedFetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
 
-      setMasterSyncState({ active: false, message: 'Daily Master Sync Complete!' });
+      // Phase 3 is client-batched: the endpoint scrapes SCM per swimmer, which
+      // is why /api/sync-scm skips membership work by default (it would time
+      // out in one pass). Without this, memberships never update — a session
+      // split leaves swimmers registered on the old session indefinitely.
+      setMasterSyncState({ active: true, message: 'Phase 3: Syncing Session Memberships...' });
+      const { data: syncSwimmers } = await supabase
+        .from('swimmers')
+        .select('id')
+        .not('scm_numeric_id', 'is', null);
+
+      let failedBatches = 0;
+      const batchSize = 5;
+      const totalSwimmers = syncSwimmers?.length || 0;
+      for (let i = 0; i < totalSwimmers; i += batchSize) {
+        const batch = syncSwimmers.slice(i, i + batchSize).map(s => s.id);
+        setMasterSyncState({ active: true, message: `Phase 3: Syncing Session Memberships (${i}/${totalSwimmers})...` });
+        try {
+          const res = await authedFetch('/api/sync-session-memberships', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ swimmerIds: batch })
+          });
+          if (!res.ok) failedBatches++;
+        } catch {
+          failedBatches++;
+        }
+      }
+
+      setMasterSyncState({
+        active: false,
+        message: failedBatches > 0
+          ? `Master Sync finished, but ${failedBatches} membership batch(es) failed — re-run from Settings.`
+          : 'Daily Master Sync Complete!'
+      });
       fetchAll();
       setTimeout(() => setMasterSyncState({ active: false, message: '' }), 5000);
     } catch (error) {

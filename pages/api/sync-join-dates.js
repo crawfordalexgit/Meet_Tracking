@@ -7,12 +7,79 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+/**
+ * Batched join-date sync: same per-swimmer work as the SSE path, but for an
+ * explicit list of swimmer IDs and returning JSON, so a scheduler can page
+ * through the club without any single request running long.
+ */
+async function handleBatch(req, res) {
+  const { swimmerIds } = req.body || {};
+  if (!Array.isArray(swimmerIds) || swimmerIds.length === 0) {
+    return res.status(400).json({ error: 'Missing swimmerIds array' });
+  }
+
+  const username = process.env.SCM_WEB_USERNAME;
+  const password = process.env.SCM_WEB_PASSWORD;
+  if (!username || !password) {
+    return res.status(500).json({ error: 'SCM Web credentials not configured in environment' });
+  }
+
+  try {
+    const cookies = await scmLogin(username, password);
+    const { data: swimmers, error } = await supabase
+      .from('swimmers')
+      .select('id, full_name, scm_numeric_id, squad_id, squads(name)')
+      .in('id', swimmerIds)
+      .not('scm_numeric_id', 'is', null);
+    if (error) throw error;
+
+    let updated = 0, skipped = 0, errored = 0;
+    for (const swimmer of swimmers || []) {
+      const squadName = swimmer.squads?.name;
+      if (!squadName) { skipped++; continue; }
+      try {
+        const realJoinDate = await fetchSwimmerSquadJoinDate(swimmer.scm_numeric_id, squadName, cookies);
+        if (realJoinDate) {
+          const { error: updateError } = await supabase
+            .from('swimmers')
+            .update({ squad_join_date: realJoinDate })
+            .eq('id', swimmer.id);
+          if (updateError) throw updateError;
+          updated++;
+        } else {
+          skipped++;
+        }
+      } catch (err) {
+        console.warn(`JOIN DATE SYNC: ${swimmer.full_name}: ${err.message}`);
+        errored++;
+      }
+    }
+
+    return res.status(200).json({ success: true, summary: { processed: swimmers?.length || 0, updated, skipped, errored } });
+  } catch (err) {
+    console.error('JOIN DATE BATCH ERROR:', err);
+    return res.status(500).json({ error: err.message });
+  }
+}
+
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
+  if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!await requireAuth(req, res)) return;
+  // Accept the scheduled invocation (Bearer CRON_SECRET), matching
+  // sync-attendance; otherwise require an authenticated user.
+  const isCron = !!process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}`;
+  if (!isCron) {
+    if (!await requireAuth(req, res)) return;
+  }
+
+  // POST is the batched, non-streaming path used by scheduled runs: the GET/SSE
+  // path walks every swimmer in one request, which cannot finish inside a
+  // serverless timeout. Callers page through with swimmerIds instead.
+  if (req.method === 'POST') {
+    return handleBatch(req, res);
+  }
 
   // Set up Server-Sent Events for progress tracking
   res.writeHead(200, {
