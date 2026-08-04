@@ -59,6 +59,7 @@ async function fetchSwimmerIds() {
 
 const totals = { processed: 0, updated: 0, skipped: 0, errored: 0 };
 let failedBatches = 0;
+const startedAt = new Date().toISOString();
 
 const ids = await fetchSwimmerIds();
 console.log(`${job.label}: ${ids.length} swimmers, ${Math.ceil(ids.length / BATCH_SIZE)} batches of ${BATCH_SIZE}`);
@@ -88,6 +89,26 @@ for (let i = 0; i < ids.length; i += BATCH_SIZE) {
 }
 
 console.log(`\n${job.label} complete:`, totals, `failedBatches=${failedBatches}`);
+
+// Record the run so the app can show sync health without anyone reading these
+// logs. Never let a logging failure fail an otherwise good sync.
+try {
+  const status = failedBatches > 0 || totals.errored > 0 || totals.skipped > 0 ? 'partial' : 'success';
+  const res = await fetch(`${APP_URL}/api/sync-runs`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      job: process.argv[2],
+      status,
+      startedAt,
+      triggeredBy: 'cron',
+      summary: { ...totals, failedBatches, swimmers: ids.length },
+    }),
+  });
+  if (!res.ok) console.warn(`  (could not record run: HTTP ${res.status})`);
+} catch (err) {
+  console.warn(`  (could not record run: ${err.message})`);
+}
 
 if (totals.skipped > 0) {
   console.log(`NOTE: ${totals.skipped} swimmer(s) were skipped by the shrink guard — review before re-running.`);

@@ -1,12 +1,15 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { fetchScmNumericIds, fetchSwimmerAttendance } from '../../lib/scm-scraper';
 import { requireAuth } from '../../lib/api-auth';
+import { recordSyncRun } from '../../lib/sync-log';
 import * as cheerio from 'cheerio';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  const runStartedAt = new Date().toISOString();
 
   // Accept the Vercel cron invocation (Bearer CRON_SECRET);
   // otherwise require an authenticated user for both GET and POST triggers.
@@ -217,11 +220,25 @@ export default async function handler(req, res) {
     }
 
     sendProgress({ message: "Attendance sync complete!", progress: 100 });
+    await recordSyncRun({
+      job: 'attendance',
+      status: 'success',
+      triggeredBy: isCron ? 'cron' : 'user',
+      startedAt: runStartedAt,
+      summary: { swimmers: swimmers.length, windowDays: req.method === 'POST' ? 14 : 365 }
+    });
     if (!isSSE) return res.status(200).json({ message: "Sync complete" });
     res.end();
 
   } catch (error) {
     console.error("Attendance Sync Error:", error);
+    await recordSyncRun({
+      job: 'attendance',
+      status: 'error',
+      triggeredBy: isCron ? 'cron' : 'user',
+      startedAt: runStartedAt,
+      error: error.message
+    });
     if (isSSE) {
       sendProgress({ error: error.message });
       res.end();

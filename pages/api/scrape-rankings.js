@@ -2,6 +2,7 @@ import { getServiceSupabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/api-auth';
 import { getRankingReferenceYear, getAgeGroupReferenceDate } from '../../lib/season';
 import { OPEN_AGE } from '../../lib/acceptance-caps';
+import { recordSyncRun } from '../../lib/sync-log';
 import * as cheerio from 'cheerio';
 
 export const config = {
@@ -112,6 +113,8 @@ export default async function handler(req, res) {
         res.write(`data: ${JSON.stringify({ message, progress, isDone, error })}\n\n`);
         flush();
     };
+
+    const runStartedAt = new Date().toISOString();
 
     try {
         const supabase = getServiceSupabase();
@@ -345,6 +348,14 @@ export default async function handler(req, res) {
                 .upsert(benchmarksToSync, { onConflict: 'category, year, gender, age_group, event, course' });
             if (benchErr) console.error("Benchmark Sync Error:", benchErr);
         }
+
+        await recordSyncRun({
+            job: 'rankings',
+            status: upsertErrors.length > 0 ? 'partial' : 'success',
+            startedAt: runStartedAt,
+            summary: { scraped: results.length, saved: savedCount, rankingYear, failedChunks: upsertErrors.length },
+            error: upsertErrors[0] || null
+        });
 
         if (upsertErrors.length > 0) {
             // Partial save — surface it rather than reporting success, otherwise a
