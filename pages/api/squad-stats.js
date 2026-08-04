@@ -38,7 +38,19 @@ export default async function handler(req, res) {
   try {
     const supabase = getServiceSupabase();
 
-    const [squadsRes, swimmersArr, resultsArr, attendanceArr, sessionsArr, membershipsArr, exRes, rankingsRes] = await Promise.all([
+    // Only the newest rankings snapshot is used below. Resolve it first so the
+    // fetch can be scoped and paginated: an unpaginated club-wide select hits
+    // PostgREST's 1000-row cap, and rows are inserted Kent -> South East ->
+    // England, so the regional and national counts silently read as zero.
+    const { data: latestSnap } = await supabase
+      .from('rankings')
+      .select('snapshot_date')
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const latestSnapshot = latestSnap?.snapshot_date || null;
+
+    const [squadsRes, swimmersArr, resultsArr, attendanceArr, sessionsArr, membershipsArr, exRes, currentRankings] = await Promise.all([
       supabase.from('squads').select('*').eq('is_squad', true).order('name'),
       fetchAll(supabase, 'swimmers', '*'),
       fetchAll(supabase, 'results', '*, meets(id,name,type)'),
@@ -46,17 +58,14 @@ export default async function handler(req, res) {
       fetchAll(supabase, 'sessions', '*'),
       fetchAll(supabase, 'session_memberships', '*'),
       supabase.from('club_exemptions').select('*'),
-      supabase.from('rankings').select('*').order('snapshot_date', { ascending: false })
+      latestSnapshot
+        ? fetchAll(supabase, 'rankings', '*', q => q.eq('snapshot_date', latestSnapshot))
+        : Promise.resolve([])
     ]);
 
     if (squadsRes.error) throw squadsRes.error;
     const squadsArr = squadsRes.data || [];
     const exemptionsArr = exRes.data || [];
-    const rankings = rankingsRes.data || [];
-
-    const uniqueSnapshots = [...new Set(rankings.map(r => r.snapshot_date))].sort((a, b) => new Date(b) - new Date(a));
-    const latestSnapshot = uniqueSnapshots[0] || null;
-    const currentRankings = rankings.filter(r => r.snapshot_date === latestSnapshot);
 
     // Pre-group once so per-squad computeSquadStats calls only filter within
     // their own swimmers' rows instead of scanning the full club-wide arrays.

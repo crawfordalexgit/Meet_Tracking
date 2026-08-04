@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { getBenchmarkTable } from '../lib/analytics-utils';
 import { supabase } from '../lib/supabase';
+import { getRankingReferenceYear } from '../lib/season';
 
 export default function BenchmarkModal({ isOpen, onClose }) {
   const [gender, setGender] = useState('F');
@@ -29,7 +30,9 @@ export default function BenchmarkModal({ isOpen, onClose }) {
         .select('*')
         .eq('category', 'National Top 40')
         .eq('gender', gender)
-        .eq('year', 2026);
+        // Benchmarks are keyed to the year the rankings scrape bucketed age
+        // groups by, i.e. the current calendar year.
+        .eq('year', getRankingReferenceYear());
       
       if (data) {
         // Transform DB rows to the table format expected by the UI

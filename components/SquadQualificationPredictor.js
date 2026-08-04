@@ -1,18 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import PremiumOrb from './PremiumOrb';
 import { supabase } from '../lib/supabase';
+import { fetchAllRows } from '../lib/paginate';
 import { normalizeEvent, timeToSeconds } from '../lib/analytics-utils';
 import { getBenchmarks, timeStringToSeconds, secondsToTimeString } from '../lib/qualifying-times';
+import { getTargetSeasonYear, getRankingReferenceYear } from '../lib/season';
+import { OPEN_AGE, getMaxAcceptedSwimmers, getAcceptanceStatus, isProxyThreshold } from '../lib/acceptance-caps';
 
-function getMaxAcceptedSwimmers(eventStr, age) {
-  const younger = age < 17;
-  if (eventStr.startsWith('50'))  return younger ? 34 : 46;
-  if (eventStr.startsWith('100')) return younger ? 21 : 24;
-  if (eventStr.startsWith('200')) return younger ? 16 : 18;
-  return 14;
-}
-
-function TrafficLightBadge({ rank, maxAccepted }) {
+function TrafficLightBadge({ rank, maxAccepted, isProxy }) {
   const r = rank ? parseInt(rank) : null;
   if (!r || r <= 0) {
     return (
@@ -21,15 +16,18 @@ function TrafficLightBadge({ rank, maxAccepted }) {
       </span>
     );
   }
-  const isGreen = r <= maxAccepted;
-  const isAmber = !isGreen && r <= maxAccepted + 10;
+  const label = getAcceptanceStatus(r, maxAccepted);
+  const isGreen = label === 'SAFE';
+  const isAmber = label === 'BUBBLE';
   const color = isGreen ? '#10b981' : isAmber ? '#f59e0b' : '#ef4444';
   const bg    = isGreen ? 'rgba(16,185,129,0.12)' : isAmber ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)';
   const dot   = isGreen ? '🟢' : isAmber ? '🟠' : '🔴';
-  const label = isGreen ? 'SAFE' : isAmber ? 'BUBBLE' : 'OUTSIDE';
   return (
-    <span style={{ display: 'inline-block', padding: '2px 6px', background: bg, color, borderRadius: '4px', fontSize: '0.6rem', fontWeight: 900, whiteSpace: 'nowrap' }}>
-      {dot} #{r}/{maxAccepted} {label}
+    <span
+      title={isProxy ? `Top-${maxAccepted} qualification proxy — South East publishes qualifying times only, with no per-event entry cap.` : undefined}
+      style={{ display: 'inline-block', padding: '2px 6px', background: bg, color, borderRadius: '4px', fontSize: '0.6rem', fontWeight: 900, whiteSpace: 'nowrap' }}
+    >
+      {dot} #{r}/{maxAccepted}{isProxy ? '~' : ''} {label}
     </span>
   );
 }
@@ -85,18 +83,34 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
       const swimmerIds = (swimmers || []).map(s => s.id).filter(Boolean);
       if (swimmerIds.length === 0) return;
 
-      supabase
-          .from('rankings')
-          .select('*')
-          .in('swimmer_id', swimmerIds)
-          .then(({ data, error }) => {
-              if (!error && data) {
-                  setRankings(data);
-              }
+      let cancelled = false;
+      async function fetchRankings() {
+          // Only the newest snapshot is current — pulling every historic scrape
+          // would let a stale rank win the lookup below.
+          const { data: latestSnap } = await supabase
+              .from('rankings')
+              .select('snapshot_date')
+              .in('swimmer_id', swimmerIds)
+              .order('snapshot_date', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+          if (cancelled || !latestSnap?.snapshot_date) return;
+
+          // Paginate: a full squad's snapshot runs past PostgREST's 1000-row
+          // cap, and districts are inserted Kent -> South East -> England, so a
+          // single page silently drops every regional row and the regional view
+          // reads as UNRANKED across the board.
+          const data = await fetchAllRows(supabase, 'rankings', {
+              filter: q => q.in('swimmer_id', swimmerIds).eq('snapshot_date', latestSnap.snapshot_date),
           });
+          if (cancelled) return;
+          setRankings(data);
+      }
+      fetchRankings();
+      return () => { cancelled = true; };
   }, [swimmers]);
 
-  const getRankForPbCourse = (swimmerId, eventName, level, pbCourse) => {
+  const getRankForPbCourse = (swimmerId, eventName, level, pbCourse, rankingAge) => {
       if (!rankings || rankings.length === 0) return null;
 
       const targetDistrict = level?.toUpperCase() === 'REGIONAL' ? 'SOUTH EAST' : 'KENT';
@@ -104,16 +118,32 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
       const safeCourse = (pbCourse || 'SC').toUpperCase();
       const targetPool = safeCourse === 'LC' ? 'L' : 'S';
 
-      const match = rankings.find(r => {
+      const matches = rankings.filter(r => {
           const isSwimmerMatch = r.swimmer_id === swimmerId;
           const isEventMatch = normalizeEvent(r.stroke || '') === targetEvent;
           const isDistrictMatch = (r.district || '').trim().toUpperCase() === targetDistrict;
           const isPoolMatch = r.pool?.toUpperCase() === targetPool;
-          
+
           return isSwimmerMatch && isEventMatch && isDistrictMatch && isPoolMatch;
       });
+      if (matches.length === 0) return null;
 
-      return match ? parseInt(match.rank) : null;
+      // Rankings only exist for the current calendar year's cohort, so match on
+      // that year's age group — not the target season's. Acceptance caps are per
+      // age group, so the age-group row is the one that matters; Open ('OP')
+      // rows cover all ages and rank far lower, so they are a last resort. Rows
+      // with no season_year were scraped before the year was recorded.
+      const forYear = matches.filter(r => r.season_year === rankingYear);
+      const candidates = forYear.length > 0
+        ? forYear
+        : matches.filter(r => r.season_year === null || r.season_year === undefined);
+
+      const match = candidates.find(r => r.age === rankingAge)
+                 ?? candidates.find(r => r.age !== OPEN_AGE)
+                 ?? candidates[0];
+      if (!match) return null;
+
+      return parseInt(match.rank);
   };
 
   React.useEffect(() => {
@@ -156,12 +186,11 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
 
   const activeEvents = categories[eventCategory] || categories.sprints;
 
-  const currentMonth = new Date().getMonth(); // 0-indexed
-  const rolloverMonth = 4; // May
-  const calculatedYear = currentMonth >= rolloverMonth 
-    ? new Date().getFullYear() + 1 
-    : new Date().getFullYear();
+  const calculatedYear = getTargetSeasonYear();
   const targetYear = manualYearOverride || calculatedYear;
+  // Rankings lag the target season by a year: only the current calendar year's
+  // cohort exists to be ranked against.
+  const rankingYear = getRankingReferenceYear();
 
   const handlePrint = () => {
     window.print();
@@ -652,7 +681,11 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
               filteredAndSorted.map((swimmer) => {
                 const yob = swimmer.yob;
                 const swimmerAge = swimmer.swimmerAge;
-                const currentAge = swimmer.yob ? new Date().getFullYear() - swimmer.yob : (swimmer.swimmerAge || 14);
+                // Rank and cap describe the current-year cohort, which is the
+                // only one that exists to be ranked against; the QT columns
+                // target targetYear.
+                const seasonAge = typeof swimmer.swimmerAge === 'number' ? swimmer.swimmerAge : 14;
+                const currentAge = swimmer.yob ? rankingYear - swimmer.yob : seasonAge;
 
                 return (
                   <tr key={swimmer.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
@@ -673,9 +706,9 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
 
                       const swimmerResults = results.filter(r => r.swimmer_id === swimmer.id);
                       const bestPb = getBestPbRecord(swimmerResults, evt);
-                      const swimmerRank = getRankForPbCourse(swimmer.id, evt, targetLevel, bestPb?.course);
+                      const swimmerRank = getRankForPbCourse(swimmer.id, evt, targetLevel, bestPb?.course, currentAge);
 
-                      const maxAccepted = getMaxAcceptedSwimmers(evt, currentAge);
+                      const maxAccepted = getMaxAcceptedSwimmers(evt, currentAge, targetLevel);
 
                       let bg = 'rgba(255, 255, 255, 0.01)';
                       let borderLeft = 'none';
@@ -722,7 +755,7 @@ export default function SquadQualificationPredictor({ swimmers = [], results = [
                               </div>
                             )}
                             <div style={{ marginTop: '4px' }}>
-                              <TrafficLightBadge rank={swimmerRank} maxAccepted={maxAccepted} />
+                              <TrafficLightBadge rank={swimmerRank} maxAccepted={maxAccepted} isProxy={isProxyThreshold(targetLevel)} />
                             </div>
                           </div>
                         </td>
