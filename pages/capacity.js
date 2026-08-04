@@ -250,7 +250,10 @@ export default function CapacityDashboard({ session }) {
         if (!filters.includes(squadName)) return null;
       }
 
-      const session = sessions.find(s => s.id === m.session_id || s.scm_guid === m.session_id);
+      // normalizedSessions, not sessions: every row has day_of_week NULL in the
+      // database and the day is only recoverable from the session name, so the
+      // raw list would render a blank Day for every ghost.
+      const session = normalizedSessions.find(s => s.id === m.session_id || s.scm_guid === m.session_id);
       if (!session) return null;
 
       const presentCount = attendance.filter(a =>
@@ -271,7 +274,7 @@ export default function CapacityDashboard({ session }) {
       (a.squadName || '').localeCompare(b.squadName || '') ||
       (a.sessionName || '').localeCompare(b.sessionName || '')
     );
-  }, [memberships, swimmers, sessions, attendance, globalSquadFilter]);
+  }, [memberships, swimmers, normalizedSessions, attendance, globalSquadFilter]);
 
   const handlePrintReport = () => {
     setIsReportModalOpen(true);
@@ -937,7 +940,7 @@ export default function CapacityDashboard({ session }) {
       const myAttendance = attendance.filter(a => a.swimmer_id === swimmer.id);
 
       const unscheduledRecords = myAttendance.filter(a => {
-        const session = sessions.find(s => s.id === a.session_id || s.scm_guid === a.session_id);
+        const session = normalizedSessions.find(s => s.id === a.session_id || s.scm_guid === a.session_id);
         const isScheduled = myMemberships.some(m => {
           if (m.session_id === a.session_id) return true;
           if (session && (m.session_id === session.id || m.session_id === session.scm_guid)) return true;
@@ -953,7 +956,9 @@ export default function CapacityDashboard({ session }) {
       unscheduledRecords.forEach(a => {
         const key = a.session_id;
         if (!unscheduledBySession[key]) {
-          const session = sessions.find(s => s.id === a.session_id || s.scm_guid === a.session_id);
+          // normalizedSessions: day_of_week is NULL on every row in the database
+          // and is only recoverable from the session name.
+          const session = normalizedSessions.find(s => s.id === a.session_id || s.scm_guid === a.session_id);
           unscheduledBySession[key] = {
             sessionId: key,
             sessionName: session ? session.name : 'Unknown Session',
@@ -977,7 +982,7 @@ export default function CapacityDashboard({ session }) {
     }).filter(Boolean).sort((a, b) => b.totalUnscheduled - a.totalUnscheduled);
 
     return list;
-  }, [memberships, swimmers, sessions, attendance, globalSquadFilter]);
+  }, [memberships, swimmers, normalizedSessions, attendance, globalSquadFilter]);
 
   const heatmapStats = useMemo(() => {
     const filtered = sortedSessions.filter(sess => {
