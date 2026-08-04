@@ -1,6 +1,7 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { fetchScmNumericIds, scmLogin, fetchSwimmerSquadJoinDate, fetchSwimmerSessions } from '../../lib/scm-scraper';
 import { requireAuth } from '../../lib/api-auth';
+import { recordSyncRun } from '../../lib/sync-log';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -8,6 +9,8 @@ export default async function handler(req, res) {
   }
 
   if (!await requireAuth(req, res)) return;
+
+  const runStartedAt = new Date().toISOString();
 
   const scmApiKey = req.body.scmApiKey || process.env.SCM_API_KEY;
   const { includeWebTasks = false } = req.body;
@@ -373,12 +376,20 @@ export default async function handler(req, res) {
     }
 
 
-    return res.status(200).json({ 
-      success: true, 
-      message: `Synced ${finalSwimmersToInsert.length} swimmers, ${squadsToInsert.length} squads. Valid competitive squads found: ${validSquadNames.size}.` 
+    await recordSyncRun({
+      job: 'scm',
+      status: 'success',
+      startedAt: runStartedAt,
+      summary: { swimmers: finalSwimmersToInsert.length, squads: squadsToInsert.length }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Synced ${finalSwimmersToInsert.length} swimmers, ${squadsToInsert.length} squads. Valid competitive squads found: ${validSquadNames.size}.`
     });
   } catch (error) {
     console.error('SCM Sync Error:', error);
+    await recordSyncRun({ job: 'scm', status: 'error', startedAt: runStartedAt, error: error.message });
     return res.status(500).json({ error: error.message });
   }
 }

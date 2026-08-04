@@ -5,6 +5,7 @@ import { authedFetch } from '../lib/api-client';
 import { useRouter } from 'next/router';
 import toast from 'react-hot-toast';
 import { useTheme } from '../lib/ThemeContext';
+import { SYNC_JOBS } from '../lib/sync-jobs';
 
 export default function Settings({ session, scmApiKey }) {
   const router = useRouter();
@@ -65,6 +66,8 @@ export default function Settings({ session, scmApiKey }) {
   const [isReconcilingPbs, setIsReconcilingPbs] = useState(false);
   const [pbSyncStatus, setPbSyncStatus] = useState(null);
   const [masterSyncState, setMasterSyncState] = useState({ active: false, step: 0, message: '' });
+  const [syncRuns, setSyncRuns] = useState([]);
+  const [syncRunsSchemaMissing, setSyncRunsSchemaMissing] = useState(false);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('coach');
@@ -101,6 +104,20 @@ export default function Settings({ session, scmApiKey }) {
     }
     checkAdmin();
   }, [session, router]);
+
+  const loadSyncRuns = async () => {
+    try {
+      const res = await authedFetch('/api/sync-runs?limit=50');
+      if (!res.ok) return;
+      const data = await res.json();
+      setSyncRuns(data.runs || []);
+      setSyncRunsSchemaMissing(!!data.schemaMissing);
+    } catch (err) {
+      console.warn('Could not load sync history:', err.message);
+    }
+  };
+
+  useEffect(() => { loadSyncRuns(); }, []);
 
   const handleMasterSync = async () => {
     setMasterSyncState({ active: true, step: 1, message: 'Phase 1: Syncing SCM Baseline...' });
@@ -583,6 +600,20 @@ export default function Settings({ session, scmApiKey }) {
    * whichever progress UI is showing. Returns { total, failedBatches } so a
    * partial run reports itself instead of claiming success.
    */
+  /** Records a run so Sync Health reflects UI-triggered syncs, not just scheduled ones. */
+  const recordRun = async (job, status, summary, startedAt) => {
+    try {
+      await authedFetch('/api/sync-runs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job, status, summary, startedAt, triggeredBy: 'user' })
+      });
+      loadSyncRuns();
+    } catch (err) {
+      console.warn('Could not record sync run:', err.message);
+    }
+  };
+
   const runSessionMembershipSync = async (onProgress) => {
     const { data: swimmers } = await supabase
       .from('swimmers')
@@ -627,6 +658,7 @@ export default function Settings({ session, scmApiKey }) {
     setIsSessionSyncing(true);
     setSessionSyncStatus({ type: 'info', text: 'Starting Session Sync...' });
     setSessionSyncProgress(0);
+    const startedAt = new Date().toISOString();
 
     try {
       const { total, failedBatches } = await runSessionMembershipSync((done, all) => {
@@ -637,9 +669,11 @@ export default function Settings({ session, scmApiKey }) {
       setSessionSyncStatus(failedBatches > 0
         ? { type: 'error', text: `Synced ${total} swimmers, but ${failedBatches} batch(es) failed — see console and re-run.` }
         : { type: 'success', text: `Successfully synced memberships for ${total} swimmers.` });
+      await recordRun('memberships', failedBatches > 0 ? 'partial' : 'success', { swimmers: total, failedBatches }, startedAt);
       loadData();
     } catch (err) {
       setSessionSyncStatus({ type: 'error', text: err.message });
+      await recordRun('memberships', 'error', null, startedAt);
     } finally {
       setIsSessionSyncing(false);
     }
@@ -1052,6 +1086,52 @@ export default function Settings({ session, scmApiKey }) {
           {activePanel === 'system' && (
             <div className="panel-content">
               <h1>System Sync</h1>
+
+              {/* ── Sync Health ── */}
+              <div className="card" style={{ marginBottom: '1rem' }}>
+                <h3 style={{ marginTop: 0 }}>🩺 Sync Health</h3>
+                <p className="mb-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  Last successful run of each job. Nothing recorded runs before this, which is how session memberships went two months without updating unnoticed.
+                </p>
+                {syncRunsSchemaMissing ? (
+                  <div className="alert alert-error">
+                    Run <code>sync_runs_schema.sql</code> in Supabase to start recording sync history.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {SYNC_JOBS.map(({ job, label, expectedEveryHours }) => {
+                      const last = syncRuns.find(r => r.job === job);
+                      const ageHours = last?.finished_at
+                        ? (Date.now() - new Date(last.finished_at).getTime()) / 3600000
+                        : null;
+                      const overdue = ageHours === null || ageHours > expectedEveryHours;
+                      const failed = last?.status === 'error';
+                      const partial = last?.status === 'partial';
+                      const colour = failed || overdue ? '#f87171' : partial ? '#f59e0b' : '#10b981';
+                      const dot = failed || overdue ? '🔴' : partial ? '🟠' : '🟢';
+                      const when = !last
+                        ? 'never recorded'
+                        : ageHours < 1
+                          ? `${Math.round(ageHours * 60)} min ago`
+                          : ageHours < 48
+                            ? `${Math.round(ageHours)} h ago`
+                            : `${Math.round(ageHours / 24)} days ago`;
+                      return (
+                        <div key={job} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          gap: '1rem', padding: '0.6rem 0.9rem', borderRadius: '10px',
+                          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)'
+                        }}>
+                          <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>{dot} {label}</span>
+                          <span style={{ fontSize: '0.75rem', color: colour, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            {when}{last?.triggered_by ? ` · ${last.triggered_by}` : ''}{partial ? ' · partial' : ''}{failed ? ' · failed' : ''}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* ── Master Sync Card ── */}
               <div className="card" style={{
