@@ -14,8 +14,17 @@ async function updateSchema() {
     console.log(`
         ALTER TABLE rankings ADD COLUMN IF NOT EXISTS snapshot_date DATE DEFAULT CURRENT_DATE;
         ALTER TABLE rankings DROP CONSTRAINT IF EXISTS rankings_swimmer_id_district_pool_stroke_age_key;
-        ALTER TABLE rankings ADD CONSTRAINT rankings_swimmer_id_district_pool_stroke_age_snapshot_date_key 
+        ALTER TABLE rankings ADD CONSTRAINT rankings_swimmer_id_district_pool_stroke_age_snapshot_date_key
         UNIQUE(swimmer_id, district, pool, stroke, age, snapshot_date);
+
+        -- season_year records which championship season the age groups were ranked
+        -- for (age at 31 December of that year). Left NULL on pre-existing rows:
+        -- those were scraped against the calendar year, so the predictor treats
+        -- them as legacy and prefers rows matching the season being planned.
+        ALTER TABLE rankings ADD COLUMN IF NOT EXISTS season_year INTEGER;
+        ALTER TABLE rankings DROP CONSTRAINT IF EXISTS rankings_swimmer_id_district_pool_stroke_age_snapshot_date_key;
+        ALTER TABLE rankings ADD CONSTRAINT rankings_swimmer_district_pool_stroke_age_season_snapshot_key
+        UNIQUE(swimmer_id, district, pool, stroke, age, season_year, snapshot_date);
     `);
 }
 

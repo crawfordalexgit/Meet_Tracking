@@ -1,5 +1,7 @@
 import { getServiceSupabase } from '../../lib/supabase';
 import { requireAuth } from '../../lib/api-auth';
+import { getRankingReferenceYear, getAgeGroupReferenceDate } from '../../lib/season';
+import { OPEN_AGE } from '../../lib/acceptance-caps';
 import * as cheerio from 'cheerio';
 
 export const config = {
@@ -73,6 +75,23 @@ function generateNameAliases(swimmer) {
     return Array.from(aliases);
 }
 
+/**
+ * Collapses rows that share the rankings unique key
+ * (swimmer_id, district, pool, stroke, age, season_year, snapshot_date).
+ * Two such rows in a single upsert make Postgres raise "ON CONFLICT DO UPDATE
+ * command cannot affect row a second time", which loses the whole chunk, so
+ * they are merged here — the better (lower) rank wins.
+ */
+function dedupeByConflictKey(rows) {
+    const byKey = new Map();
+    for (const row of rows) {
+        const key = [row.swimmer_id, row.district, row.pool, row.stroke, row.age, row.season_year, row.snapshot_date].join('|');
+        const existing = byKey.get(key);
+        if (!existing || row.rank < existing.rank) byKey.set(key, row);
+    }
+    return Array.from(byKey.values());
+}
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
@@ -113,16 +132,25 @@ export default async function handler(req, res) {
             });
         });
 
-        const currentYear = new Date().getFullYear();
-        const endDate = `31/12/${currentYear}`;
+        // Rankings are bucketed by age at 31 Dec of the current calendar year:
+        // a future season's cohort is not yet meaningful, so planning for 2027
+        // during 2026 still ranks against the 2026 age group. The `date` param
+        // sets that age-group reference date only. Overridable once the new year
+        // starts, or to back-check a past year.
+        const requestedYear = parseInt(req.body?.rankingYear);
+        const rankingYear = Number.isFinite(requestedYear) ? requestedYear : getRankingReferenceYear();
+        const endDate = getAgeGroupReferenceDate(rankingYear);
         const snapshotDate = new Date().toISOString().split('T')[0];
         
-        // Clean existing rankings for today's snapshot to avoid same-day duplication
-        sendProgress("Cleaning today's snapshot rankings...", 2);
+        // Clean existing rankings for today's snapshot to avoid same-day
+        // duplication — scoped to this reference year so re-running for a
+        // different year does not wipe the run made the same day.
+        sendProgress(`Cleaning today's snapshot of ${rankingYear} age-group rankings...`, 2);
         const { error: delErr } = await supabase
             .from('rankings')
             .delete()
-            .eq('snapshot_date', snapshotDate);
+            .eq('snapshot_date', snapshotDate)
+            .eq('season_year', rankingYear);
         if (delErr) {
             console.error("Warning cleaning current snapshot rankings:", delErr.message);
         }
@@ -146,6 +174,12 @@ export default async function handler(req, res) {
                                 sendProgress(`Processing ${district.name} | ${pool} | ${sex} | ${age} | ${eventName}...`, progress);
                             }
 
+                            // `date` sets the age-group reference date only; the ranked times are
+                            // always the trailing 12 months. RecordsToView=100 caps each list, so a
+                            // swimmer outside the top 100 of their age group has no row at all.
+                            // TargetClub is accepted but ignored by this endpoint — verified by
+                            // diffing TargetClub=TONSKNTQ against XXXX (byte-identical responses),
+                            // so the rank column is always the true district rank.
                             const url = `https://www.swimmingresults.org/12months/last12.php?Pool=${pool}&Stroke=${stroke}&Sex=${sex}&AgeGroup=${age}&date=${encodeURIComponent(endDate)}&StartNumber=1&RecordsToView=100&${district.params}&TargetClub=XXXX`;
                             
                             try {
@@ -191,9 +225,12 @@ export default async function handler(req, res) {
                                         }
 
                                         if (!isNaN(seconds)) {
+                                            // age_group here is the queried age group, i.e. age at
+                                            // 31/12/rankingYear — so the benchmark is keyed to the
+                                            // same season as the rankings it was extracted from.
                                             benchmarksToSync.push({
                                                 category: benchmarkCategory,
-                                                year: currentYear,
+                                                year: rankingYear,
                                                 gender: sex === 'M' ? 'Male' : 'Female',
                                                 age_group: age === 'OP' ? 99 : parseInt(age),
                                                 event: eventName,
@@ -223,7 +260,13 @@ export default async function handler(req, res) {
                                             if (!isNaN(yobVal)) {
                                                 birthYear = yobVal > 50 ? 1900 + yobVal : 2000 + yobVal;
                                             }
-                                            const calculatedAge = birthYear ? (currentYear - birthYear) : (age === 'OP' ? 99 : parseInt(age));
+                                            // Age at 31/12/rankingYear — matches the age group the row
+                                            // was ranked in, and the age the QT tables are read at.
+                                            const calculatedAge = birthYear ? (rankingYear - birthYear) : parseInt(age);
+                                            // 'OP' rows are an all-ages list and rank far lower than the
+                                            // age-group equivalent — store them under OPEN_AGE so they are
+                                            // kept separate rather than overwriting the age-group rank.
+                                            const rowAge = age === 'OP' ? OPEN_AGE : calculatedAge;
 
                                             let isoDate = null;
                                             if (dateText) {
@@ -242,7 +285,7 @@ export default async function handler(req, res) {
                                                 district: district.name,
                                                 pool: pool,
                                                 gender: sex,
-                                                age: calculatedAge,
+                                                age: rowAge,
                                                 stroke: eventName,
                                                 time: timeText,
                                                 rank: rank,
@@ -250,6 +293,7 @@ export default async function handler(req, res) {
                                                 meet_name: meet,
                                                 venue: venue,
                                                 fina_points: fina,
+                                                season_year: rankingYear,
                                                 snapshot_date: snapshotDate,
                                                 last_updated: new Date().toISOString()
                                             });
@@ -268,17 +312,27 @@ export default async function handler(req, res) {
             }
         }
 
-        sendProgress(`Scraping complete. Found ${results.length} results. Saving to database...`, 98);
+        const rows = dedupeByConflictKey(results);
+        const dropped = results.length - rows.length;
+        sendProgress(`Scraping complete. Found ${results.length} results${dropped > 0 ? ` (${dropped} duplicate key(s) merged)` : ''}. Saving to database...`, 98);
 
-        if (results.length > 0) {
-            for (let i = 0; i < results.length; i += 100) {
-                const chunk = results.slice(i, i + 100);
-                const { error } = await supabase.from('rankings').upsert(chunk, { onConflict: 'swimmer_id,district,pool,stroke,age,snapshot_date' });
+        let savedCount = 0;
+        const upsertErrors = [];
+        if (rows.length > 0) {
+            for (let i = 0; i < rows.length; i += 100) {
+                const chunk = rows.slice(i, i + 100);
+                const { error } = await supabase.from('rankings').upsert(chunk, { onConflict: 'swimmer_id,district,pool,stroke,age,season_year,snapshot_date' });
                 if (error) {
                     if (error.code === '42P01') {
                         throw new Error("Rankings table not found. Please run the SQL schema first.");
                     }
+                    if (error.code === '42P10' || error.code === 'PGRST204') {
+                        throw new Error("Rankings table is missing the season_year column/constraint. Run `node scripts/update-rankings-db.js` and apply the printed SQL.");
+                    }
                     console.error("Upsert Error:", error);
+                    upsertErrors.push(error.message);
+                } else {
+                    savedCount += chunk.length;
                 }
             }
         }
@@ -292,7 +346,16 @@ export default async function handler(req, res) {
             if (benchErr) console.error("Benchmark Sync Error:", benchErr);
         }
 
-        sendProgress(`Success! Scraped and updated ${results.length} ranking entries.`, 100, true);
+        if (upsertErrors.length > 0) {
+            // Partial save — surface it rather than reporting success, otherwise a
+            // rejected chunk silently leaves swimmers looking unranked.
+            sendProgress(
+                `Saved ${savedCount} of ${rows.length} ranking entries. ${upsertErrors.length} chunk(s) failed: ${upsertErrors[0]}`,
+                100, true, upsertErrors[0]
+            );
+        } else {
+            sendProgress(`Success! Scraped and updated ${savedCount} ranking entries in ${rankingYear} age groups.`, 100, true);
+        }
         res.end();
 
     } catch (error) {

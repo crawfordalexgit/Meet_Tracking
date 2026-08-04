@@ -5,6 +5,8 @@ import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { normalizeEvent, timeToSeconds } from '../lib/analytics-utils';
 import { getBenchmarks } from '../lib/qualifying-times';
+import { getTargetSeasonYear, getRankingReferenceYear } from '../lib/season';
+import { OPEN_AGE, REGIONAL_TOP_N, getMaxAcceptedSwimmers, getAcceptanceStatus, isProxyThreshold } from '../lib/acceptance-caps';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -61,15 +63,49 @@ function GapBadge({ gapSeconds }) {
   );
 }
 
-function getMaxAcceptedSwimmers(eventStr, age) {
-  const younger = age < 17;
-  if (eventStr.startsWith('50'))  return younger ? 34 : 46;
-  if (eventStr.startsWith('100')) return younger ? 21 : 24;
-  if (eventStr.startsWith('200')) return younger ? 16 : 18;
-  return 14;
+/**
+ * Picks the ranking row that a swimmer's acceptance chance should be judged on.
+ * Rows must be pre-filtered to a single snapshot — this resolves event, pool,
+ * district and which year's age groups the row was ranked in.
+ *
+ * Rankings are always a statement about the current calendar year's cohort, so
+ * `rankingYear`/`rankingAge` are this year's, not the target season's.
+ *
+ * Returns { row, isUnlabelledYear } so the UI can flag rows scraped before
+ * season_year existed, whose age basis cannot be confirmed.
+ */
+function findRanking(rankings, eventName, pool, district, rankingYear, rankingAge) {
+  const matches = (rankings || []).filter(r =>
+    normalizeEvent(r.stroke || '') === normalizeEvent(eventName) &&
+    r.pool === pool &&
+    r.district === district
+  );
+  if (matches.length === 0) return { row: null, isUnlabelledYear: false };
+
+  // Prefer rows whose age groups were bucketed by this year, matched on the
+  // swimmer's age in that year. Acceptance caps are applied per age group, so
+  // the age-group row is the one that matters; Open rows cover all ages and rank
+  // far lower, so they are a last resort.
+  const forYear = matches.filter(r => r.season_year === rankingYear);
+  if (forYear.length > 0) {
+    const row = forYear.find(r => r.age === rankingAge)
+             ?? forYear.find(r => r.age !== OPEN_AGE)
+             ?? forYear[0];
+    return { row, isUnlabelledYear: false };
+  }
+
+  // Rows scraped before season_year existed. They were bucketed by the calendar
+  // year of that scrape, which is usually still this year — but it is not
+  // recorded, so the UI marks them.
+  const unlabelled = matches.filter(r => r.season_year === null || r.season_year === undefined);
+  const row = unlabelled.find(r => r.age === rankingAge)
+           ?? unlabelled.find(r => r.age !== OPEN_AGE)
+           ?? unlabelled[0]
+           ?? null;
+  return { row, isUnlabelledYear: row !== null };
 }
 
-function TrafficLightBadge({ rank, maxAccepted }) {
+function TrafficLightBadge({ rank, maxAccepted, isUnlabelledYear }) {
   if (!rank || rank <= 0) {
     return (
       <span style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(239,68,68,0.15)', color: '#ef4444', borderRadius: '6px', fontSize: '0.65rem', fontWeight: 900, letterSpacing: '0.05em' }}>
@@ -77,22 +113,29 @@ function TrafficLightBadge({ rank, maxAccepted }) {
       </span>
     );
   }
-  const isGreen = rank <= maxAccepted;
-  const isAmber = !isGreen && rank <= maxAccepted + 10;
+  const label   = getAcceptanceStatus(rank, maxAccepted);
+  const isGreen = label === 'SAFE';
+  const isAmber = label === 'BUBBLE';
   const color   = isGreen ? '#10b981' : isAmber ? '#f59e0b' : '#ef4444';
   const bg      = isGreen ? 'rgba(16,185,129,0.12)' : isAmber ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)';
-  const label   = isGreen ? 'SAFE' : isAmber ? 'BUBBLE' : 'OUTSIDE';
   const dot     = isGreen ? '🟢' : isAmber ? '🟠' : '🔴';
   return (
-    <span style={{ display: 'inline-block', padding: '3px 8px', background: bg, color, borderRadius: '6px', fontSize: '0.65rem', fontWeight: 900, whiteSpace: 'nowrap' }}>
-      {dot} #{rank} / {maxAccepted} — {label}
+    <span
+      title={isUnlabelledYear ? 'Scraped before the age-group year was recorded, so the basis of this rank is unconfirmed. Re-run the rankings scrape to refresh.' : undefined}
+      style={{ display: 'inline-block', padding: '3px 8px', background: bg, color, borderRadius: '6px', fontSize: '0.65rem', fontWeight: 900, whiteSpace: 'nowrap' }}
+    >
+      {dot} #{rank} / {maxAccepted} — {label}{isUnlabelledYear && <span style={{ opacity: 0.7 }}> *</span>}
     </span>
   );
 }
 
 // ─── CoachesEye AI Card ──────────────────────────────────────────────────────
 
-function PathwayAiCard({ swimmer, age, gapData, rankings, course, session }) {
+function PathwayAiCard({ swimmer, age, currentAge, seasonYear, rankingYear, gapData, rankings, course, level, session }) {
+  // The table and the AI must describe the same competition, or CoachesEye
+  // reports Kent ranks under a regional heading.
+  const safeLevel = (level || 'COUNTY').toUpperCase();
+  const district  = safeLevel === 'REGIONAL' ? 'South East' : 'Kent';
   const [loading, setLoading]   = useState(false);
   const [insight, setInsight]   = useState(null);
   const [error, setError]       = useState(null);
@@ -120,19 +163,19 @@ function PathwayAiCard({ swimmer, age, gapData, rankings, course, session }) {
   }, [gapData]);
 
   const rankingSummary = useMemo(() => {
-    if (!rankings?.length || age === null) return '';
+    if (!rankings?.length || currentAge === null) return '';
     return PRIMARY_EVENTS.map(eventName => {
-      const maxAccepted = getMaxAcceptedSwimmers(eventName, age);
+      // Rank and cap both describe the current-year cohort, so the cap is read
+      // at currentAge even though the QT gaps target next season.
+      const maxAccepted = getMaxAcceptedSwimmers(eventName, currentAge, safeLevel);
       const poolCode = course === 'SC' ? 'S' : 'L';
-      const match = rankings.find(r =>
-        normalizeEvent(r.stroke || '') === normalizeEvent(eventName) && r.pool === poolCode
-      );
-      const rank = match ? parseInt(match.rank) : null;
+      const { row, isUnlabelledYear } = findRanking(rankings, eventName, poolCode, district, rankingYear, currentAge);
+      const rank = row ? parseInt(row.rank) : null;
       if (!rank) return `${eventName}: unranked (cap ${maxAccepted})`;
-      const status = rank <= maxAccepted ? 'SAFE' : rank <= maxAccepted + 10 ? 'BUBBLE' : 'OUTSIDE';
-      return `${eventName}: rank #${rank} / cap ${maxAccepted} [${status}]`;
+      const status = getAcceptanceStatus(rank, maxAccepted);
+      return `${eventName}: rank #${rank} / cap ${maxAccepted} [${status}]${isUnlabelledYear ? ' (age-group year unconfirmed)' : ''}`;
     }).join(', ');
-  }, [rankings, age]);
+  }, [rankings, currentAge, rankingYear, course, safeLevel, district]);
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -149,7 +192,7 @@ function PathwayAiCard({ swimmer, age, gapData, rankings, course, session }) {
             `Age: ${age}y | Gender: ${swimmer.gender || 'unknown'}`,
             `County Auto QT gaps (Short Course): ${countyGapSummary || 'No PB data available'}`,
             `SE Regional Auto QT gaps (Short Course): ${regionalGapSummary || 'No PB data available'}`,
-            rankingSummary ? `Current Kent rankings vs event acceptance caps (format: rank / cap [status]): ${rankingSummary}` : 'No rankings data on file.',
+            rankingSummary ? `${district} rankings in the ${rankingYear} age group (current age ${currentAge}, i.e. one year behind the ${seasonYear} QT gaps above — the ${seasonYear} cohort does not exist yet), from times swum in the last 12 months, vs ${isProxyThreshold(safeLevel) ? `a top-${REGIONAL_TOP_N} qualification proxy (South East publishes no per-event entry cap)` : 'event acceptance caps'} (format: rank / cap [status]): ${rankingSummary}` : 'No rankings data on file.',
             `Identify the 2–3 events closest to a County or Regional breakthrough. Provide specific, actionable technical recommendations (starts, turns, race strategy) to close the gap. Comment on any BUBBLE events where the swimmer is waitlist-vulnerable. Include a headline prediction for their championship season.`,
           ],
         }),
@@ -252,7 +295,7 @@ function PathwayAiCard({ swimmer, age, gapData, rankings, course, session }) {
 
 // ─── QT Table ────────────────────────────────────────────────────────────────
 
-function QtTable({ results, age, currentAge, gender, course, rankings, level }) {
+function QtTable({ results, age, currentAge, rankingYear, gender, course, rankings, level }) {
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
@@ -280,12 +323,11 @@ function QtTable({ results, age, currentAge, gender, course, rankings, level }) 
                 const safeLevel = (level || 'COUNTY').toUpperCase();
                 const targetDistrict = safeLevel === 'REGIONAL' ? 'South East' : 'Kent';
                 const targetPool = (course === 'SC' || course === 'S' || course === 'sc' || course === 's') ? 'S' : 'L';
-                const currentRank = (rankings || []).find(r =>
-                  normalizeEvent(r.stroke || '') === normalizeEvent(eventName) &&
-                  r.pool === targetPool &&
-                  r.district === targetDistrict
-                );
-                const maxAccepted = getMaxAcceptedSwimmers(eventName, currentAge || age);
+                // Rank and cap describe the current-year cohort — the target
+                // season's cohort does not exist yet — while the QT columns
+                // target next season. The footnote spells the difference out.
+                const { row: currentRank, isUnlabelledYear } = findRanking(rankings, eventName, targetPool, targetDistrict, rankingYear, currentAge);
+                const maxAccepted = getMaxAcceptedSwimmers(eventName, currentAge, safeLevel);
                 const swimmerRank = currentRank ? parseInt(currentRank.rank) : null;
 
                 const courseKey = course === 'LC' ? 'autoLC' : 'autoSC';
@@ -348,7 +390,7 @@ function QtTable({ results, age, currentAge, gender, course, rankings, level }) 
                     </td>
                     {/* Rank & Prob */}
                     <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                      <TrafficLightBadge rank={swimmerRank} maxAccepted={maxAccepted} />
+                      <TrafficLightBadge rank={swimmerRank} maxAccepted={maxAccepted} isUnlabelledYear={isUnlabelledYear} />
                     </td>
                   </tr>
                 );
@@ -375,9 +417,6 @@ export default function PredictorPage({ session: propSession }) {
   const [course, setCourse]         = useState('SC');
   const [search, setSearch]         = useState('');
   const [rankings, setRankings]     = useState([]);
-
-  console.log("🚨 CANARY LOG: PredictorPage Rendered! Selected ID:", selectedId);
-  console.log("🚨 CURRENT RANKINGS IN STATE:", rankings?.length);
 
   // Sync prop session to state session if propSession is loaded after initial render
   useEffect(() => {
@@ -411,24 +450,36 @@ export default function PredictorPage({ session: propSession }) {
     fetchData();
   }, [session]);
 
-  // Fetch rankings for selected swimmer
+  // Fetch rankings for selected swimmer — only the newest snapshot is current,
+  // so narrow to that date rather than mixing every historic scrape together.
   useEffect(() => {
-    console.log("🚨 RANKINGS USE-EFFECT TRIGGERED! Session exists:", !!session, "| ID:", selectedId);
     if (!session || !selectedId) {
       setRankings([]);
       return;
     }
-    console.log("🔍 FETCHING RANKINGS FOR SWIMMER ID:", selectedId);
-    supabase
-      .from('rankings')
-      .select('*')
-      .eq('swimmer_id', selectedId)
-      .then(({ data, error }) => {
-        if (error) console.error("🚨 Rankings Fetch Error:", error);
-        console.log("📦 RAW RANKINGS FROM DB:", data);
-        // Absolute bypass of ALL snapshot filters
-        setRankings(data || []);
-      });
+    let cancelled = false;
+    async function fetchRankings() {
+      const { data: latestSnap } = await supabase
+        .from('rankings')
+        .select('snapshot_date')
+        .eq('swimmer_id', selectedId)
+        .order('snapshot_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!latestSnap?.snapshot_date) { setRankings([]); return; }
+
+      const { data, error } = await supabase
+        .from('rankings')
+        .select('*')
+        .eq('swimmer_id', selectedId)
+        .eq('snapshot_date', latestSnap.snapshot_date);
+      if (cancelled) return;
+      if (error) console.error('Rankings fetch error:', error);
+      setRankings(data || []);
+    }
+    fetchRankings();
+    return () => { cancelled = true; };
   }, [session, selectedId]);
 
   const swimmer = useMemo(() => swimmers.find(s => s.id === selectedId) || null, [swimmers, selectedId]);
@@ -439,7 +490,10 @@ export default function PredictorPage({ session: propSession }) {
   );
 
   const now = new Date();
-  const targetYear = now.getMonth() >= 4 ? now.getFullYear() + 1 : now.getFullYear();
+  const targetYear = getTargetSeasonYear(now);
+  // Rankings lag the target season by a year: only the current calendar year's
+  // cohort exists to be ranked against.
+  const rankingYear = getRankingReferenceYear(now);
   const age = swimmer?.year_of_birth ? targetYear - swimmer.year_of_birth : null;
   const currentAge = swimmer?.year_of_birth ? now.getFullYear() - swimmer.year_of_birth : null;
   const gender = swimmer?.gender || 'M';
@@ -461,6 +515,15 @@ export default function PredictorPage({ session: propSession }) {
       };
     });
   }, [swimmer, swimmerResults, age, gender]);
+
+  // Footnote facts: which competition is in view, which snapshot the ranks come
+  // from, and whether any of them predate season_year being recorded.
+  const isRegional = (queryLevel || 'COUNTY').toUpperCase() === 'REGIONAL';
+  const rankingSnapshotDate = rankings[0]?.snapshot_date || null;
+  const hasUnlabelledRankings = useMemo(
+    () => rankings.some(r => r.season_year === null || r.season_year === undefined),
+    [rankings]
+  );
 
   const filteredSwimmers = useMemo(() => {
     if (!search.trim()) return swimmers;
@@ -571,7 +634,7 @@ export default function PredictorPage({ session: propSession }) {
           </div>
 
           {/* AI Card */}
-          <PathwayAiCard swimmer={swimmer} age={age} gapData={gapData} rankings={rankings} course={course} session={session} />
+          <PathwayAiCard swimmer={swimmer} age={age} currentAge={currentAge} seasonYear={targetYear} rankingYear={rankingYear} gapData={gapData} rankings={rankings} course={course} level={queryLevel || 'COUNTY'} session={session} />
 
           {/* QT Table */}
           <div className="glass-card" style={{ padding: '2.5rem' }}>
@@ -594,11 +657,16 @@ export default function PredictorPage({ session: propSession }) {
               </div>
             </div>
 
-            <QtTable results={swimmerResults} age={age} currentAge={currentAge} gender={gender} course={course} rankings={rankings} level={queryLevel || 'COUNTY'} />
+            <QtTable results={swimmerResults} age={age} currentAge={currentAge} rankingYear={rankingYear} gender={gender} course={course} rankings={rankings} level={queryLevel || 'COUNTY'} />
 
             <div style={{ marginTop: '1.5rem', padding: '1rem 1.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
               <p style={{ fontSize: '0.7rem', opacity: 0.4, margin: 0, lineHeight: 1.6 }}>
-                <strong style={{ opacity: 1 }}>Key:</strong> Auto = Automatic qualifying time (guaranteed entry). Cons = Consideration time (subject to selection). Times sourced from Kent 2026 Championship Standards. Age calculated against {targetYear} season year.
+                <strong style={{ opacity: 1 }}>Key:</strong> Auto = Automatic qualifying time (guaranteed entry). Cons = Consideration time (subject to selection). Times sourced from Kent 2026 Championship Standards — not yet republished for {targetYear}. Age calculated against the {targetYear} season (age at 31 Dec {targetYear}).
+              </p>
+              <p style={{ fontSize: '0.7rem', opacity: 0.4, margin: '0.5rem 0 0', lineHeight: 1.6 }}>
+                <strong style={{ opacity: 1 }}>Rank &amp; Prob:</strong> position in the <strong style={{ opacity: 1 }}>{rankingYear}</strong> {isRegional ? 'South East' : 'Kent'} age group on swimmingresults.org{rankingSnapshotDate ? ` as at ${rankingSnapshotDate}` : ''} — one year behind the QT columns, because the {targetYear} cohort does not exist until {targetYear} begins. Built from times swum in the trailing 12 months. {isRegional
+                  ? `Judged against a top-${REGIONAL_TOP_N} proxy: South East publishes qualifying times only, with no per-event entry cap, so this mirrors the Top-30 measure used on the dashboard rather than a published acceptance limit.`
+                  : `Judged against the maximum entries accepted per event, transcribed from the 2026 Kent conditions and unconfirmed for ${targetYear}.`} Lists are capped at the top 100, so anyone below that shows as UNRANKED.{hasUnlabelledRankings ? ' Ranks marked * were scraped before the age-group year was recorded, so their basis is unconfirmed — re-run the rankings scrape to refresh.' : ''}
               </p>
             </div>
           </div>
