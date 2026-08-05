@@ -48,6 +48,21 @@ const headers = {
 async function fetchSwimmerIds() {
   const res = await fetch(`${APP_URL}/api/sync-targets`, { headers });
   if (!res.ok) {
+    // A 404 here almost always means the deployment predates this endpoint,
+    // not that anything is broken — say so rather than dumping a 404 page.
+    if (res.status === 404) {
+      throw new Error(
+        `${APP_URL}/api/sync-targets returned 404. That endpoint ships with this script, so ` +
+        `the deployment is probably older than this commit. Check the Vercel deployment has ` +
+        `finished, then re-run. No swimmers were touched.`
+      );
+    }
+    if (res.status === 401) {
+      throw new Error(
+        `${APP_URL}/api/sync-targets returned 401. The CRON_SECRET repo secret does not match ` +
+        `the deployment's CRON_SECRET environment variable. No swimmers were touched.`
+      );
+    }
     throw new Error(`Could not list swimmers (${res.status}): ${(await res.text()).slice(0, 200)}`);
   }
   const { swimmerIds } = await res.json();

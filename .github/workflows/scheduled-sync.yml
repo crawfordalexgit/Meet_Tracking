@@ -34,11 +34,11 @@ jobs:
       APP_URL: https://www.coacheseye.co.uk
       CRON_SECRET: ${{ secrets.CRON_SECRET }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
 
       # Decide which job this run should do. A manual run uses the chosen input;
       # the monthly schedule does join dates; anything else is the daily sync.
@@ -58,6 +58,24 @@ jobs:
             echo "CRON_SECRET repo secret is not set — add it under Settings > Secrets and variables > Actions."
             exit 1
           fi
+
+      # Fail fast with a clear cause rather than mid-run: a 404 means the
+      # deployment is older than this commit, a 401 means the secret is wrong.
+      - name: Check deployment is up to date
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/sync-targets")
+          if [ "$code" = "404" ]; then
+            echo "$APP_URL/api/sync-targets returned 404 — the deployment is older than this commit."
+            echo "Wait for Vercel to finish deploying, then re-run. Nothing has been changed."
+            exit 1
+          elif [ "$code" = "401" ]; then
+            echo "$APP_URL/api/sync-targets returned 401 — CRON_SECRET here does not match the deployment."
+            exit 1
+          elif [ "$code" != "200" ]; then
+            echo "$APP_URL/api/sync-targets returned HTTP $code."
+            exit 1
+          fi
+          echo "Deployment is current."
 
       - name: Run sync
         run: node scripts/drive-sync.mjs "${{ steps.pick.outputs.job }}"
