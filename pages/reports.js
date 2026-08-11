@@ -7,6 +7,7 @@ import { authedFetch } from '../lib/api-client';
 import { getNormalizedWA } from '../lib/wa-points';
 import { getCategoryBenchmark } from '../lib/analytics-utils';
 import PremiumOrb from '../components/PremiumOrb';
+import SessionAllocationsReport from '../components/SessionAllocationsReport';
 import {
   ResponsiveContainer,
   ScatterChart,
@@ -470,6 +471,7 @@ export default function ReportsCenter({ session }) {
         >
           <option value="briefings">AI Strategic Briefings</option>
           <option value="athletes">Athlete Intelligence Directory</option>
+          <option value="allocations">Session Allocations</option>
           <option value="efficiency">Load & Efficiency Matrix</option>
           <option value="pathway">Championship Pathway Audit</option>
           <option value="temperament">Competitive Temperament</option>
@@ -529,6 +531,11 @@ export default function ReportsCenter({ session }) {
               </div>
             </div>
           </div>
+
+          {/* SESSION ALLOCATIONS: how many sessions each athlete is scheduled into */}
+          {activeTab === 'allocations' && (
+            <SessionAllocationsReport initialSquadId={squadId} />
+          )}
 
           {/* TAB 1: AI INTEL BRIEFINGS */}
           {activeTab === 'briefings' && (
