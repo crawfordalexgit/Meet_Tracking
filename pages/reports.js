@@ -20,6 +20,22 @@ import {
   ReferenceLine
 } from 'recharts';
 
+// There is no Tailwind build in this app — styles/globals.css hand-rolls a
+// subset of utility classes, and `bg-slate-900` is not among them (only the
+// `/40`, `/60` and `/80` opacity variants exist). Without a background the
+// filter controls rendered as white text on a white field, so they are styled
+// inline against the theme variables instead.
+const FILTER_FIELD_STYLE = {
+  background: 'rgba(0, 0, 0, 0.35)',
+  border: '1px solid rgba(255, 255, 255, 0.12)',
+  borderRadius: 10,
+  padding: '8px 12px',
+  color: 'var(--text-primary)',
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  outline: 'none'
+};
+
 export default function ReportsCenter({ session }) {
   // Navigation & Loading States
   const [loading, setLoading] = useState(true);
@@ -393,7 +409,7 @@ export default function ReportsCenter({ session }) {
             <select
               value={squadId}
               onChange={(e) => setSquadId(e.target.value)}
-              className="bg-slate-900 border border-white/10 rounded-lg p-2 text-white text-xs font-semibold focus:border-cyan-400 outline-none w-48"
+              style={{ ...FILTER_FIELD_STYLE, width: 190 }}
             >
               <option value="all">All Active Squads</option>
               {squads.map(s => (
@@ -407,7 +423,7 @@ export default function ReportsCenter({ session }) {
             <select
               value={period}
               onChange={(e) => handlePeriodChange(e.target.value)}
-              className="bg-slate-900 border border-white/10 rounded-lg p-2 text-white text-xs font-semibold focus:border-cyan-400 outline-none w-36"
+              style={{ ...FILTER_FIELD_STYLE, width: 150 }}
             >
               <option value="30">Last 30 Days</option>
               <option value="90">Last 90 Days</option>
@@ -425,7 +441,7 @@ export default function ReportsCenter({ session }) {
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="bg-slate-900 border border-white/10 rounded-lg p-2 text-white text-xs font-semibold focus:border-cyan-400 outline-none w-36"
+                  style={{ ...FILTER_FIELD_STYLE, width: 150 }}
                 />
               </div>
               <div className="flex flex-col gap-2">
@@ -434,7 +450,7 @@ export default function ReportsCenter({ session }) {
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="bg-slate-900 border border-white/10 rounded-lg p-2 text-white text-xs font-semibold focus:border-cyan-400 outline-none w-36"
+                  style={{ ...FILTER_FIELD_STYLE, width: 150 }}
                 />
               </div>
             </>
@@ -504,8 +520,11 @@ export default function ReportsCenter({ session }) {
         </button>
       </div>
 
-      {/* Tab Panels */}
-      {loading ? (
+      {/* Session allocations reads its own endpoint, so it renders whether or
+          not the shared reporting dataset compiled. */}
+      {activeTab === 'allocations' ? (
+        <SessionAllocationsReport initialSquadId={squadId} />
+      ) : loading ? (
         <div className="flex flex-col items-center justify-center py-32 gap-6">
           <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-cyan-400"></div>
           <div className="text-xs font-black tracking-widest uppercase text-cyan-400/80">Synthesizing Analytical Datasets...</div>
@@ -531,11 +550,6 @@ export default function ReportsCenter({ session }) {
               </div>
             </div>
           </div>
-
-          {/* SESSION ALLOCATIONS: how many sessions each athlete is scheduled into */}
-          {activeTab === 'allocations' && (
-            <SessionAllocationsReport initialSquadId={squadId} />
-          )}
 
           {/* TAB 1: AI INTEL BRIEFINGS */}
           {activeTab === 'briefings' && (

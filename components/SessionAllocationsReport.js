@@ -1,30 +1,72 @@
 import { useState, useEffect, useMemo } from 'react';
 import { authedFetch } from '../lib/api-client';
 import { DAY_NAMES_FULL, getDayOrder } from '../lib/analytics-utils';
-
-const GROUP_OPTIONS = [
-  { value: 'none', label: 'No Grouping (Flat Roster)' },
-  { value: 'squad', label: 'Squad' },
-  { value: 'day', label: 'Day of Week' },
-  { value: 'session', label: 'Session' },
-  { value: 'location', label: 'Location' }
-];
-
-const SORT_OPTIONS = [
-  { value: 'sessions', label: 'Sessions Allocated' },
-  { value: 'hours', label: 'Weekly Hours' },
-  { value: 'name', label: 'Swimmer Name' },
-  { value: 'variance', label: 'Variance vs Target' }
-];
-
-// Targets are per-swimmer-per-week, so they are only meaningful on a row that
-// covers the swimmer's whole allocation. Slicing by day/session/location shows a
-// fragment of it, and comparing a fragment to a weekly target would read as a
-// deficit that isn't real.
-const GROUPINGS_WITH_TARGETS = ['none', 'squad'];
+import { GROUP_OPTIONS, SORT_OPTIONS, buildAllocationReport } from '../lib/session-allocations';
 
 const fmtHours = (h) => `${(Math.round(h * 10) / 10).toFixed(1)}h`;
 const fmtDelta = (d, unit) => `${d > 0 ? '+' : ''}${Math.round(d * 10) / 10}${unit}`;
+
+// This app has no Tailwind build — styles/globals.css hand-rolls a small subset
+// of utility classes, so anything beyond it is styled inline against the theme
+// variables. Keep to CSS custom properties so the report follows theme switches.
+const S = {
+  label: {
+    fontSize: '0.625rem',
+    fontWeight: 900,
+    letterSpacing: '0.15em',
+    textTransform: 'uppercase',
+    color: 'var(--accent-cyan)',
+    opacity: 0.8,
+    display: 'block',
+    marginBottom: 8
+  },
+  field: {
+    background: 'rgba(0, 0, 0, 0.35)',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    borderRadius: 10,
+    padding: '8px 12px',
+    color: 'var(--text-primary)',
+    fontSize: '0.75rem',
+    fontWeight: 600,
+    outline: 'none'
+  },
+  tile: { padding: '1.25rem 1.5rem' },
+  tileLabel: {
+    fontSize: '0.625rem',
+    fontWeight: 900,
+    letterSpacing: '0.15em',
+    textTransform: 'uppercase',
+    color: 'var(--text-dim)',
+    marginBottom: 8
+  },
+  tileValue: { fontSize: '1.75rem', fontWeight: 900, lineHeight: 1.1, color: 'var(--text-primary)' },
+  chip: {
+    display: 'inline-block',
+    background: 'rgba(255, 255, 255, 0.04)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: '3px 8px',
+    fontSize: '0.65rem',
+    fontWeight: 600,
+    color: 'var(--text-secondary)',
+    whiteSpace: 'nowrap'
+  },
+  note: { fontSize: '0.7rem', color: 'var(--text-dim)', fontStyle: 'italic', margin: 0 }
+};
+
+const pillStyle = (active) => ({
+  padding: '6px 14px',
+  borderRadius: 10,
+  fontSize: '0.65rem',
+  fontWeight: 900,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+  transition: 'all 0.25s',
+  background: active ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.04)',
+  color: active ? '#00121f' : 'var(--text-secondary)',
+  border: `1px solid ${active ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.12)'}`
+});
 
 export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
   const [loading, setLoading] = useState(true);
@@ -48,6 +90,8 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
   const [sortBy, setSortBy] = useState('sessions');
   const [sortDir, setSortDir] = useState('desc');
   const [collapsed, setCollapsed] = useState({});
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,198 +143,54 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
     return set.has('Unknown') ? [...known, 'Unknown'] : known;
   }, [data]);
 
-  // Swimmers that survive the swimmer-level filters
-  const eligibleSwimmers = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return (data?.swimmers || []).filter(sw => {
-      if (!sw.is_squad_member) return false;
-      if (squadFilter.length && !squadFilter.includes(sw.squad_id)) return false;
-      if (!includeExempt && sw.is_exempt) return false;
-      if (term && !(sw.preferred_name || sw.full_name || '').toLowerCase().includes(term)) return false;
-      return true;
-    });
-  }, [data, squadFilter, includeExempt, search]);
+  // The whole filter/group/sort pipeline lives in lib/session-allocations so the
+  // spreadsheet export reproduces these numbers exactly rather than recomputing
+  // them from its own copy of the rules.
+  const reportOptions = useMemo(() => ({
+    squadFilter, dayFilter, locationFilter, sessionFilter,
+    activeOnly, includeExempt, includeUnallocated, search,
+    groupBy, sortBy, sortDir
+  }), [squadFilter, dayFilter, locationFilter, sessionFilter, activeOnly,
+    includeExempt, includeUnallocated, search, groupBy, sortBy, sortDir]);
 
-  // Allocation rows that survive the session-level filters, joined to swimmer + session
-  const rows = useMemo(() => {
-    if (!data) return [];
-    const swimmerById = {};
-    eligibleSwimmers.forEach(sw => { swimmerById[sw.id] = sw; });
+  const { groups, totals, showTargets, canShowUnallocated, hasRoster } = useMemo(
+    () => buildAllocationReport(data, reportOptions),
+    [data, reportOptions]
+  );
 
-    return data.allocations.reduce((acc, a) => {
-      const swimmer = swimmerById[a.swimmer_id];
-      const session = sessionsById[a.session_id];
-      if (!swimmer || !session) return acc;
-      if (activeOnly && !session.is_active) return acc;
-      if (dayFilter.length && !dayFilter.includes(session.day)) return acc;
-      if (locationFilter !== 'all' && session.location !== locationFilter) return acc;
-      if (sessionFilter !== 'all' && session.id !== sessionFilter) return acc;
-      acc.push({ swimmer, session });
-      return acc;
-    }, []);
-  }, [data, eligibleSwimmers, sessionsById, activeOnly, dayFilter, locationFilter, sessionFilter]);
-
-  const showTargets = GROUPINGS_WITH_TARGETS.includes(groupBy);
-  // A swimmer with zero allocations has no row to carry them, so only a grouping
-  // keyed off the swimmer (not off a session attribute) can show them at all.
-  const canShowUnallocated = showTargets && includeUnallocated
-    && !dayFilter.length && locationFilter === 'all' && sessionFilter === 'all';
-
-  const groups = useMemo(() => {
-    if (!data) return [];
-
-    const keyOf = (row) => {
-      switch (groupBy) {
-        case 'squad': return { key: row.swimmer.squad_id || 'unassigned', label: row.swimmer.squad_name };
-        case 'day': return { key: row.session.day, label: row.session.day };
-        case 'session': return { key: row.session.id, label: `${row.session.day} — ${row.session.name}` };
-        case 'location': return { key: row.session.location, label: row.session.location };
-        default: return { key: 'all', label: 'All Athletes' };
-      }
-    };
-
-    const buckets = new Map();
-    const bucketFor = (key, label) => {
-      if (!buckets.has(key)) buckets.set(key, { key, label, swimmers: new Map() });
-      return buckets.get(key);
-    };
-
-    rows.forEach(row => {
-      const { key, label } = keyOf(row);
-      const bucket = bucketFor(key, label);
-      if (!bucket.swimmers.has(row.swimmer.id)) {
-        bucket.swimmers.set(row.swimmer.id, { swimmer: row.swimmer, sessions: [], hours: 0 });
-      }
-      const entry = bucket.swimmers.get(row.swimmer.id);
-      entry.sessions.push(row.session);
-      entry.hours += row.session.durationHours;
-    });
-
-    if (canShowUnallocated) {
-      const seen = new Set(rows.map(r => r.swimmer.id));
-      eligibleSwimmers.filter(sw => !seen.has(sw.id)).forEach(sw => {
-        const key = groupBy === 'squad' ? (sw.squad_id || 'unassigned') : 'all';
-        const label = groupBy === 'squad' ? sw.squad_name : 'All Athletes';
-        const bucket = bucketFor(key, label);
-        if (!bucket.swimmers.has(sw.id)) bucket.swimmers.set(sw.id, { swimmer: sw, sessions: [], hours: 0 });
-      });
-    }
-
-    const built = [...buckets.values()].map(bucket => {
-      const entries = [...bucket.swimmers.values()].map(e => {
-        const squad = squadById[e.swimmer.squad_id];
-        const targetSessions = showTargets ? (squad?.target_sessions_per_week || 0) : 0;
-        const targetHours = showTargets ? (squad?.target_hours_per_week || 0) : 0;
-        return {
-          ...e,
-          count: e.sessions.length,
-          hours: Math.round(e.hours * 100) / 100,
-          targetSessions,
-          targetHours,
-          sessionVariance: targetSessions ? e.sessions.length - targetSessions : null,
-          hourVariance: targetHours ? Math.round((e.hours - targetHours) * 100) / 100 : null
-        };
-      });
-
-      const totalSessions = entries.reduce((a, e) => a + e.count, 0);
-      const totalHours = entries.reduce((a, e) => a + e.hours, 0);
-      const scored = entries.filter(e => e.sessionVariance !== null || e.hourVariance !== null);
-      const onTarget = scored.filter(e => (e.sessionVariance ?? 0) >= 0 && (e.hourVariance ?? 0) >= 0).length;
-
-      return {
-        ...bucket,
-        entries,
-        totalSwimmers: entries.length,
-        totalSessions,
-        totalHours: Math.round(totalHours * 100) / 100,
-        avgSessions: entries.length ? totalSessions / entries.length : 0,
-        avgHours: entries.length ? totalHours / entries.length : 0,
-        scoredCount: scored.length,
-        onTargetCount: onTarget
-      };
-    });
-
-    const dir = sortDir === 'asc' ? 1 : -1;
-    const compare = (a, b) => {
-      switch (sortBy) {
-        case 'name': return (a.swimmer.preferred_name || '').localeCompare(b.swimmer.preferred_name || '') * dir;
-        case 'hours': return (a.hours - b.hours) * dir;
-        case 'variance': return ((a.sessionVariance ?? 0) - (b.sessionVariance ?? 0)) * dir;
-        default: return (a.count - b.count) * dir;
-      }
-    };
-    built.forEach(g => g.entries.sort(compare));
-
-    if (groupBy === 'day') built.sort((a, b) => getDayOrder(a.key) - getDayOrder(b.key));
-    else if (groupBy === 'session') built.sort((a, b) => {
-      const d = getDayOrder(sessionsById[a.key]?.day) - getDayOrder(sessionsById[b.key]?.day);
-      return d !== 0 ? d : a.label.localeCompare(b.label);
-    });
-    else built.sort((a, b) => a.label.localeCompare(b.label));
-
-    return built;
-  }, [data, rows, eligibleSwimmers, groupBy, sortBy, sortDir, showTargets, canShowUnallocated, squadById, sessionsById]);
-
-  const totals = useMemo(() => {
-    // Group by day/session/location repeats a swimmer across buckets, so headline
-    // figures are computed from the de-duplicated allocation rows instead.
-    const bySwimmer = new Map();
-    rows.forEach(r => {
-      if (!bySwimmer.has(r.swimmer.id)) bySwimmer.set(r.swimmer.id, { swimmer: r.swimmer, count: 0, hours: 0 });
-      const e = bySwimmer.get(r.swimmer.id);
-      e.count += 1;
-      e.hours += r.session.durationHours;
-    });
-    if (canShowUnallocated) {
-      eligibleSwimmers.forEach(sw => {
-        if (!bySwimmer.has(sw.id)) bySwimmer.set(sw.id, { swimmer: sw, count: 0, hours: 0 });
-      });
-    }
-    const list = [...bySwimmer.values()];
-    const scored = list.filter(e => squadById[e.swimmer.squad_id]?.target_sessions_per_week);
-    const meeting = scored.filter(e => e.count >= squadById[e.swimmer.squad_id].target_sessions_per_week).length;
-    return {
-      swimmers: list.length,
-      allocations: rows.length,
-      hours: list.reduce((a, e) => a + e.hours, 0),
-      avgSessions: list.length ? rows.length / list.length : 0,
-      unallocated: list.filter(e => e.count === 0).length,
-      meetingPct: scored.length ? Math.round((meeting / scored.length) * 100) : null
-    };
-  }, [rows, eligibleSwimmers, canShowUnallocated, squadById]);
 
   const toggleIn = (list, setList, value) => {
     setList(list.includes(value) ? list.filter(v => v !== value) : [...list, value]);
   };
 
-  const exportCsv = () => {
-    const head = ['Group', 'Swimmer', 'Squad', 'Sessions Allocated', 'Weekly Hours', 'Target Sessions', 'Target Hours', 'Session Variance', 'Hour Variance', 'Allocated Sessions'];
-    const lines = [head];
-    groups.forEach(g => {
-      g.entries.forEach(e => {
-        lines.push([
-          g.label,
-          e.swimmer.preferred_name,
-          e.swimmer.squad_name,
-          e.count,
-          e.hours,
-          e.targetSessions || '',
-          e.targetHours || '',
-          e.sessionVariance ?? '',
-          e.hourVariance ?? '',
-          e.sessions.map(s => `${s.day} ${s.name}`).join(' | ')
-        ]);
+  // The workbook is built server-side from the same options object the screen
+  // renders from, so the export always matches whatever is currently on view.
+  const exportExcel = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const res = await authedFetch('/api/export-session-allocations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ options: reportOptions })
       });
-    });
-    const csv = lines
-      .map(cols => cols.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `session-allocations-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+      if (!res.ok) {
+        let detail = `Export failed (${res.status})`;
+        try { detail = (await res.json()).error || detail; } catch {}
+        throw new Error(detail);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `session-allocations-${new Date().toISOString().split('T')[0]}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e.message);
+    } finally {
+      setExporting(false);
+    }
   };
 
   const resetFilters = () => {
@@ -306,115 +206,138 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
 
   if (loading) {
     return (
-      <div className="glass-card p-12 text-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-cyan-400 mx-auto mb-4"></div>
-        <p className="text-xs font-black uppercase tracking-widest text-white/60">Loading Session Allocations…</p>
+      <div className="glass-card" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+        <div className="animate-spin" style={{
+          width: 32, height: 32, margin: '0 auto 1rem',
+          borderRadius: '50%', borderTop: '2px solid var(--accent-cyan)', borderBottom: '2px solid var(--accent-cyan)'
+        }}></div>
+        <p style={{ fontSize: '0.7rem', fontWeight: 900, letterSpacing: '0.15em', textTransform: 'uppercase', color: 'var(--text-secondary)', margin: 0 }}>
+          Loading session allocations…
+        </p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="glass-card p-8 border border-rose-400/30">
-        <h3 className="text-md font-black uppercase tracking-wider text-rose-400 mb-2">Allocation Load Failed</h3>
-        <p className="text-xs text-white/70">{error}</p>
+      <div className="glass-card" style={{ borderColor: 'rgba(244, 63, 94, 0.35)' }}>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent-rose)', margin: '0 0 8px' }}>
+          Allocation load failed
+        </h3>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>{error}</p>
       </div>
     );
   }
 
-  const pillClass = (active) =>
-    `px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
-      active
-        ? 'bg-cyan-400 text-black border-cyan-400'
-        : 'bg-white/5 text-white/60 border-white/10 hover:border-cyan-400/40'
-    }`;
-
-  const selectClass = 'bg-slate-900 border border-white/10 rounded-lg p-2 text-white text-xs font-semibold focus:border-cyan-400 outline-none';
-  const thClass = 'p-4 text-[10px] font-black uppercase text-white/60 tracking-wider';
-
   return (
-    <div className="space-y-8">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      {!hasRoster && (
+        <div className="glass-card" style={{ borderColor: 'rgba(251, 191, 36, 0.35)' }}>
+          <h3 style={{ fontSize: '0.9rem', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent-amber)', margin: '0 0 8px' }}>
+            No athletes returned
+          </h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
+            The server read back zero squad members. If the roster is populated everywhere else in the app,
+            this is a server-side permissions problem rather than missing data — check that
+            <code> SUPABASE_SERVICE_ROLE_KEY</code> holds the secret key and not the publishable one, since an
+            anonymous client is blocked by row-level security and silently returns nothing.
+          </p>
+        </div>
+      )}
+
       {/* Headline metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16 }}>
         {[
           { label: 'Athletes In Scope', value: totals.swimmers },
           { label: 'Total Allocations', value: totals.allocations },
           { label: 'Avg Sessions / Athlete', value: totals.avgSessions.toFixed(1) },
-          { label: 'Weekly Pool Hours', value: fmtHours(totals.hours) },
+          { label: 'Weekly Athlete Hours', value: fmtHours(totals.hours) },
           {
             label: 'Meeting Session Target',
             value: totals.meetingPct === null ? '—' : `${totals.meetingPct}%`,
-            accent: totals.meetingPct !== null && totals.meetingPct < 75 ? 'text-amber-400' : 'text-emerald-400'
+            color: totals.meetingPct === null
+              ? 'var(--text-dim)'
+              : totals.meetingPct < 75 ? 'var(--accent-amber)' : 'var(--accent-emerald)'
           }
         ].map(tile => (
-          <div key={tile.label} className="glass-card p-5">
-            <div className="text-[10px] font-black tracking-widest text-white/50 uppercase mb-2">{tile.label}</div>
-            <div className={`text-2xl font-black ${tile.accent || 'text-white'}`}>{tile.value}</div>
+          <div key={tile.label} className="glass-card" style={S.tile}>
+            <div style={S.tileLabel}>{tile.label}</div>
+            <div style={{ ...S.tileValue, color: tile.color || 'var(--text-primary)' }}>{tile.value}</div>
           </div>
         ))}
       </div>
 
       {/* Filter & grouping controls */}
-      <div className="glass-card p-6 space-y-5 no-print">
-        <div className="flex flex-wrap gap-6 items-end">
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase">Group By</label>
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} className={`${selectClass} w-56`}>
+      <div className="glass-card no-print" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'flex-end' }}>
+          <div>
+            <label style={S.label}>Group By</label>
+            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} style={{ ...S.field, width: 220 }}>
               {GROUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase">Sort Athletes By</label>
-            <div className="flex gap-2">
-              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className={`${selectClass} w-44`}>
+          <div>
+            <label style={S.label}>Sort Athletes By</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ ...S.field, width: 180 }}>
                 {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-              <button onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')} className={pillClass(false)}>
+              <button onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')} style={pillStyle(false)}>
                 {sortDir === 'asc' ? '↑ Asc' : '↓ Desc'}
               </button>
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase">Location</label>
-            <select value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} className={`${selectClass} w-44`}>
+          <div>
+            <label style={S.label}>Location</label>
+            <select value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} style={{ ...S.field, width: 180 }}>
               <option value="all">All Locations</option>
               {locations.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase">Session</label>
-            <select value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)} className={`${selectClass} w-64`}>
+          <div>
+            <label style={S.label}>Session</label>
+            <select value={sessionFilter} onChange={(e) => setSessionFilter(e.target.value)} style={{ ...S.field, width: 260 }}>
               <option value="all">All Sessions</option>
               {sessionPickList.map(s => <option key={s.id} value={s.id}>{s.day} — {s.name}</option>)}
             </select>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase">Find Athlete</label>
+          <div>
+            <label style={S.label}>Find Athlete</label>
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name…"
-              className={`${selectClass} w-48`}
+              style={{ ...S.field, width: 190 }}
             />
           </div>
 
-          <div className="ml-auto flex gap-2">
-            <button onClick={exportCsv} className={pillClass(false)}>⬇ Export CSV</button>
-            <button onClick={resetFilters} className={pillClass(false)}>Reset Filters</button>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            <button
+              onClick={exportExcel}
+              disabled={exporting}
+              style={{
+                ...pillStyle(true),
+                opacity: exporting ? 0.6 : 1,
+                cursor: exporting ? 'wait' : 'pointer'
+              }}
+            >
+              {exporting ? 'Building workbook…' : '⬇ Export to Excel'}
+            </button>
+            <button onClick={resetFilters} style={pillStyle(false)}>Reset Filters</button>
           </div>
         </div>
 
         <div>
-          <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase block mb-2">Squads</label>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setSquadFilter([])} className={pillClass(squadFilter.length === 0)}>All Squads</button>
+          <label style={S.label}>Squads</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button onClick={() => setSquadFilter([])} style={pillStyle(squadFilter.length === 0)}>All Squads</button>
             {(data?.squads || []).map(sq => (
-              <button key={sq.id} onClick={() => toggleIn(squadFilter, setSquadFilter, sq.id)} className={pillClass(squadFilter.includes(sq.id))}>
+              <button key={sq.id} onClick={() => toggleIn(squadFilter, setSquadFilter, sq.id)} style={pillStyle(squadFilter.includes(sq.id))}>
                 {sq.name}
               </button>
             ))}
@@ -422,45 +345,54 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
         </div>
 
         <div>
-          <label className="text-[10px] font-black tracking-widest text-cyan-400/80 uppercase block mb-2">Days</label>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => setDayFilter([])} className={pillClass(dayFilter.length === 0)}>All Days</button>
+          <label style={S.label}>Days</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button onClick={() => setDayFilter([])} style={pillStyle(dayFilter.length === 0)}>All Days</button>
             {daysPresent.map(d => (
-              <button key={d} onClick={() => toggleIn(dayFilter, setDayFilter, d)} className={pillClass(dayFilter.includes(d))}>
+              <button key={d} onClick={() => toggleIn(dayFilter, setDayFilter, d)} style={pillStyle(dayFilter.includes(d))}>
                 {d.slice(0, 3)}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => setActiveOnly(!activeOnly)} className={pillClass(activeOnly)}>Active Sessions Only</button>
-          <button onClick={() => setIncludeExempt(!includeExempt)} className={pillClass(includeExempt)}>Include Exempt Athletes</button>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <button onClick={() => setActiveOnly(!activeOnly)} style={pillStyle(activeOnly)}>Active Sessions Only</button>
+          <button onClick={() => setIncludeExempt(!includeExempt)} style={pillStyle(includeExempt)}>Include Exempt Athletes</button>
           <button
             onClick={() => setIncludeUnallocated(!includeUnallocated)}
             disabled={!showTargets}
             title={showTargets ? '' : 'Only available when grouping by squad or not grouping'}
-            className={`${pillClass(includeUnallocated && canShowUnallocated)} ${showTargets ? '' : 'opacity-40 cursor-not-allowed'}`}
+            style={{
+              ...pillStyle(includeUnallocated && canShowUnallocated),
+              opacity: showTargets ? 1 : 0.4,
+              cursor: showTargets ? 'pointer' : 'not-allowed'
+            }}
           >
             Show Unallocated Athletes
           </button>
         </div>
 
         {!showTargets && (
-          <p className="text-[10px] text-white/40 italic">
+          <p style={S.note}>
             Weekly targets are hidden when grouping by {GROUP_OPTIONS.find(o => o.value === groupBy)?.label.toLowerCase()} — each row covers only part of an athlete&apos;s week.
           </p>
         )}
+        {exportError && (
+          <p style={{ ...S.note, color: 'var(--accent-rose)', fontStyle: 'normal', fontWeight: 700 }}>
+            Excel export failed: {exportError}
+          </p>
+        )}
         {totals.unallocated > 0 && (
-          <p className="text-[10px] text-amber-400 font-bold uppercase tracking-wider">
+          <p style={{ ...S.note, color: 'var(--accent-amber)', fontStyle: 'normal', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             {totals.unallocated} athlete{totals.unallocated === 1 ? '' : 's'} in scope with zero allocated sessions
           </p>
         )}
       </div>
 
       {/* Groups */}
-      {groups.length === 0 && (
-        <div className="glass-card p-12 text-center text-xs text-white/50 font-semibold">
+      {groups.length === 0 && hasRoster && (
+        <div className="glass-card" style={{ textAlign: 'center', padding: '3rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
           No allocations match the current filters.
         </div>
       )}
@@ -468,33 +400,46 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
       {groups.map(group => {
         const isCollapsed = !!collapsed[group.key];
         return (
-          <div key={group.key} className="glass-card overflow-hidden">
+          <div key={group.key} className="glass-card" style={{ padding: 0 }}>
             <div
-              className="p-6 border-b border-white/10 flex flex-wrap justify-between items-center gap-4 cursor-pointer hover:bg-white/5 transition-all"
               onClick={() => setCollapsed({ ...collapsed, [group.key]: !isCollapsed })}
+              style={{
+                padding: '1.5rem 2rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '1rem',
+                cursor: 'pointer'
+              }}
             >
               <div>
-                <h3 className="text-md font-black tracking-wider text-white uppercase">
-                  <span className="text-white/30 mr-2 text-xs">{isCollapsed ? '▶' : '▼'}</span>
+                <h3 style={{ fontSize: '0.9rem', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-primary)', margin: 0 }}>
+                  <span style={{ color: 'var(--text-dim)', marginRight: 10, fontSize: '0.7rem' }}>{isCollapsed ? '▶' : '▼'}</span>
                   {group.label}
                 </h3>
-                <p className="text-[10px] text-white/50 font-semibold uppercase tracking-wider mt-1">
+                <p style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-dim)', margin: '6px 0 0' }}>
                   {group.totalSwimmers} athletes · {group.totalSessions} allocations · {fmtHours(group.totalHours)} per week
                 </p>
               </div>
-              <div className="flex gap-6 text-right">
+              <div style={{ display: 'flex', gap: '2rem', textAlign: 'right' }}>
                 <div>
-                  <div className="text-[10px] font-black tracking-widest text-white/40 uppercase">Avg Sessions</div>
-                  <div className="text-lg font-black text-cyan-400">{group.avgSessions.toFixed(1)}</div>
+                  <div style={S.tileLabel}>Avg Sessions</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>{group.avgSessions.toFixed(1)}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] font-black tracking-widest text-white/40 uppercase">Avg Hours</div>
-                  <div className="text-lg font-black text-white">{fmtHours(group.avgHours)}</div>
+                  <div style={S.tileLabel}>Avg Hours</div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-primary)' }}>{fmtHours(group.avgHours)}</div>
                 </div>
                 {showTargets && group.scoredCount > 0 && (
                   <div>
-                    <div className="text-[10px] font-black tracking-widest text-white/40 uppercase">On Target</div>
-                    <div className={`text-lg font-black ${group.onTargetCount === group.scoredCount ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    <div style={S.tileLabel}>On Target</div>
+                    <div style={{
+                      fontSize: '1.15rem',
+                      fontWeight: 900,
+                      color: group.onTargetCount === group.scoredCount ? 'var(--accent-emerald)' : 'var(--accent-amber)'
+                    }}>
                       {group.onTargetCount}/{group.scoredCount}
                     </div>
                   </div>
@@ -503,55 +448,64 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
             </div>
 
             {!isCollapsed && (
-              <div className="overflow-x-auto text-left">
-                <table className="w-full text-left border-collapse stats-table-glass">
+              <div style={{ overflowX: 'auto', padding: '0.5rem 1rem 1rem' }}>
+                <table className="stats-table-glass">
                   <thead>
-                    <tr className="border-b border-white/10">
-                      <th className={thClass}>Swimmer</th>
-                      {groupBy !== 'squad' && <th className={thClass}>Squad</th>}
-                      <th className={thClass}>Sessions Allocated</th>
-                      <th className={thClass}>Weekly Hours</th>
-                      {showTargets && <th className={thClass}>Weekly Target</th>}
-                      {showTargets && <th className={thClass}>Variance</th>}
-                      <th className={`${thClass} text-right`}>Allocated Sessions</th>
+                    <tr>
+                      <th>Swimmer</th>
+                      <th title="Age reached by 31 December this year — the age swimming squads and championship age groups run on">Age (EOY)</th>
+                      {groupBy !== 'squad' && <th>Squad</th>}
+                      <th>Sessions</th>
+                      <th>Weekly Hours</th>
+                      {showTargets && <th>Weekly Target</th>}
+                      {showTargets && <th>Variance</th>}
+                      <th style={{ textAlign: 'right' }}>Allocated Sessions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {group.entries.map(e => (
-                      <tr key={e.swimmer.id} className="border-b border-white/5 hover:bg-white/5 transition-all text-xs font-semibold align-top">
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <span className="text-white font-bold">{e.swimmer.preferred_name}</span>
-                            {e.swimmer.is_exempt && (
-                              <span className="bg-amber-400/10 text-amber-400 text-[8px] font-black px-1.5 py-0.5 rounded tracking-widest uppercase border border-amber-400/20">Exempt</span>
-                            )}
-                          </div>
+                      <tr key={e.swimmer.id}>
+                        <td style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {e.swimmer.preferred_name}
+                          {e.swimmer.is_exempt && (
+                            <span style={{
+                              marginLeft: 8, padding: '2px 6px', borderRadius: 4,
+                              background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.25)',
+                              color: 'var(--accent-amber)', fontSize: '0.55rem', fontWeight: 900,
+                              letterSpacing: '0.1em', textTransform: 'uppercase'
+                            }}>Exempt</span>
+                          )}
                         </td>
-                        {groupBy !== 'squad' && <td className="p-4 text-white/60">{e.swimmer.squad_name}</td>}
-                        <td className="p-4">
-                          <span className={`font-black ${e.count === 0 ? 'text-rose-400' : 'text-cyan-400'}`}>{e.count}</span>
+                        <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          {e.swimmer.age_end_of_year ?? <span style={{ color: 'var(--text-dim)' }}>—</span>}
                         </td>
-                        <td className="p-4 text-white/80">{fmtHours(e.hours)}</td>
+                        {groupBy !== 'squad' && (
+                          <td style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{e.swimmer.squad_name}</td>
+                        )}
+                        <td style={{ fontSize: '0.9rem', fontWeight: 900, color: e.count === 0 ? 'var(--accent-rose)' : 'var(--accent-cyan)' }}>
+                          {e.count}
+                        </td>
+                        <td style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{fmtHours(e.hours)}</td>
                         {showTargets && (
-                          <td className="p-4 text-white/50">
+                          <td style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
                             {e.targetSessions || e.targetHours
                               ? `${e.targetSessions || '—'} / ${e.targetHours ? fmtHours(e.targetHours) : '—'}`
-                              : <span className="text-white/30">Not set</span>}
+                              : 'Not set'}
                           </td>
                         )}
                         {showTargets && (
-                          <td className="p-4">
+                          <td style={{ fontSize: '0.75rem' }}>
                             {e.sessionVariance === null && e.hourVariance === null ? (
-                              <span className="text-white/30">—</span>
+                              <span style={{ color: 'var(--text-dim)' }}>—</span>
                             ) : (
-                              <div className="flex flex-col">
+                              <div style={{ display: 'flex', flexDirection: 'column' }}>
                                 {e.sessionVariance !== null && (
-                                  <span className={e.sessionVariance >= 0 ? 'text-emerald-400 font-black' : 'text-rose-400 font-black'}>
+                                  <span style={{ fontWeight: 900, color: e.sessionVariance >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
                                     {fmtDelta(e.sessionVariance, '')} sessions
                                   </span>
                                 )}
                                 {e.hourVariance !== null && (
-                                  <span className={`text-[10px] ${e.hourVariance >= 0 ? 'text-emerald-400/70' : 'text-rose-400/70'}`}>
+                                  <span style={{ fontSize: '0.65rem', opacity: 0.75, color: e.hourVariance >= 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
                                     {fmtDelta(e.hourVariance, 'h')}
                                   </span>
                                 )}
@@ -559,16 +513,19 @@ export default function SessionAllocationsReport({ initialSquadId = 'all' }) {
                             )}
                           </td>
                         )}
-                        <td className="p-4 text-right">
+                        <td style={{ textAlign: 'right' }}>
                           {e.sessions.length === 0 ? (
-                            <span className="text-rose-400/70 text-[10px] font-black uppercase tracking-wider">No sessions allocated</span>
+                            <span style={{ fontSize: '0.65rem', fontWeight: 900, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--accent-rose)', opacity: 0.8 }}>
+                              No sessions allocated
+                            </span>
                           ) : (
-                            <div className="flex flex-wrap gap-1.5 justify-end">
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'flex-end' }}>
                               {[...e.sessions]
                                 .sort((a, b) => getDayOrder(a.day) - getDayOrder(b.day))
                                 .map((s, i) => (
-                                  <span key={`${s.id}-${i}`} className="bg-white/5 border border-white/10 rounded px-2 py-0.5 text-[10px] text-white/70">
-                                    {s.day.slice(0, 3)} · {s.name} <span className="text-white/40">({fmtHours(s.durationHours)})</span>
+                                  <span key={`${s.id}-${i}`} style={S.chip}>
+                                    {s.day.slice(0, 3)} · {s.name}
+                                    <span style={{ color: 'var(--text-dim)' }}> ({fmtHours(s.durationHours)})</span>
                                   </span>
                                 ))}
                             </div>
