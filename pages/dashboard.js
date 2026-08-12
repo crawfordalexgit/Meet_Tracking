@@ -120,14 +120,32 @@ export default function Dashboard({ session }) {
     try {
       await authedFetch('/api/sync-scm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
 
-      setMasterSyncState({ active: true, message: 'Phase 2: Syncing Attendance...' });
+      // Link new members to their SCM web ID before anything that needs it.
+      // Every phase below (and the attendance and membership endpoints) filters
+      // on scm_numeric_id, so a member without one is invisible to all of them
+      // and silently stays on zero sessions and zero attendance.
+      setMasterSyncState({ active: true, message: 'Phase 2: Linking SCM member IDs...' });
+      let unlinkedRemaining = 0;
+      try {
+        const idRes = await authedFetch('/api/sync-scm-ids', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const idData = await idRes.json();
+        if (idRes.ok) unlinkedRemaining = (idData.unlinked || 0) - (idData.linked || 0);
+      } catch (e) {
+        console.error('SCM ID linking failed:', e);
+      }
+
+      setMasterSyncState({ active: true, message: 'Phase 3: Syncing Attendance...' });
       await authedFetch('/api/sync-attendance', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
 
       // Phase 3 is client-batched: the endpoint scrapes SCM per swimmer, which
       // is why /api/sync-scm skips membership work by default (it would time
       // out in one pass). Without this, memberships never update — a session
       // split leaves swimmers registered on the old session indefinitely.
-      setMasterSyncState({ active: true, message: 'Phase 3: Syncing Session Memberships...' });
+      setMasterSyncState({ active: true, message: 'Phase 4: Syncing Session Memberships...' });
       const { data: syncSwimmers } = await supabase
         .from('swimmers')
         .select('id')
@@ -138,7 +156,7 @@ export default function Dashboard({ session }) {
       const totalSwimmers = syncSwimmers?.length || 0;
       for (let i = 0; i < totalSwimmers; i += batchSize) {
         const batch = syncSwimmers.slice(i, i + batchSize).map(s => s.id);
-        setMasterSyncState({ active: true, message: `Phase 3: Syncing Session Memberships (${i}/${totalSwimmers})...` });
+        setMasterSyncState({ active: true, message: `Phase 4: Syncing Session Memberships (${i}/${totalSwimmers})...` });
         try {
           const res = await authedFetch('/api/sync-session-memberships', {
             method: 'POST',
@@ -151,11 +169,18 @@ export default function Dashboard({ session }) {
         }
       }
 
+      // An unmatched member is a silent data gap, so name it rather than
+      // reporting a clean run: they will hold zero sessions and zero attendance
+      // until someone reconciles them in SCM.
+      const unlinkedNote = unlinkedRemaining > 0
+        ? ` ${unlinkedRemaining} member(s) could not be matched in SCM and will show no sessions or attendance.`
+        : '';
+
       setMasterSyncState({
         active: false,
-        message: failedBatches > 0
+        message: (failedBatches > 0
           ? `Master Sync finished, but ${failedBatches} membership batch(es) failed — re-run from Settings.`
-          : 'Daily Master Sync Complete!'
+          : 'Daily Master Sync Complete!') + unlinkedNote
       });
       fetchAll();
       setTimeout(() => setMasterSyncState({ active: false, message: '' }), 5000);

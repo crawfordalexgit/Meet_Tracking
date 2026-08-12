@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/sync-scm-ids",
+      "schedule": "0 1 * * *"
+    },
+    {
       "path": "/api/sync-attendance",
       "schedule": "0 2 * * *"
     }
