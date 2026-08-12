@@ -580,7 +580,30 @@ export default function Settings({ session, scmApiKey }) {
 
       if (!res.ok) throw new Error(data.error || 'Sync failed');
 
-      setSyncStatus({ type: 'success', text: data.message });
+      // Link any newly imported members to their SCM web ID. Without it they are
+      // filtered out of the session, attendance, join-date and target syncs and
+      // stay on zero forever. Cheap enough to run every time (one directory
+      // fetch), unlike the per-swimmer scraping it used to be bundled with.
+      let linkNote = '';
+      try {
+        setSyncStatus({ type: 'info', text: 'Syncing (Phase 2: Linking SCM member IDs)...' });
+        const idRes = await authedFetch('/api/sync-scm-ids', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const idData = await idRes.json();
+        if (idRes.ok && idData.linked > 0) {
+          linkNote = ` Linked ${idData.linked} new member(s) to SCM.`;
+        } else if (idRes.ok && idData.unlinked > 0) {
+          linkNote = ` ${idData.unlinked} member(s) could not be matched in the SCM directory.`;
+        }
+      } catch (linkErr) {
+        console.error('SCM ID linking failed:', linkErr);
+        linkNote = ' (SCM member ID linking failed — see console.)';
+      }
+
+      setSyncStatus({ type: 'success', text: (data.message || 'Sync complete.') + linkNote });
       loadData();
     } catch (err) {
       console.error('Hybrid Sync Error Details:', err);

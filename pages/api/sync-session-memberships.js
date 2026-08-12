@@ -43,18 +43,35 @@ export default async function handler(req, res) {
     const sessionNameToId = {};
     if (dbSessions) dbSessions.forEach(s => sessionNameToId[s.name.trim()] = s.id);
 
-    // Fetch swimmers to get their numeric IDs
-    const { data: swimmers } = await supabase
+    // Fetch swimmers to get their numeric IDs. Anyone without an scm_numeric_id
+    // cannot be scraped, but they must still be reported: silently filtering
+    // them out makes a swimmer with no SCM link indistinguishable from one who
+    // genuinely has no sessions, and they simply stay on zero forever.
+    const { data: allRequested } = await supabase
       .from('swimmers')
       .select('id, full_name, scm_numeric_id')
-      .in('id', swimmerIds)
-      .not('scm_numeric_id', 'is', null);
+      .in('id', swimmerIds);
 
-    if (!swimmers || swimmers.length === 0) {
-      return res.status(200).json({ success: true, message: 'No valid swimmers found in this batch.' });
+    const swimmers = (allRequested || []).filter(s => s.scm_numeric_id != null);
+    const unlinked = (allRequested || []).filter(s => s.scm_numeric_id == null);
+
+    const results = unlinked.map(s => {
+      console.warn(`SESSION SYNC: ${s.full_name} has no scm_numeric_id — cannot scrape sessions.`);
+      return {
+        swimmer: s.full_name,
+        skipped: true,
+        reason: 'No scm_numeric_id on this swimmer, so SCM cannot be queried. Link the member record in SCM first.'
+      };
+    });
+
+    if (swimmers.length === 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'No swimmers in this batch have an SCM link.',
+        summary: { processed: results.length, updated: 0, skipped: results.length, errored: 0 },
+        results
+      });
     }
-
-    const results = [];
     for (const swimmer of swimmers) {
       try {
         console.log(`SESSION SYNC: Scraping ${swimmer.full_name}...`);
@@ -87,16 +104,45 @@ export default async function handler(req, res) {
               continue;
             }
 
-            // Clear and replace
-            await supabase.from('session_memberships').delete().eq('swimmer_id', swimmer.id);
+            // Insert the new set before removing the old one. Deleting first
+            // means a failed insert leaves the swimmer on zero sessions with no
+            // way back; this way a failure leaves the previous set intact and
+            // the worst case is a transient duplicate.
+            const { data: superseded } = await supabase
+              .from('session_memberships')
+              .select('id')
+              .eq('swimmer_id', swimmer.id);
+
             const { error } = await supabase.from('session_memberships').insert(memberships);
             if (error) throw error;
+
+            if (superseded?.length) {
+              const { error: delError } = await supabase
+                .from('session_memberships')
+                .delete()
+                .in('id', superseded.map(r => r.id));
+              if (delError) {
+                console.error(`SESSION SYNC: ${swimmer.full_name} left with duplicates — ${delError.message}`);
+                results.push({
+                  swimmer: swimmer.full_name,
+                  sessions: memberships.length,
+                  warning: `New sessions written but ${superseded.length} old row(s) could not be removed; counts may be doubled until re-run.`
+                });
+                continue;
+              }
+            }
             results.push({ swimmer: swimmer.full_name, sessions: memberships.length });
           } else {
-            results.push({ swimmer: swimmer.full_name, sessions: 0, warning: 'No matching sessions found in DB' });
+            // SCM listed sessions but none matched a row in `sessions` by exact
+            // name, so the existing set is deliberately left untouched.
+            results.push({
+              swimmer: swimmer.full_name,
+              sessions: 0,
+              warning: `SCM returned ${officialSessions.length} session name(s), none matching the sessions table: ${officialSessions.join(' | ')}`
+            });
           }
         } else {
-          results.push({ swimmer: swimmer.full_name, sessions: 0 });
+          results.push({ swimmer: swimmer.full_name, sessions: 0, note: 'SCM has no sessions assigned to this member.' });
         }
       } catch (err) {
         console.error(`SESSION SYNC ERROR for ${swimmer.full_name}:`, err.message);
