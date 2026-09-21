@@ -3,6 +3,31 @@ import { fetchScmNumericIds, scmLogin, fetchSwimmerSquadJoinDate, fetchSwimmerSe
 import { requireAuth } from '../../lib/api-auth';
 import { recordSyncRun } from '../../lib/sync-log';
 
+/**
+ * Whether a synced session should be active, without undoing a local decision.
+ *
+ * This read `s.active === 'Yes' || s.Active === 'Yes' || s.isActive !== false`,
+ * and SCM's session payload carries none of those three fields. The last clause
+ * therefore evaluated `undefined !== false`, so every sync silently reactivated
+ * every session — including the ones a coach had deliberately turned off.
+ *
+ * Retired duplicates came back each time the sync ran, which put three of them
+ * back into the club's capacity totals: 138 phantom places, spread across two
+ * sessions with no weekday set, so they never appeared in any day-by-day view
+ * while still deflating every "how full are we" figure.
+ *
+ * Day and location already defer to the stored row when SCM says nothing. This
+ * does the same: SCM decides only when it has an opinion, a session the club
+ * turned off stays off, and only genuinely new sessions default to active.
+ */
+export function resolveSessionActive(scmSession, existing) {
+  const s = scmSession || {};
+  if (s.active === 'Yes' || s.Active === 'Yes' || s.isActive === true) return true;
+  if (s.active === 'No' || s.Active === 'No' || s.isActive === false) return false;
+  const stored = existing ? existing.is_active : undefined;
+  return stored === undefined || stored === null ? true : stored;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -154,6 +179,23 @@ export default async function handler(req, res) {
     const sessionsData = await fetchAllPages('ClubSessions');
     console.log(`SCM SYNC: Fetched ${sessionsData.length} raw session records.`);
 
+    // Fields SCM does not send must not be blanked on every sync.
+    //
+    // ClubSessions carries no venue and no weekday, so `s.location || ''` wrote
+    // an empty string over whatever had been curated here, and the same for
+    // day_of_week — which is why every session in this database had an empty
+    // day. Anything the club sets by hand is kept unless SCM actually has a
+    // value to replace it with.
+    let existingByGuid = {};
+    if (supabase) {
+      const { data: existingSessions } = await supabase
+        .from('sessions')
+        .select('scm_guid, location, day_of_week, is_active');
+      (existingSessions || []).forEach(row => {
+        if (row.scm_guid) existingByGuid[row.scm_guid] = row;
+      });
+    }
+
     let sessionsToUpsert = [];
     if (sessionsData.length > 0) {
       sessionsToUpsert = sessionsData.map(s => {
@@ -165,14 +207,16 @@ export default async function handler(req, res) {
           return null;
         }
 
+        const existing = existingByGuid[guid.toString()] || {};
         return {
           scm_guid: guid.toString(),
           name: name.trim(),
-          day_of_week: s.dayOfWeek || s.DayOfWeek || s.day || '',
+          // Curated locally when SCM has nothing to say — never blanked.
+          day_of_week: s.dayOfWeek || s.DayOfWeek || s.day || existing.day_of_week || '',
           start_time: s.startTime || s.StartTime || s.start || '',
           end_time: s.endTime || s.EndTime || s.end || '',
-          location: s.location || s.Location || s.venue || '',
-          is_active: s.active === 'Yes' || s.Active === 'Yes' || s.isActive !== false
+          location: s.location || s.Location || s.venue || existing.location || '',
+          is_active: resolveSessionActive(s, existing)
         };
       }).filter(Boolean);
 
