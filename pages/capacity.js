@@ -10,6 +10,9 @@ import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveCo
 import { useRouter } from 'next/router';
 import CapacityReportModal from '../components/CapacityReportModal';
 
+/** Weekday columns for the per-day tables, in the order a week runs. */
+const DAY_COLUMNS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 export default function CapacityDashboard({ session }) {
   const router = useRouter();
   const [isClient, setIsClient] = useState(false);
@@ -334,6 +337,55 @@ export default function CapacityDashboard({ session }) {
 
   const handlePrintReport = () => {
     setIsReportModalOpen(true);
+  };
+
+  /**
+   * The pool time report: every squad's water and how it falls across the week.
+   *
+   * Rendered by re-visiting this page with report=poolTime, which the print
+   * stylesheet strips back to the cover, the squad cards and the by-day table.
+   * Light theme, because this one gets printed on paper and handed round a
+   * committee table rather than read on a screen.
+   */
+  const exportPoolTimeReport = async () => {
+    setIsExporting(true);
+    try {
+      const clientAuth = {};
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('sb-') || key === 'print-insight-cache' || key === 'print-report-config')) {
+          clientAuth[key] = localStorage.getItem(key);
+        }
+      }
+      const res = await authedFetch('/api/generate-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // tab=heatmap, because that is where the squad overview and the
+          // by-day table live. The print rules strip the rest of that tab.
+          targetPath: `/capacity?tab=heatmap&report=poolTime&periodDays=${periodDays}&printTheme=light`,
+          clientAuth
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'PDF generation failed');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pool-time-report-${new Date().toISOString().split('T')[0]}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('[Pool time report]', err);
+      toast.error(err.message || 'Report failed');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleGenerateReport = async (config) => {
@@ -750,7 +802,10 @@ export default function CapacityDashboard({ session }) {
       const lanes = getSessionLanesForSquad(s, targetModellingSquad.id);
       return sum + lanes * maxPerLane;
     }, 0);
-    const totalPoolHours = squadModellingSessions.reduce((sum, s) => sum + getSessionDuration(s), 0);
+    // Water only — a zero-lane session carries a register, not pool time.
+    const totalPoolHours = squadModellingSessions
+      .filter(s => getSessionLanesForSquad(s, targetModellingSquad.id) > 0)
+      .reduce((sum, s) => sum + getSessionDuration(s), 0);
     const maxSquadSize = hasTarget ? Math.floor(totalWeeklySlots / targetSessions) : null;
     const currentSquadSize = squadSwimmers.length;
     return {
@@ -764,6 +819,10 @@ export default function CapacityDashboard({ session }) {
       isOverCapacity: hasTarget && currentSquadSize > maxSquadSize
     };
   }, [targetModellingSquad, squadModellingSessions, squadSwimmers, sharedSessionsConfig]);
+
+  // The printed pool time report. Driven by the URL so Puppeteer can ask for it
+  // by visiting this page, the way every other report on this site is made.
+  const isPoolTimeReport = router.query.report === 'poolTime';
 
   const allSquadsMetrics = useMemo(() => {
     return dbSquads.filter(sq => sq.is_squad).map(sq => {
@@ -783,7 +842,34 @@ export default function CapacityDashboard({ session }) {
         const lanes = getSessionLanesForSquad(s, sq.id);
         return sum + lanes * maxPerLane;
       }, 0);
-      const totalPoolHours = Math.round(sqSessions.reduce((sum, s) => sum + getSessionDuration(s), 0) * 10) / 10;
+      // Pool time means water, so a session holding no lanes contributes none
+      // of it. Some sessions exist only to carry a register — Age is recorded
+      // as a two-hour session plus a one-hour one on the same night, the second
+      // at zero lanes because the lanes are already counted on the first. Those
+      // add no water, and counting their hours had Age offering fifteen hours
+      // across nine sessions when it holds thirteen across seven.
+      const waterSessions = sqSessions.filter(s => getSessionLanesForSquad(s, sq.id) > 0);
+      const registerOnlyCount = sqSessions.length - waterSessions.length;
+      const totalPoolHours = Math.round(waterSessions.reduce((sum, s) => sum + getSessionDuration(s), 0) * 10) / 10;
+
+      // The same water, split across the week. A weekly total says whether a
+      // squad has enough; only the days say whether it can actually be swum —
+      // ten hours is a different squad's week if eight of them are on a Friday.
+      const hoursByDay = {};
+      const laneHoursByDay = {};
+      const sessionsByDay = {};
+      waterSessions.forEach(s => {
+        const day = s.day_of_week;
+        if (!DAY_COLUMNS.includes(day)) return;
+        const hrs = getSessionDuration(s);
+        hoursByDay[day] = (hoursByDay[day] || 0) + hrs;
+        laneHoursByDay[day] = (laneHoursByDay[day] || 0) + hrs * getSessionLanesForSquad(s, sq.id);
+        sessionsByDay[day] = (sessionsByDay[day] || 0) + 1;
+      });
+      DAY_COLUMNS.forEach(d => {
+        if (hoursByDay[d]) hoursByDay[d] = Math.round(hoursByDay[d] * 10) / 10;
+        if (laneHoursByDay[d]) laneHoursByDay[d] = Math.round(laneHoursByDay[d] * 10) / 10;
+      });
       // How many swimmers the water holds depends entirely on how many sessions
       // each of them is set. Masters is set none, and `target || 1` read that as
       // "one a week", so its ten sessions of places counted as room for 144
@@ -803,12 +889,26 @@ export default function CapacityDashboard({ session }) {
         maxSquadSize,
         totalPoolHours,
         totalWeeklySlots,
-        sessionCount: sqSessions.length,
+        sessionCount: waterSessions.length,
+        registerOnlyCount,
+        hoursByDay,
+        laneHoursByDay,
+        sessionsByDay,
         pct,
         isOverCapacity: hasTarget && maxSquadSize > 0 && sqSwimmerCount > maxSquadSize
       };
     });
   }, [dbSquads, normalizedSessions, swimmers, sharedSessionsConfig]);
+
+  /** Headline figures for the report cover. */
+  const poolTimeSummary = useMemo(() => {
+    const withWater = allSquadsMetrics.filter(sq => sq.sessionCount > 0);
+    return {
+      squadCount: withWater.length,
+      sessionCount: withWater.reduce((sum, sq) => sum + sq.sessionCount, 0),
+      totalHours: Math.round(withWater.reduce((sum, sq) => sum + sq.totalPoolHours, 0) * 10) / 10
+    };
+  }, [allSquadsMetrics]);
 
   const currentAvailablePlaces = useMemo(() => {
     if (!targetModellingSquad || squadModellingSessions.length === 0) return 0;
@@ -1278,11 +1378,16 @@ export default function CapacityDashboard({ session }) {
       if (!matchesSquadFilter(swSquadName, sess?.name)) return;
 
       const isExempt = isShutdownDate(att.date, clubExemptions, squadId);
-      if (isExempt) {
-        const matchedExemption = clubExemptions.find(ex => {
-          if (ex.squad_id && ex.squad_id !== squadId) return false;
-          return att.date >= ex.start_date && att.date <= ex.end_date;
-        });
+      // Only a closure makes attendance suspect.
+      //
+      // The club records two kinds of exemption: 'exempt' means it was shut,
+      // and 'credit' means the day is optional and nobody is marked down for
+      // missing it. isShutdownDate returns either, and this flagged both — so
+      // the Summer Bank Holiday on 31 August, a credit day the club chose to
+      // train through, produced thirty errors against the swimmers who turned
+      // up. Training on a day you did not have to is not a data fault.
+      if (isExempt && isExempt.type === 'exempt') {
+        const matchedExemption = isExempt;
 
         issues.push({
           id: `shutdown_${att.date}_${att.swimmer_id}_${att.session_id}`,
@@ -1499,10 +1604,70 @@ export default function CapacityDashboard({ session }) {
               border-bottom: ${printConfig.printTheme === 'light' ? '1px solid rgba(0,0,0,0.08)' : '1px solid rgba(255,255,255,0.05)'} !important; 
             }
             .print-hide, .no-print, .print-hide *, .no-print * { display: none !important; }
+
+            /*
+              The pool time report.
+
+              This page carries seven tabs of working; the report is three
+              things — the cover, the squad cards and the week laid out by day.
+              Everything else is hidden by name rather than by rearranging the
+              page, so the report cannot drift from what the screen shows.
+            */
+            ${isPoolTimeReport ? `
+              .pool-time-hide-in-report { display: none !important; }
+              .pool-time-report {
+                background: transparent !important;
+                border: none !important;
+                padding: 0 !important;
+                box-shadow: none !important;
+              }
+              .pool-time-cards {
+                display: grid !important;
+                grid-template-columns: repeat(3, 1fr) !important;
+                gap: 0.6rem !important;
+                page-break-inside: avoid;
+              }
+              .pool-time-cards .glass-card {
+                padding: 0.9rem !important;
+                margin-bottom: 0 !important;
+              }
+              .pool-time-table { page-break-inside: avoid; }
+              .pool-time-table table { font-size: 0.8rem !important; width: 100% !important; }
+              .pool-time-table th, .pool-time-table td {
+                color: #000 !important;
+                border-bottom: 1px solid rgba(0,0,0,0.1) !important;
+              }
+              .pool-time-table tfoot td {
+                border-top: 2px solid rgba(0,0,0,0.35) !important;
+                font-weight: 900 !important;
+              }
+            ` : ''}
           }
           .print-only { display: none; }
         `}</style>
       </Head>
+
+      {/* POOL TIME REPORT — cover */}
+      {isPoolTimeReport && (
+        <div className="print-only roster-cover-page">
+          <img src="/coacheseye-logo.png" alt="CoachesEye" style={{ height: '120px', marginBottom: '3rem' }} />
+          <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', letterSpacing: '0.5em', marginBottom: '2.5rem', textTransform: 'uppercase' }}>Tonbridge Swimming Club</div>
+          <h1 style={{ fontSize: '3.8rem', fontWeight: 900, margin: '0 2rem', lineHeight: 1.15, letterSpacing: '-0.04em', textTransform: 'uppercase', color: '#000' }}>
+            Pool Time<br />by Squad
+          </h1>
+          <div style={{ height: '8px', width: '120px', background: 'var(--accent-cyan)', margin: '4rem 0' }}></div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#000' }}>
+            How the club&apos;s water divides across the week
+          </div>
+          <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '1rem', color: '#000' }}>
+            {poolTimeSummary.totalHours} hours of squad water across {poolTimeSummary.sessionCount} sessions
+            {' · '}{poolTimeSummary.squadCount} squads
+          </div>
+          <div style={{ fontSize: '0.9rem', opacity: 0.4, marginTop: '3rem', color: '#000' }}>
+            Generated {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </div>
+        </div>
+      )}
 
       {/* PRINT COVER PAGE */}
       {activeTab === 'ghosts' && (
@@ -1684,7 +1849,7 @@ export default function CapacityDashboard({ session }) {
 
             {activeTab === 'heatmap' ? (
               <div className="flex flex-col gap-8">
-                <div className="section-divider" style={{ marginTop: '1rem' }}>
+                <div className="section-divider pool-time-hide-in-report" style={{ marginTop: '1rem' }}>
                   <span className="label">At a glance</span>
                   <span className="rule" />
                 </div>
@@ -1777,9 +1942,20 @@ export default function CapacityDashboard({ session }) {
                 {/* Squad Capacity KPI Header */}
                 {globalSquadFilter === 'All' ? (
                   allSquadsMetrics.length > 0 && (
-                    <div className="glass-card" style={{ padding: '1.25rem 1.5rem' }}>
-                      <div className="section-title">All Squads — Capacity Overview</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
+                    <div className={`glass-card${isPoolTimeReport ? ' pool-time-report' : ''}`} style={{ padding: '1.25rem 1.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+                        <div className="section-title" style={{ marginBottom: 0 }}>All Squads — Capacity Overview</div>
+                        <button
+                          className="btn btn-secondary no-print"
+                          style={{ fontSize: '0.7rem', padding: '6px 12px', whiteSpace: 'nowrap' }}
+                          disabled={isExporting}
+                          onClick={exportPoolTimeReport}
+                          title="A printable report: every squad's water, how it falls across the week, and where the club is short."
+                        >
+                          {isExporting ? 'Building…' : '📄 Pool Time Report'}
+                        </button>
+                      </div>
+                      <div className="pool-time-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
                         {allSquadsMetrics.map(sq => {
                           // Green on a squad there is no way to judge would read
                           // as "plenty of room", which is the claim being avoided.
@@ -1812,12 +1988,102 @@ export default function CapacityDashboard({ session }) {
                                 {sq.hasTarget
                                   ? <span title={`${sq.maxSquadSize} swimmers fit, at ${sq.targetSessions} session${sq.targetSessions === 1 ? '' : 's'} each a week across ${sq.totalWeeklySlots} places.`}>{sq.pct}% full</span>
                                   : <span title="This squad has no weekly session target, so there is nothing to measure how full it is against. Set one under Settings → Squads.">no weekly target</span>}
-                                <span>{sq.totalPoolHours}h · {sq.sessionCount}s</span>
+                                <span title={`${sq.totalPoolHours} hours of water across ${sq.sessionCount} session${sq.sessionCount === 1 ? '' : 's'} a week.${sq.registerOnlyCount ? ` A further ${sq.registerOnlyCount} session${sq.registerOnlyCount === 1 ? ' holds' : 's hold'} no lanes and carry only a register, so they add no pool time.` : ''}`}>
+                                  {sq.totalPoolHours}h · {sq.sessionCount}s{sq.registerOnlyCount ? ` +${sq.registerOnlyCount}r` : ''}
+                                </span>
                               </div>
                               {sq.isOverCapacity && <span style={{ fontSize: '0.55rem', color: 'var(--accent-rose)', fontWeight: 700 }}>⚠ OVER CAPACITY</span>}
                             </div>
                           );
                         })}
+                      </div>
+
+                      {/*
+                        The same water, laid out across the week.
+
+                        A weekly total says whether a squad has enough; only the
+                        days say whether it can be swum. Ten hours is a very
+                        different week if eight of them fall on a Friday, and a
+                        squad set four sessions cannot take them from three days.
+                        Register-only sessions are left out, since they hold no
+                        lanes — they are counted beside the total instead.
+                      */}
+                      <div className="mt-6 pool-time-table">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color: 'var(--text-secondary)' }}>
+                          Pool time by day
+                        </h4>
+                        <div className="card" style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                                <th style={{ padding: '8px 12px', textAlign: 'left', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.62rem', letterSpacing: '0.08em' }}>Squad</th>
+                                {DAY_COLUMNS.map(d => (
+                                  <th key={d} style={{ padding: '8px 10px', textAlign: 'center', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.62rem', letterSpacing: '0.08em' }}>{d.slice(0, 3)}</th>
+                                ))}
+                                <th style={{ padding: '8px 12px', textAlign: 'right', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.62rem', letterSpacing: '0.08em' }}>Total</th>
+                                <th style={{ padding: '8px 12px', textAlign: 'right', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.62rem', letterSpacing: '0.08em' }}>Days</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {allSquadsMetrics.filter(sq => sq.sessionCount > 0 || sq.registerOnlyCount > 0).map(sq => {
+                                const daysUsed = DAY_COLUMNS.filter(d => sq.hoursByDay[d]).length;
+                                const shortOfTarget = sq.hasTarget && daysUsed < sq.targetSessions;
+                                return (
+                                  <tr key={sq.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <td style={{ padding: '8px 12px', fontWeight: 700, whiteSpace: 'nowrap' }}>{sq.name}</td>
+                                    {DAY_COLUMNS.map(d => {
+                                      const h = sq.hoursByDay[d];
+                                      return (
+                                        <td key={d}
+                                          title={h ? `${h}h across ${sq.sessionsByDay[d]} session${sq.sessionsByDay[d] === 1 ? '' : 's'}, ${sq.laneHoursByDay[d]} lane-hours` : 'No water this day'}
+                                          style={{ padding: '8px 10px', textAlign: 'center', color: h ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.15)', fontWeight: h ? 700 : 400 }}>
+                                          {h ? h : '·'}
+                                        </td>
+                                      );
+                                    })}
+                                    <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 900 }}>
+                                      {sq.totalPoolHours}h
+                                      {sq.registerOnlyCount > 0 && (
+                                        <span style={{ opacity: 0.45, fontWeight: 600 }} title={`${sq.registerOnlyCount} register-only session(s), holding no lanes`}> +{sq.registerOnlyCount}r</span>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: shortOfTarget ? 'var(--accent-amber)' : 'inherit' }}
+                                      title={sq.hasTarget
+                                        ? `Trains on ${daysUsed} day${daysUsed === 1 ? '' : 's'} a week, and each swimmer is set ${sq.targetSessions} session${sq.targetSessions === 1 ? '' : 's'}.${shortOfTarget ? ' Fewer days than sessions owed, so somebody must swim twice in a day.' : ''}`
+                                        : `Trains on ${daysUsed} day${daysUsed === 1 ? '' : 's'} a week. No weekly session target set.`}>
+                                      {daysUsed}{sq.hasTarget ? ` / ${sq.targetSessions}` : ''}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                            <tfoot>
+                              <tr style={{ borderTop: '1px solid rgba(255,255,255,0.12)' }}>
+                                <td style={{ padding: '10px 12px', fontWeight: 900, textTransform: 'uppercase', fontSize: '0.66rem', letterSpacing: '0.06em' }}>All squads</td>
+                                {DAY_COLUMNS.map(d => {
+                                  const t = allSquadsMetrics.reduce((sum, sq) => sum + (sq.hoursByDay[d] || 0), 0);
+                                  return (
+                                    <td key={d} style={{ padding: '10px 10px', textAlign: 'center', fontWeight: 900, color: t ? 'var(--accent-emerald)' : 'rgba(255,255,255,0.15)' }}>
+                                      {t ? Math.round(t * 10) / 10 : '·'}
+                                    </td>
+                                  );
+                                })}
+                                <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 900, color: 'var(--accent-emerald)' }}>
+                                  {Math.round(allSquadsMetrics.reduce((sum, sq) => sum + sq.totalPoolHours, 0) * 10) / 10}h
+                                </td>
+                                <td style={{ padding: '10px 12px' }} />
+                              </tr>
+                            </tfoot>
+                          </table>
+                        </div>
+                        <p className="mt-3" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                          Hours a squad is in the water, not lane-hours — hover a day for the lane-hours and
+                          session count behind it. Sessions holding no lanes carry a register only and add no
+                          pool time; they appear as <strong>+r</strong> beside the total. <strong>Days</strong> is
+                          how many days a week the squad trains against the sessions each swimmer is set: fewer
+                          days than sessions means somebody has to swim twice in one day. The club total counts
+                          a shared session once per squad in it, so it is higher than the hours the pool is open.
+                        </p>
                       </div>
                     </div>
                   )
@@ -1858,7 +2124,7 @@ export default function CapacityDashboard({ session }) {
                 )}
 
                 {/* 2. Visual Week-at-a-Glance Heatmap Grid */}
-                <div className="glass-card" style={{ padding: '2rem' }}>
+                <div className="glass-card pool-time-hide-in-report" style={{ padding: '2rem' }}>
                   <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-6">
                     <div>
                       <h3 className="text-xl font-black uppercase text-white">Week-at-a-Glance Heatmap</h3>
@@ -2004,7 +2270,7 @@ export default function CapacityDashboard({ session }) {
                 </div>
 
                 {/* 3. Detailed Session Breakdowns */}
-                <div id="detailed-sessions-breakdown">
+                <div id="detailed-sessions-breakdown" className="pool-time-hide-in-report">
                   <div className="flex justify-between items-end mb-6">
                     <div>
                       <h3 className="text-xl font-black uppercase text-white">Detailed Session Breakdowns</h3>
