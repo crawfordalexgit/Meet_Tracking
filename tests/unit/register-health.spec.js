@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import {
-  runDatesFor, assessSession, assessRegisters, findStoppedClusters
+  runDatesFor, assessSession, assessRegisters, findStoppedClusters,
+  squadNameFor, groupBySquad
 } from '../../lib/register-health.js';
 
 /**
@@ -201,5 +202,83 @@ test.describe('registers that stopped together', () => {
     expect(findStoppedClusters([{ name: 'ok', flags: [], lastDate: '2026-09-18' }])).toEqual([]);
     expect(findStoppedClusters([])).toEqual([]);
     expect(findStoppedClusters(null)).toEqual([]);
+  });
+});
+
+test.describe('which squad a session belongs to', () => {
+  const SQUADS = ['AGE DEVELOPMENT', 'BRONZE', 'CLUB 2', 'GOLD DEVELOPMENT',
+    'MASTERS', 'MASTERS JNR', 'NAR', 'SILVER', 'TECHNICAL DEVELOPMENT SQUAD'];
+
+  test('the obvious ones', () => {
+    expect(squadNameFor('SILVER Friday', SQUADS)).toBe('SILVER');
+    expect(squadNameFor('BRONZE Monday pm', SQUADS)).toBe('BRONZE');
+    expect(squadNameFor('AGE DEVELOPMENT Tuesday', SQUADS)).toBe('AGE DEVELOPMENT');
+  });
+
+  test('the longer squad name wins, so Junior Masters is not Masters', () => {
+    // The substring trap: every "MASTERS JNR" session is also a "MASTERS" one,
+    // and matching the short name first is why both squads claim the same ten
+    // sessions on the capacity page.
+    expect(squadNameFor('MASTERS JNR Sunday', SQUADS)).toBe('MASTERS JNR');
+    expect(squadNameFor('MASTERS (FASTER) Sunday Morning', SQUADS)).toBe('MASTERS');
+  });
+
+  test('a first-word fallback catches a decorated name', () => {
+    expect(squadNameFor('NAR+ Friday', SQUADS)).toBe('NAR');
+    expect(squadNameFor('TECHNICAL DEVELOPMENT Friday pm', SQUADS)).toBe('TECHNICAL DEVELOPMENT SQUAD');
+  });
+
+  test('learn to swim and land training belong to no squad', () => {
+    // Forcing them into one would put their registers on a squad's record.
+    expect(squadNameFor('LTS 3/4 Friday', SQUADS)).toBeNull();
+    expect(squadNameFor('LTS 5/6 Friday', SQUADS)).toBeNull();
+    expect(squadNameFor('Land training', SQUADS)).toBeNull();
+  });
+
+  test('an unrecognised session is left unattributed rather than guessed', () => {
+    expect(squadNameFor('Something else entirely', SQUADS)).toBeNull();
+    expect(squadNameFor('', SQUADS)).toBeNull();
+    expect(squadNameFor(null, SQUADS)).toBeNull();
+    expect(squadNameFor('SILVER Friday', [])).toBeNull();
+  });
+});
+
+test.describe('gathering the findings under each squad', () => {
+  const row = (name, squad, worst, taken, expected) => ({
+    name, squad, worst, taken, expected, flags: worst === 'ok' ? [] : [{ key: 'patchy', severity: worst }]
+  });
+
+  test('squads with the most wrong come first', () => {
+    const groups = groupBySquad([
+      row('A', 'SILVER', 'ok', 13, 13),
+      row('B', 'MASTERS', 'error', 0, 13),
+      row('C', 'MASTERS', 'error', 1, 13),
+      row('D', 'BRONZE', 'warning', 8, 13)
+    ]);
+    expect(groups.map(g => g.squad)).toEqual(['MASTERS', 'BRONZE', 'SILVER']);
+    expect(groups[0].errors).toBe(2);
+  });
+
+  test('each squad carries its own registers taken against owed', () => {
+    // So a heading can be read without the rows beneath it.
+    const groups = groupBySquad([
+      row('B', 'MASTERS', 'error', 0, 13),
+      row('C', 'MASTERS', 'warning', 4, 13)
+    ]);
+    expect(groups[0].taken).toBe(4);
+    expect(groups[0].expected).toBe(26);
+    expect(groups[0].clean).toBe(0);
+    expect(groups[0].sessions).toHaveLength(2);
+  });
+
+  test('sessions belonging to no squad are gathered, not dropped', () => {
+    const groups = groupBySquad([row('LTS', null, 'error', 0, 13)]);
+    expect(groups[0].squad).toBe('No squad');
+  });
+
+  test('a squad with nothing wrong still appears, with its clean count', () => {
+    const groups = groupBySquad([row('A', 'SILVER', 'ok', 13, 13)]);
+    expect(groups[0].flagged).toEqual([]);
+    expect(groups[0].clean).toBe(1);
   });
 });
