@@ -40,3 +40,49 @@ test.describe('capacity and the planner read a session the same way', () => {
     expect(laneSegments(AGE_MON, [], 2).map(s => s.lanes)).toEqual([2]);
   });
 });
+
+/**
+ * A squad with no weekly session target has no maximum size.
+ *
+ * /capacity computed it as `totalWeeklySlots / (target || 1)`, so Masters —
+ * which is set no target at all — read as having room for one swimmer per
+ * place: 144 of them, against 43 on the books, shown as "30% full". The squad
+ * was not 70% empty; there was simply nothing to measure it against, and the
+ * page said the one thing that could not be true rather than saying so.
+ *
+ * The planner already refuses this: squads with no target are named and left
+ * out of the count of squads getting their training week. This keeps the two
+ * pages honest in the same way.
+ */
+const maxSquadSizeFor = (totalWeeklySlots, targetSessionsPerWeek) => {
+  const hasTarget = Number(targetSessionsPerWeek) > 0;
+  return hasTarget ? Math.floor(totalWeeklySlots / Number(targetSessionsPerWeek)) : null;
+};
+
+test.describe('squad capacity needs a weekly target', () => {
+  test('a squad with a target sizes on it', () => {
+    expect(maxSquadSizeFor(159, 4)).toBe(39);
+    expect(maxSquadSizeFor(88, 5)).toBe(17);
+  });
+
+  test('a squad with no target has no maximum, rather than a target of one', () => {
+    // The bug: 144 places read as room for 144 Masters swimmers.
+    expect(maxSquadSizeFor(144, 0)).toBeNull();
+    expect(maxSquadSizeFor(144, null)).toBeNull();
+    expect(maxSquadSizeFor(144, undefined)).toBeNull();
+    expect(maxSquadSizeFor(144, '')).toBeNull();
+  });
+
+  test('a target arriving as a string still counts', () => {
+    expect(maxSquadSizeFor(144, '2')).toBe(72);
+  });
+
+  test('no target means a squad can never be reported over capacity', () => {
+    const over = (size, slots, target) => {
+      const max = maxSquadSizeFor(slots, target);
+      return max !== null && max > 0 && size > max;
+    };
+    expect(over(43, 144, 0)).toBe(false);
+    expect(over(30, 100, 4)).toBe(true);
+  });
+});

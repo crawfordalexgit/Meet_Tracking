@@ -22,10 +22,22 @@ import { recordSyncRun } from '../../lib/sync-log';
  */
 export function resolveSessionActive(scmSession, existing) {
   const s = scmSession || {};
-  if (s.active === 'Yes' || s.Active === 'Yes' || s.isActive === true) return true;
-  if (s.active === 'No' || s.Active === 'No' || s.isActive === false) return false;
   const stored = existing ? existing.is_active : undefined;
-  return stored === undefined || stored === null ? true : stored;
+  const unknown = stored === undefined || stored === null;
+
+  // SCM archiving a session is a decision, and it wins: the club has retired it
+  // there and it should disappear here too.
+  if (s.archived === 'Yes' || s.Archived === 'Yes') return false;
+  if (s.active === 'No' || s.Active === 'No' || s.isActive === false) return false;
+
+  // SCM *not* archiving something is not a decision, it is the default state of
+  // every row it holds — including ones this club has deliberately switched off
+  // here after finding them duplicated. So it may only turn a session on that
+  // nobody has an opinion about yet.
+  if (!unknown) return stored;
+  if (s.archived === 'No' || s.Archived === 'No') return true;
+  if (s.active === 'Yes' || s.Active === 'Yes' || s.isActive === true) return true;
+  return true;
 }
 
 export default async function handler(req, res) {
@@ -212,10 +224,22 @@ export default async function handler(req, res) {
           scm_guid: guid.toString(),
           name: name.trim(),
           // Curated locally when SCM has nothing to say — never blanked.
-          day_of_week: s.dayOfWeek || s.DayOfWeek || s.day || existing.day_of_week || '',
+          // `weekDay` is the field SCM actually sends; the three names looked
+          // for before it exist in no payload, which is why every session in
+          // this database ended up with no day set.
+          day_of_week: s.weekDay || s.dayOfWeek || s.DayOfWeek || s.day || existing.day_of_week || '',
           start_time: s.startTime || s.StartTime || s.start || '',
           end_time: s.endTime || s.EndTime || s.end || '',
-          location: s.location || s.Location || s.venue || existing.location || '',
+          // Deliberately NOT taken from SCM. It sends `sessionLocation`, but it
+          // holds eleven spellings for seven pools — "Town Pool", "Tonbridge
+          // Town" and "Tonbridge Town Pool" are one venue, St John's appears
+          // with two different apostrophes, and two sessions have none at all.
+          // Worse, it is less precise than what is recorded here: SCM puts the
+          // Learn to Swim sessions in "Tonbridge Town Pool" when they are in
+          // the small pool beside it, and calls both the gym and the pool
+          // "Tonbridge School". Adopting it would merge venues that have
+          // different lane counts and silently break every capacity figure.
+          location: existing.location || '',
           is_active: resolveSessionActive(s, existing)
         };
       }).filter(Boolean);
