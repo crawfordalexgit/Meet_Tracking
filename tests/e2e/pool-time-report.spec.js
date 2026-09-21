@@ -137,3 +137,52 @@ test.describe('the report says what it was measured over', () => {
     bands.forEach(b => expect(b.display, 'hidden on screen').toBe('none'));
   });
 });
+
+test.describe('the session breakdowns read a day at a time', () => {
+  test('sessions are ordered as the week runs, not alphabetically', async ({ page }) => {
+    // They arrived sorted by day_of_week as a string: Friday, Monday,
+    // Saturday, Sunday, Thursday, Tuesday, Wednesday.
+    await page.goto('/capacity?tab=heatmap');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+
+    const days = await page.locator('.pool-time-day-start h4').allTextContents();
+    const week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const expected = week.filter(d => days.includes(d));
+    expect(days, 'day headings in week order').toEqual(expected);
+  });
+
+  test('each day is headed, counted, and starts a page when printed', async ({ page }) => {
+    await page.goto('/capacity?tab=heatmap&report=poolTime&printTheme=dark');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+    await page.emulateMedia({ media: 'print' });
+
+    const headings = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.pool-time-day-start')).map(el => ({
+        text: el.textContent.trim(),
+        breakBefore: getComputedStyle(el).breakBefore || getComputedStyle(el).pageBreakBefore,
+        first: el.classList.contains('is-first')
+      })));
+
+    expect(headings.length, 'a heading per day with sessions').toBeGreaterThan(4);
+    headings.forEach(h => {
+      expect(h.text).toMatch(/\d+ session/);
+      // The first day continues the page the breakdowns start on; every other
+      // day opens its own, so a day is never split across a fold.
+      if (h.first) expect(h.breakBefore).toBe('avoid');
+      else expect(h.breakBefore).toBe('page');
+    });
+  });
+
+  test('a printed session card is a fraction of its height on screen', async ({ page }) => {
+    // Sunday runs to thirteen sessions; at screen height that is three sheets.
+    await page.goto('/capacity?tab=heatmap&report=poolTime&printTheme=dark');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+
+    const onScreen = await page.locator('.pool-time-session').first().boundingBox();
+    await page.emulateMedia({ media: 'print' });
+    const printed = await page.locator('.pool-time-session').first().boundingBox();
+
+    console.log('session card height — screen:', Math.round(onScreen.height), 'print:', Math.round(printed.height));
+    expect(printed.height, 'cards shrink for print').toBeLessThan(onScreen.height * 0.75);
+  });
+});

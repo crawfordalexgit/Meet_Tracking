@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import Head from 'next/head';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
@@ -1340,6 +1340,22 @@ export default function CapacityDashboard({ session }) {
     return heatmapStats.sessionsData;
   }, [heatmapStats.sessionsData, cardFilter]);
 
+  /**
+   * The breakdowns in the order a week runs.
+   *
+   * They arrived ordered by day_of_week as a string, which is alphabetical:
+   * Friday, Monday, Saturday, Sunday, Thursday, Tuesday, Wednesday. Readable
+   * enough on screen when you are hunting one session, useless on paper, and
+   * impossible to break into a page per day.
+   */
+  const detailedSessionsByDay = useMemo(() => {
+    return [...filteredDetailedSessions].sort((a, b) => {
+      const d = getDayOrder(a.day_of_week) - getDayOrder(b.day_of_week);
+      if (d !== 0) return d;
+      return String(a.start_time || '').localeCompare(String(b.start_time || ''));
+    });
+  }, [filteredDetailedSessions]);
+
   const dataHealthIssues = useMemo(() => {
     if (loading || sessions.length === 0) return [];
     
@@ -1668,6 +1684,45 @@ export default function CapacityDashboard({ session }) {
               /* The heatmap and the breakdowns are the bulk of the report and
                  cannot fit beside what precedes them. */
               #detailed-sessions-breakdown { page-break-before: always; }
+
+              /*
+                A day of sessions to a page.
+
+                The session cards are built for a screen you scroll: two inches
+                of height each, which put four on a sheet and spread one week
+                across eleven pages with days broken across the fold. Nobody can
+                see a Tuesday that way.
+
+                So each day starts a page and the cards give up the space they
+                were using for emphasis — the padding, the oversized figures and
+                the roomy gaps between columns — while keeping every number.
+                Sunday, the longest day at thirteen sessions, is what sets how
+                far this has to go.
+              */
+              .pool-time-day-start {
+                page-break-before: always;
+                page-break-after: avoid;
+                margin: 0 0 0.5rem !important;
+                padding-top: 0.25rem;
+              }
+              .pool-time-day-start.is-first { page-break-before: avoid; }
+              .pool-time-session {
+                padding: 0.5rem 0.9rem !important;
+                margin-bottom: 0 !important;
+                page-break-inside: avoid;
+              }
+              #detailed-sessions-breakdown .grid { gap: 0.4rem !important; }
+              .pool-time-session h3 { font-size: 0.82rem !important; }
+              .pool-time-session .text-2xl { font-size: 1rem !important; }
+              .pool-time-session .text-xl { font-size: 0.9rem !important; }
+              .pool-time-session .text-lg { font-size: 0.8rem !important; }
+              .pool-time-session .gap-12 { gap: 1.5rem !important; }
+              .pool-time-session select {
+                padding: 2px 6px !important;
+                font-size: 0.7rem !important;
+              }
+              /* The bar is decoration once the two percentages are printed. */
+              .pool-time-session .h-3 { display: none !important; }
             ` : ''}
           }
           .print-only { display: none; }
@@ -2365,7 +2420,13 @@ export default function CapacityDashboard({ session }) {
                         </button>
                       </div>
                     ) : (
-                      filteredDetailedSessions.map(sess => {
+                      detailedSessionsByDay.map((sess, sessIndex) => {
+                      // A heading wherever the day changes. On paper this is
+                      // also where the page breaks, so a day is read whole
+                      // rather than split across a fold.
+                      const prev = detailedSessionsByDay[sessIndex - 1];
+                      const startsADay = !prev || prev.day_of_week !== sess.day_of_week;
+                      const dayCount = detailedSessionsByDay.filter(x => x.day_of_week === sess.day_of_week).length;
                       const maxCapacity = sess.maxCapacity;
                       const activeSwimmers = sess.activeSwimmers;
                       const rosterDensity = sess.rosterDensity;
@@ -2377,10 +2438,22 @@ export default function CapacityDashboard({ session }) {
                       const sessionAtt = sess.sessionAtt;
 
                       return (
-                        <div 
-                          key={sess.id} 
+                        <Fragment key={sess.id}>
+                        {startsADay && (
+                          <div className={`pool-time-day-start${sessIndex === 0 ? ' is-first' : ''}`}
+                            style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem', marginTop: sessIndex === 0 ? 0 : '0.5rem' }}>
+                            <h4 style={{ fontSize: '0.95rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'var(--accent-cyan)', margin: 0 }}>
+                              {sess.day_of_week}
+                            </h4>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                              {dayCount} session{dayCount === 1 ? '' : 's'}
+                            </span>
+                            <span style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.12)' }} />
+                          </div>
+                        )}
+                        <div
                           onClick={() => { setGraphSession({ sess, sessionAtt, maxCapacity }); setSelectedAttendanceDate(null); }}
-                          className="glass-card flex items-center justify-between hover:border-cyan-400/50 transition-all duration-200" 
+                          className="glass-card pool-time-session flex items-center justify-between hover:border-cyan-400/50 transition-all duration-200"
                           style={{ borderLeft: `4px solid ${statusColor}`, padding: '1.5rem 2rem', cursor: 'pointer' }}
                           title="Click to view week-by-week attendance graph"
                         >
@@ -2464,6 +2537,7 @@ export default function CapacityDashboard({ session }) {
                             </div>
                           </div>
                         </div>
+                        </Fragment>
                       );
                     })
                     )}
