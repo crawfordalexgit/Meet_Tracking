@@ -10,6 +10,33 @@ import { requireAuth } from '../../lib/api-auth';
 const MIN_EXISTING_TO_GUARD = 3;
 const MAX_SHRINK_RATIO = 0.5;
 
+/**
+ * What to add and what to remove, given what a swimmer has and what SCM says.
+ *
+ * The sync used to insert the whole wanted set and then delete the old one, so
+ * that a failed insert could never leave a swimmer on zero sessions. Sound
+ * intent, impossible in this table: (swimmer_id, session_id) is unique, and a
+ * swimmer keeps most of their sessions week to week, so the insert collided on
+ * the first unchanged row and Postgres threw out the whole statement. Those
+ * swimmers were logged as errors and nothing about them changed — new sessions
+ * included, because they travelled in the same insert as the unchanged ones.
+ *
+ * Writing the difference keeps the guarantee, and is idempotent: running it
+ * twice is free rather than a second pile of constraint violations.
+ */
+export function planMembershipChanges(existingRows, wantedSessionIds) {
+  const wanted = Array.from(new Set((wantedSessionIds || []).filter(Boolean)));
+  const rows = existingRows || [];
+  const have = new Set(rows.map(r => r.session_id));
+  const keep = new Set(wanted);
+  return {
+    wanted,
+    existingCount: rows.length,
+    toAdd: wanted.filter(id => !have.has(id)),
+    toRemove: rows.filter(r => !keep.has(r.session_id))
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -86,52 +113,59 @@ export default async function handler(req, res) {
             .filter(m => m.session_id);
 
           if (memberships.length > 0) {
+            const { data: existingRows, error: readError } = await supabase
+              .from('session_memberships')
+              .select('id, session_id')
+              .eq('swimmer_id', swimmer.id);
+            if (readError) throw readError;
+
+            const { wanted, existingCount, toAdd: addIds, toRemove } =
+              planMembershipChanges(existingRows, memberships.map(m => m.session_id));
+
             // Circuit breaker: refuse to shrink an established set by more than
             // half. A partial scrape looks identical to a genuine withdrawal
             // here, and unattended is exactly when nobody would notice.
-            const { count: existingCount } = await supabase
-              .from('session_memberships')
-              .select('id', { count: 'exact', head: true })
-              .eq('swimmer_id', swimmer.id);
-
-            if (existingCount >= MIN_EXISTING_TO_GUARD && memberships.length < existingCount * MAX_SHRINK_RATIO) {
-              console.warn(`SESSION SYNC: skipped ${swimmer.full_name} — SCM returned ${memberships.length} session(s) vs ${existingCount} on file.`);
+            if (existingCount >= MIN_EXISTING_TO_GUARD && wanted.length < existingCount * MAX_SHRINK_RATIO) {
+              console.warn(`SESSION SYNC: skipped ${swimmer.full_name} — SCM returned ${wanted.length} session(s) vs ${existingCount} on file.`);
               results.push({
                 swimmer: swimmer.full_name,
                 skipped: true,
-                reason: `Would drop ${existingCount} memberships to ${memberships.length}; skipped for review.`
+                reason: `Would drop ${existingCount} memberships to ${wanted.length}; skipped for review.`
               });
               continue;
             }
 
-            // Insert the new set before removing the old one. Deleting first
-            // means a failed insert leaves the swimmer on zero sessions with no
-            // way back; this way a failure leaves the previous set intact and
-            // the worst case is a transient duplicate.
-            const { data: superseded } = await supabase
-              .from('session_memberships')
-              .select('id')
-              .eq('swimmer_id', swimmer.id);
+            // Add what is missing, remove what has gone. See
+            // planMembershipChanges for why this is not a replace.
+            const toAdd = addIds.map(session_id => ({ swimmer_id: swimmer.id, session_id }));
 
-            const { error } = await supabase.from('session_memberships').insert(memberships);
-            if (error) throw error;
+            if (toAdd.length) {
+              const { error } = await supabase.from('session_memberships').insert(toAdd);
+              if (error) throw error;
+            }
 
-            if (superseded?.length) {
+            if (toRemove.length) {
               const { error: delError } = await supabase
                 .from('session_memberships')
                 .delete()
-                .in('id', superseded.map(r => r.id));
+                .in('id', toRemove.map(r => r.id));
               if (delError) {
-                console.error(`SESSION SYNC: ${swimmer.full_name} left with duplicates — ${delError.message}`);
+                console.error(`SESSION SYNC: ${swimmer.full_name} kept stale sessions — ${delError.message}`);
                 results.push({
                   swimmer: swimmer.full_name,
-                  sessions: memberships.length,
-                  warning: `New sessions written but ${superseded.length} old row(s) could not be removed; counts may be doubled until re-run.`
+                  sessions: wanted.length,
+                  warning: `Added ${toAdd.length} session(s) but ${toRemove.length} withdrawn row(s) could not be removed; counts may be high until re-run.`
                 });
                 continue;
               }
             }
-            results.push({ swimmer: swimmer.full_name, sessions: memberships.length });
+
+            results.push({
+              swimmer: swimmer.full_name,
+              sessions: wanted.length,
+              added: toAdd.length,
+              removed: toRemove.length
+            });
           } else {
             // SCM listed sessions but none matched a row in `sessions` by exact
             // name, so the existing set is deliberately left untouched.
