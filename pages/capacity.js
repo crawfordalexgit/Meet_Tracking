@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { fetchAllRows } from '../lib/paginate';
 import { getSessionDuration, calculateReliability, isShutdownDate, isGalaDate, getWeekKey } from '../lib/analytics-utils';
-import { laneSegments, peakLanesOf } from '../lib/session-lanes';
+import { laneSegments, peakLanesOf, describeLanes } from '../lib/session-lanes';
 import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useRouter } from 'next/router';
 import CapacityReportModal from '../components/CapacityReportModal';
@@ -742,21 +742,26 @@ export default function CapacityDashboard({ session }) {
   const squadCapacityMetrics = useMemo(() => {
     if (!targetModellingSquad || squadModellingSessions.length === 0) return null;
     const maxPerLane = targetModellingSquad.swimmers_per_lane || targetModellingSquad.max_swimmers_per_lane || 8;
-    const targetSessions = targetModellingSquad.target_sessions_per_week || 1;
+    // See the squad cards below: a squad with no weekly target has no divisor,
+    // and inventing one of 1 turns every place it holds into a free space.
+    const hasTarget = Number(targetModellingSquad.target_sessions_per_week) > 0;
+    const targetSessions = hasTarget ? Number(targetModellingSquad.target_sessions_per_week) : null;
     const totalWeeklySlots = squadModellingSessions.reduce((sum, s) => {
       const lanes = getSessionLanesForSquad(s, targetModellingSquad.id);
       return sum + lanes * maxPerLane;
     }, 0);
     const totalPoolHours = squadModellingSessions.reduce((sum, s) => sum + getSessionDuration(s), 0);
-    const maxSquadSize = Math.floor(totalWeeklySlots / targetSessions);
+    const maxSquadSize = hasTarget ? Math.floor(totalWeeklySlots / targetSessions) : null;
     const currentSquadSize = squadSwimmers.length;
     return {
+      hasTarget,
+      targetSessions,
       maxSquadSize,
       totalPoolHours: Math.round(totalPoolHours * 10) / 10,
       totalWeeklySlots,
       totalSlots: totalWeeklySlots,
       currentSquadSize,
-      isOverCapacity: currentSquadSize > maxSquadSize
+      isOverCapacity: hasTarget && currentSquadSize > maxSquadSize
     };
   }, [targetModellingSquad, squadModellingSessions, squadSwimmers, sharedSessionsConfig]);
 
@@ -779,18 +784,28 @@ export default function CapacityDashboard({ session }) {
         return sum + lanes * maxPerLane;
       }, 0);
       const totalPoolHours = Math.round(sqSessions.reduce((sum, s) => sum + getSessionDuration(s), 0) * 10) / 10;
-      const maxSquadSize = Math.floor(totalWeeklySlots / targetSess);
-      const pct = maxSquadSize > 0 ? Math.round((sqSwimmerCount / maxSquadSize) * 100) : 0;
+      // How many swimmers the water holds depends entirely on how many sessions
+      // each of them is set. Masters is set none, and `target || 1` read that as
+      // "one a week", so its ten sessions of places counted as room for 144
+      // swimmers and 43 of them showed as 30% full. Nobody can act on that
+      // number: it is not that Masters is empty, it is that there is no target
+      // to measure it against. Squads without one are now said to have none.
+      const hasTarget = Number(sq.target_sessions_per_week) > 0;
+      const maxSquadSize = hasTarget ? Math.floor(totalWeeklySlots / targetSess) : null;
+      const pct = hasTarget && maxSquadSize > 0
+        ? Math.round((sqSwimmerCount / maxSquadSize) * 100) : null;
       return {
         id: sq.id,
         name: sq.name,
         currentSquadSize: sqSwimmerCount,
+        hasTarget,
+        targetSessions: hasTarget ? targetSess : null,
         maxSquadSize,
         totalPoolHours,
         totalWeeklySlots,
         sessionCount: sqSessions.length,
         pct,
-        isOverCapacity: sqSwimmerCount > maxSquadSize && maxSquadSize > 0
+        isOverCapacity: hasTarget && maxSquadSize > 0 && sqSwimmerCount > maxSquadSize
       };
     });
   }, [dbSquads, normalizedSessions, swimmers, sharedSessionsConfig]);
@@ -1766,7 +1781,11 @@ export default function CapacityDashboard({ session }) {
                       <div className="section-title">All Squads — Capacity Overview</div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
                         {allSquadsMetrics.map(sq => {
-                          const barColor = sq.isOverCapacity ? 'var(--accent-rose)' : sq.pct >= 85 ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-emerald)';
+                          // Green on a squad there is no way to judge would read
+                          // as "plenty of room", which is the claim being avoided.
+                          const barColor = !sq.hasTarget ? 'var(--text-secondary)'
+                            : sq.isOverCapacity ? 'var(--accent-rose)'
+                            : sq.pct >= 85 ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-emerald)';
                           return (
                             <div
                               key={sq.id}
@@ -1781,14 +1800,18 @@ export default function CapacityDashboard({ session }) {
                               <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: barColor, wordBreak: 'break-word', whiteSpace: 'normal', lineHeight: 1.3 }}>{sq.name}</span>
                               <div className="flex items-baseline gap-1.5">
                                 <span className="text-xl font-black" style={{ color: barColor }}>{sq.currentSquadSize}</span>
-                                <span className="text-xs text-white/40 font-bold">/ {sq.maxSquadSize}</span>
+                                {sq.hasTarget
+                                  ? <span className="text-xs text-white/40 font-bold">/ {sq.maxSquadSize}</span>
+                                  : <span className="text-xs text-white/40 font-bold">swimmers</span>}
                               </div>
                               {/* capacity bar */}
                               <div style={{ height: '3px', borderRadius: '1.5px', background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                                <div style={{ height: '100%', width: `${Math.min(sq.pct, 100)}%`, background: barColor, borderRadius: '1.5px', transition: 'width 0.4s' }} />
+                                <div style={{ height: '100%', width: sq.hasTarget ? `${Math.min(sq.pct, 100)}%` : '0%', background: barColor, borderRadius: '1.5px', transition: 'width 0.4s' }} />
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.58rem', color: 'rgba(255,255,255,0.4)', fontWeight: 600 }}>
-                                <span>{sq.pct}% full</span>
+                                {sq.hasTarget
+                                  ? <span title={`${sq.maxSquadSize} swimmers fit, at ${sq.targetSessions} session${sq.targetSessions === 1 ? '' : 's'} each a week across ${sq.totalWeeklySlots} places.`}>{sq.pct}% full</span>
+                                  : <span title="This squad has no weekly session target, so there is nothing to measure how full it is against. Set one under Settings → Squads.">no weekly target</span>}
                                 <span>{sq.totalPoolHours}h · {sq.sessionCount}s</span>
                               </div>
                               {sq.isOverCapacity && <span style={{ fontSize: '0.55rem', color: 'var(--accent-rose)', fontWeight: 700 }}>⚠ OVER CAPACITY</span>}
@@ -1809,10 +1832,14 @@ export default function CapacityDashboard({ session }) {
                             <h2 className="text-3xl font-black" style={{ color: squadCapacityMetrics.isOverCapacity ? 'var(--accent-rose)' : 'var(--accent-emerald)' }}>
                               {squadCapacityMetrics.currentSquadSize}
                             </h2>
-                            <span className="text-sm text-white/40 font-bold">/ {squadCapacityMetrics.maxSquadSize} max</span>
+                            <span className="text-sm text-white/40 font-bold">
+                              {squadCapacityMetrics.hasTarget ? `/ ${squadCapacityMetrics.maxSquadSize} max` : 'swimmers'}
+                            </span>
                           </div>
                           <p className="text-xs mt-3" style={{ color: squadCapacityMetrics.isOverCapacity ? 'rgba(244,63,94,0.8)' : 'rgba(255,255,255,0.4)' }}>
-                            {squadCapacityMetrics.isOverCapacity ? '⚠️ Over max capacity' : 'Within capacity'}
+                            {!squadCapacityMetrics.hasTarget
+                              ? 'No weekly session target, so there is no maximum to measure against'
+                              : squadCapacityMetrics.isOverCapacity ? '⚠️ Over max capacity' : 'Within capacity'}
                           </p>
                         </div>
                         <div className="glass-card" style={{ padding: '1.5rem', borderTop: '4px solid var(--accent-cyan)' }}>
@@ -2016,7 +2043,6 @@ export default function CapacityDashboard({ session }) {
                       </div>
                     ) : (
                       filteredDetailedSessions.map(sess => {
-                      const lanes = peakLanes(sess);
                       const maxCapacity = sess.maxCapacity;
                       const activeSwimmers = sess.activeSwimmers;
                       const rosterDensity = sess.rosterDensity;
@@ -2044,23 +2070,47 @@ export default function CapacityDashboard({ session }) {
                             <div className="flex flex-col items-center">
                               {(() => {
                                 const isShared = sharedSessionsConfig?.[sess.id] !== undefined || sharedSessionsConfig?.[sess.scm_guid] !== undefined || sharedSessionsConfig?.[sess.name] !== undefined;
+                                // The box edits lanes_allocated, so it has to show
+                                // lanes_allocated. It showed the peak instead, which
+                                // is a different number the moment a session changes
+                                // lane count part-way through — and saving would then
+                                // quietly overwrite the opening count with the peak.
+                                const storedLanes = lanesOf(sess);
+                                const phases = phasesFor(sess);
+                                const changesMidSession = laneSegments(sess, phases, storedLanes).length > 1;
                                 return (
                                   <>
                                     <span className="text-[10px] font-bold uppercase text-white/50 mb-2 flex items-center gap-1">
                                       Lanes Allocated {isShared && <span title="Shared session: lane allocation is split by rules in Settings" style={{ color: 'var(--accent-cyan)', fontSize: '10px' }}>🥞 Shared</span>}
                                     </span>
                                     <select
-                                      value={lanes}
+                                      value={storedLanes}
                                       onChange={(e) => updateLanes(sess.id, parseInt(e.target.value))}
                                       onClick={(e) => e.stopPropagation()}
                                       disabled={updating === sess.id || isShared}
                                       className="border border-white/10 rounded-lg px-4 py-2 text-white font-bold outline-none focus:border-cyan-400"
                                       style={{ background: '#0f172a', color: '#fff', cursor: isShared ? 'not-allowed' : 'default', opacity: isShared ? 0.7 : 1 }}
                                     >
-                                      {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                                      {/* From zero, because a dry-land session holds no
+                                          lanes at all and the box must be able to say so
+                                          rather than silently showing the first option. */}
+                                      {Array.from({ length: 11 }, (_, i) => i).map(num => (
                                         <option key={num} value={num} style={{ background: '#0f172a', color: '#fff' }}>{num} Lanes</option>
                                       ))}
                                     </select>
+                                    {changesMidSession && (
+                                      /* Without this the card claims a flat lane count for
+                                         the whole session. Age holds two lanes on a Monday
+                                         until eight and one after, so a flat "2 Lanes" puts
+                                         five lanes in a four-lane pool at 20:00. */
+                                      <span
+                                        className="text-[10px] font-bold mt-2 text-center"
+                                        style={{ color: 'var(--accent-amber)' }}
+                                        title="This session's lane count changes part-way through. Edit the change under Settings → Timetable."
+                                      >
+                                        {describeLanes(sess, phases, storedLanes)}
+                                      </span>
+                                    )}
                                   </>
                                 );
                               })()}
@@ -4146,7 +4196,11 @@ export default function CapacityDashboard({ session }) {
 
                         <div style={{ background: 'rgba(0, 212, 255, 0.1)', border: '1px solid rgba(0, 212, 255, 0.2)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ fontWeight: 700 }}>Total Weekly Slots: <span style={{ color: 'var(--accent-cyan)' }}>{squadCapacityMetrics.totalSlots}</span></div>
-                            <div style={{ fontWeight: 700 }}>Max Squad Size: <span style={{ color: 'var(--accent-amber)' }}>{squadCapacityMetrics.maxSquadSize}</span> athletes</div>
+                            <div style={{ fontWeight: 700 }}>
+                              {squadCapacityMetrics.hasTarget
+                                ? <>Max Squad Size: <span style={{ color: 'var(--accent-amber)' }}>{squadCapacityMetrics.maxSquadSize}</span> athletes</>
+                                : <span style={{ opacity: 0.7 }}>No weekly session target set for this squad</span>}
+                            </div>
                         </div>
                     </div>
                 </div>
