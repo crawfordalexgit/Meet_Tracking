@@ -363,7 +363,7 @@ export default function CapacityDashboard({ session }) {
         body: JSON.stringify({
           // tab=heatmap, because that is where the squad overview and the
           // by-day table live. The print rules strip the rest of that tab.
-          targetPath: `/capacity?tab=heatmap&report=poolTime&periodDays=${periodDays}&printTheme=light`,
+          targetPath: `/capacity?tab=heatmap&report=poolTime&periodDays=${periodDays}&printTheme=dark`,
           clientAuth
         })
       });
@@ -899,6 +899,9 @@ export default function CapacityDashboard({ session }) {
       };
     });
   }, [dbSquads, normalizedSessions, swimmers, sharedSessionsConfig]);
+
+  // The cover follows the report's theme, like everything else on it.
+  const coverInk = printConfig.printTheme === 'light' ? '#000' : '#fff';
 
   /** Headline figures for the report cover. */
   const poolTimeSummary = useMemo(() => {
@@ -1606,21 +1609,23 @@ export default function CapacityDashboard({ session }) {
             .print-hide, .no-print, .print-hide *, .no-print * { display: none !important; }
 
             /*
-              The pool time report.
+              The pool time report: the whole capacity view, as it looks on
+              screen.
 
-              This page carries seven tabs of working; the report is three
-              things — the cover, the squad cards and the week laid out by day.
-              Everything else is hidden by name rather than by rearranging the
-              page, so the report cannot drift from what the screen shows.
+              It began as three sections on white, and was wrong on both counts.
+              The page is read dark and the colour carries meaning — rose for
+              over capacity, amber for nearly full, cyan for a day with water in
+              it — so printing it white threw away the part a reader uses first.
+              And a report on pool usage that stops after the overview leaves
+              out the heatmap, the session breakdowns and every figure behind
+              the summary.
+
+              So nothing is hidden but the controls. Only the layout changes:
+              cards tighten to three across and each block is kept off a page
+              break, so it reads as the screen does rather than as a screenshot
+              cut into pieces.
             */
             ${isPoolTimeReport ? `
-              .pool-time-hide-in-report { display: none !important; }
-              .pool-time-report {
-                background: transparent !important;
-                border: none !important;
-                padding: 0 !important;
-                box-shadow: none !important;
-              }
               .pool-time-cards {
                 display: grid !important;
                 grid-template-columns: repeat(3, 1fr) !important;
@@ -1632,15 +1637,14 @@ export default function CapacityDashboard({ session }) {
                 margin-bottom: 0 !important;
               }
               .pool-time-table { page-break-inside: avoid; }
-              .pool-time-table table { font-size: 0.8rem !important; width: 100% !important; }
-              .pool-time-table th, .pool-time-table td {
-                color: #000 !important;
-                border-bottom: 1px solid rgba(0,0,0,0.1) !important;
+              .pool-time-table table { width: 100% !important; }
+              /* Each block whole on one page, rather than split mid-table. */
+              .glass-card, #detailed-sessions-breakdown > div {
+                page-break-inside: avoid;
               }
-              .pool-time-table tfoot td {
-                border-top: 2px solid rgba(0,0,0,0.35) !important;
-                font-weight: 900 !important;
-              }
+              /* The heatmap and the breakdowns are the bulk of the report and
+                 cannot fit beside what precedes them. */
+              #detailed-sessions-breakdown { page-break-before: always; }
             ` : ''}
           }
           .print-only { display: none; }
@@ -1652,18 +1656,18 @@ export default function CapacityDashboard({ session }) {
         <div className="print-only roster-cover-page">
           <img src="/coacheseye-logo.png" alt="CoachesEye" style={{ height: '120px', marginBottom: '3rem' }} />
           <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--accent-cyan)', letterSpacing: '0.5em', marginBottom: '2.5rem', textTransform: 'uppercase' }}>Tonbridge Swimming Club</div>
-          <h1 style={{ fontSize: '3.8rem', fontWeight: 900, margin: '0 2rem', lineHeight: 1.15, letterSpacing: '-0.04em', textTransform: 'uppercase', color: '#000' }}>
+          <h1 style={{ fontSize: '3.8rem', fontWeight: 900, margin: '0 2rem', lineHeight: 1.15, letterSpacing: '-0.04em', textTransform: 'uppercase', color: coverInk }}>
             Pool Time<br />by Squad
           </h1>
           <div style={{ height: '8px', width: '120px', background: 'var(--accent-cyan)', margin: '4rem 0' }}></div>
-          <div style={{ fontSize: '1.4rem', fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#000' }}>
+          <div style={{ fontSize: '1.4rem', fontWeight: 700, opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.1em', color: coverInk }}>
             How the club&apos;s water divides across the week
           </div>
-          <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '1rem', color: '#000' }}>
+          <div style={{ fontSize: '1rem', opacity: 0.6, marginTop: '1rem', color: coverInk }}>
             {poolTimeSummary.totalHours} hours of squad water across {poolTimeSummary.sessionCount} sessions
             {' · '}{poolTimeSummary.squadCount} squads
           </div>
-          <div style={{ fontSize: '0.9rem', opacity: 0.4, marginTop: '3rem', color: '#000' }}>
+          <div style={{ fontSize: '0.9rem', opacity: 0.4, marginTop: '3rem', color: coverInk }}>
             Generated {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
           </div>
         </div>
@@ -1849,12 +1853,12 @@ export default function CapacityDashboard({ session }) {
 
             {activeTab === 'heatmap' ? (
               <div className="flex flex-col gap-8">
-                <div className="section-divider pool-time-hide-in-report" style={{ marginTop: '1rem' }}>
+                <div className="section-divider" style={{ marginTop: '1rem' }}>
                   <span className="label">At a glance</span>
                   <span className="rule" />
                 </div>
                 {/* 1. Summary Cards */}
-                <div className="no-print" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
+                <div className={isPoolTimeReport ? '' : 'no-print'} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
                   <div
                     onClick={() => handleCardClick('all')}
                     className="glass-card flex flex-col justify-between hover-glow"
@@ -2124,7 +2128,7 @@ export default function CapacityDashboard({ session }) {
                 )}
 
                 {/* 2. Visual Week-at-a-Glance Heatmap Grid */}
-                <div className="glass-card pool-time-hide-in-report" style={{ padding: '2rem' }}>
+                <div className="glass-card" style={{ padding: '2rem' }}>
                   <div className="flex flex-col md:flex-row justify-between items-start gap-4 mb-6">
                     <div>
                       <h3 className="text-xl font-black uppercase text-white">Week-at-a-Glance Heatmap</h3>
@@ -2270,7 +2274,7 @@ export default function CapacityDashboard({ session }) {
                 </div>
 
                 {/* 3. Detailed Session Breakdowns */}
-                <div id="detailed-sessions-breakdown" className="pool-time-hide-in-report">
+                <div id="detailed-sessions-breakdown">
                   <div className="flex justify-between items-end mb-6">
                     <div>
                       <h3 className="text-xl font-black uppercase text-white">Detailed Session Breakdowns</h3>
