@@ -903,6 +903,29 @@ export default function CapacityDashboard({ session }) {
   // The cover follows the report's theme, like everything else on it.
   const coverInk = printConfig.printTheme === 'light' ? '#000' : '#fff';
 
+  /**
+   * What the report was measured over, said in full.
+   *
+   * Two different kinds of figure sit side by side on this page and only one of
+   * them has a period. Attendance, occupancy and the heatmap are read from
+   * registers over the last N days; lanes, places and pool time are the
+   * timetable as it stands today and would read the same over any window.
+   * A report that gives a single date range implies the whole thing moves with
+   * it, and one that gives none invites the first question anybody asks.
+   */
+  const reportWindow = useMemo(() => {
+    const to = new Date();
+    const from = new Date(to.getTime() - periodDays * 86400000);
+    const fmt = d => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    return {
+      days: periodDays,
+      weeks: Math.round(periodDays / 7),
+      fromLabel: fmt(from),
+      toLabel: fmt(to),
+      range: `${fmt(from)} to ${fmt(to)}`
+    };
+  }, [periodDays]);
+
   /** Headline figures for the report cover. */
   const poolTimeSummary = useMemo(() => {
     const withWater = allSquadsMetrics.filter(sq => sq.sessionCount > 0);
@@ -1667,6 +1690,17 @@ export default function CapacityDashboard({ session }) {
             {poolTimeSummary.totalHours} hours of squad water across {poolTimeSummary.sessionCount} sessions
             {' · '}{poolTimeSummary.squadCount} squads
           </div>
+
+          {/* The first question anybody asks of a figure is "over what?". */}
+          <div style={{ fontSize: '0.95rem', marginTop: '2.5rem', color: coverInk, opacity: 0.75, maxWidth: '46ch', lineHeight: 1.7 }}>
+            <strong>Attendance measured over {reportWindow.days} days</strong><br />
+            {reportWindow.range} · about {reportWindow.weeks} weeks of registers
+          </div>
+          <div style={{ fontSize: '0.85rem', marginTop: '1rem', color: coverInk, opacity: 0.45, maxWidth: '52ch', lineHeight: 1.6 }}>
+            Lanes, places and pool time are the timetable as it stands today and do not
+            move with that window.
+          </div>
+
           <div style={{ fontSize: '0.9rem', opacity: 0.4, marginTop: '3rem', color: coverInk }}>
             Generated {new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
           </div>
@@ -1853,6 +1887,15 @@ export default function CapacityDashboard({ session }) {
 
             {activeTab === 'heatmap' ? (
               <div className="flex flex-col gap-8">
+                {isPoolTimeReport && (
+                  /* Repeated where the report breaks to a new page, so a figure
+                     is never read without the window it was measured over. */
+                  <div className="print-only" style={{ border: '1px solid rgba(255,255,255,0.12)', borderLeft: '3px solid var(--accent-cyan)', padding: '0.7rem 1rem', margin: '0 0 1rem', fontSize: '0.78rem', lineHeight: 1.6 }}>
+                    <strong>Attendance over the last {reportWindow.days} days</strong>
+                    {' — '}{reportWindow.range}, about {reportWindow.weeks} weeks of registers.
+                    {' '}<span style={{ opacity: 0.6 }}>Lanes, places and pool time are today&apos;s timetable and do not move with this window.</span>
+                  </div>
+                )}
                 <div className="section-divider" style={{ marginTop: '1rem' }}>
                   <span className="label">At a glance</span>
                   <span className="rule" />
@@ -2275,6 +2318,16 @@ export default function CapacityDashboard({ session }) {
 
                 {/* 3. Detailed Session Breakdowns */}
                 <div id="detailed-sessions-breakdown">
+                  {isPoolTimeReport && (
+                    /* Repeated where the report breaks to a new page, so a figure
+                       is never read without the window it was measured over. */
+                    <div className="print-only" style={{ border: '1px solid rgba(255,255,255,0.12)', borderLeft: '3px solid var(--accent-cyan)', padding: '0.7rem 1rem', margin: '0 0 1rem', fontSize: '0.78rem', lineHeight: 1.6 }}>
+                      <strong>Attendance over the last {reportWindow.days} days</strong>
+                      {' — '}{reportWindow.range}, about {reportWindow.weeks} weeks of registers.
+                      {' '}<span style={{ opacity: 0.6 }}>Lanes, places and pool time are today&apos;s timetable and do not move with this window.</span>
+                    </div>
+                  )}
+
                   <div className="flex justify-between items-end mb-6">
                     <div>
                       <h3 className="text-xl font-black uppercase text-white">Detailed Session Breakdowns</h3>

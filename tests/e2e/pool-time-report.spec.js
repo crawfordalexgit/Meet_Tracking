@@ -81,3 +81,59 @@ test.describe('the pool time report', () => {
     await expect(page.getByRole('heading', { name: /Pool Time$/ })).toBeHidden();
   });
 });
+
+test.describe('the report says what it was measured over', () => {
+  /** The bands are print-only, so what matters is how they compute under print. */
+  const bandsUnderPrint = page => page.evaluate(() =>
+    Array.from(document.querySelectorAll('.print-only'))
+      .filter(el => /Attendance over the last/.test(el.textContent || ''))
+      .map(el => ({ text: el.textContent.trim(), display: getComputedStyle(el).display })));
+
+  test('the cover states the window, its dates and what does not move with it', async ({ page }) => {
+    // "48% attended" is unreadable without knowing 48% of what, over how long.
+    await page.goto('/capacity?tab=heatmap&report=poolTime&printTheme=dark&periodDays=90');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+    await page.emulateMedia({ media: 'print' });
+
+    const cover = page.locator('.roster-cover-page').first();
+    await expect(cover).toContainText('Attendance measured over 90 days');
+    await expect(cover).toContainText('about 13 weeks of registers');
+    // en-GB abbreviates September to four letters, so allow 3-5.
+    await expect(cover).toContainText(/\d{1,2} \w{3,5} \d{4} to \d{1,2} \w{3,5} \d{4}/);
+    // Lanes and places are the timetable as it stands, not a measurement.
+    await expect(cover).toContainText('do not move with that window');
+  });
+
+  test('the window is repeated where the report breaks to a new page', async ({ page }) => {
+    // A reader who opens at the session breakdowns must not find attendance
+    // figures with no period attached to them.
+    await page.goto('/capacity?tab=heatmap&report=poolTime&printTheme=dark&periodDays=30');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+    await page.emulateMedia({ media: 'print' });
+
+    const bands = await bandsUnderPrint(page);
+    expect(bands.length, 'one band per page break').toBeGreaterThan(1);
+    bands.forEach(b => {
+      expect(b.display, 'band shown when printing').not.toBe('none');
+      expect(b.text).toContain('Attendance over the last 30 days');
+    });
+  });
+
+  test('the window follows the period asked for', async ({ page }) => {
+    await page.goto('/capacity?tab=heatmap&report=poolTime&printTheme=dark&periodDays=180');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.locator('.roster-cover-page').first())
+      .toContainText('Attendance measured over 180 days');
+    const bands = await bandsUnderPrint(page);
+    expect(bands[0].text).toContain('Attendance over the last 180 days');
+  });
+
+  test('the bands stay off the screen', async ({ page }) => {
+    await page.goto('/capacity?tab=heatmap&report=poolTime&printTheme=dark');
+    await expect(page.getByText('All Squads — Capacity Overview')).toBeVisible();
+    const bands = await bandsUnderPrint(page);
+    expect(bands.length).toBeGreaterThan(1);
+    bands.forEach(b => expect(b.display, 'hidden on screen').toBe('none'));
+  });
+});
