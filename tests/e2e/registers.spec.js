@@ -1,0 +1,100 @@
+import { test, expect } from '@playwright/test';
+
+/**
+ * The register check.
+ *
+ * A register that was never taken looks exactly like a session nobody attends,
+ * so the page's job is to name the sessions whose numbers should not be
+ * trusted — and to say how many are fine, because five findings with no
+ * denominator read as a broken club.
+ */
+test.describe('the register check', () => {
+  test('loads clean and reports both the flagged and the fine', async ({ page }) => {
+    const errors = [];
+    const bad = [];
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('response', r => { if (r.status() >= 500) bad.push(`${r.status()} ${r.url()}`); });
+
+    test.setTimeout(120000);
+    await page.goto('/registers');
+    await expect(page.getByRole('heading', { name: 'Register Check' })).toBeVisible();
+    await expect(page.getByText('Sessions flagged')).toBeVisible();
+    await expect(page.getByText(/look fine/).first()).toBeVisible();
+    await expect(page.getByText('Session by session')).toBeVisible();
+
+    // The window has to be stated; every figure on the page depends on it.
+    await expect(page.getByText(/\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/).first()).toBeVisible();
+
+    expect(bad, 'no 5xx').toEqual([]);
+    expect(errors.filter(e => !/favicon|404/i.test(e))).toEqual([]);
+  });
+
+  test('every flagged session says which night it was last taken', async ({ page }) => {
+    test.setTimeout(120000);
+    await page.goto('/registers');
+    await expect(page.getByText('Session by session')).toBeVisible();
+    const rows = page.locator('.reg-row');
+    if (await rows.count() === 0) test.skip(true, 'nothing flagged, nothing to check');
+    await expect(rows.first()).toContainText(/taken \d+ of \d+ nights/);
+    await expect(rows.first()).toContainText(/last \d{4}-\d{2}-\d{2}|never taken/);
+  });
+
+  test('the window follows the period asked for', async ({ page }) => {
+    test.setTimeout(120000);
+    await page.goto('/registers?days=30');
+    await expect(page.getByRole('heading', { name: 'Register Check' })).toBeVisible();
+    await expect(page.getByText('Sessions flagged')).toBeVisible();
+    const thirty = await page.getByText(/\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/).first().textContent();
+
+    test.setTimeout(120000);
+    await page.goto('/registers?days=365');
+    await expect(page.getByText('Sessions flagged')).toBeVisible();
+    const year = await page.getByText(/\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/).first().textContent();
+
+    expect(year, 'a different window reads differently').not.toBe(thirty);
+  });
+
+  test('printing adds a cover and drops the controls', async ({ page }) => {
+    test.setTimeout(120000);
+    await page.goto('/registers?report=registers&days=90');
+    await expect(page.getByText('Session by session')).toBeVisible({ timeout: 60000 });
+    await page.emulateMedia({ media: 'print' });
+
+    await expect(page.locator('.reg-cover')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Report/ })).toBeHidden();
+    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    const [r, g, b] = bg.match(/\d+/g).map(Number);
+    expect(r + g + b, 'prints dark, like the interface').toBeLessThan(200);
+  });
+});
+
+test.describe('opening a finding', () => {
+  test('a flagged session opens to show every night it ran', async ({ page }) => {
+    test.setTimeout(120000);
+    // "Taken on 3 of 13" is a claim; the thirteen dates are the evidence.
+    await page.goto('/registers?days=90');
+    await expect(page.getByText('Session by session')).toBeVisible({ timeout: 60000 });
+
+    const row = page.locator('.reg-row').first();
+    await expect(row.locator('.reg-nights')).toHaveCount(0);
+
+    await row.click();
+    const nights = row.locator('.reg-nights');
+    await expect(nights).toBeVisible();
+    await expect(nights).toContainText('Every night it ran');
+    // Each night is a dated chip, either a register or a gap.
+    await expect(nights.getByText(/^\d{2}-\d{2} · /).first()).toBeVisible();
+
+    await row.click();
+    await expect(row.locator('.reg-nights')).toHaveCount(0);
+  });
+
+  test('the printed report opens every finding, because paper cannot be clicked', async ({ page }) => {
+    test.setTimeout(120000);
+    await page.goto('/registers?report=registers&days=90');
+    await expect(page.getByText('Session by session')).toBeVisible({ timeout: 60000 });
+    const rows = page.locator('.reg-row');
+    if (await rows.count() === 0) test.skip(true, 'nothing flagged');
+    await expect(rows.first().locator('.reg-nights')).toBeVisible();
+  });
+});
