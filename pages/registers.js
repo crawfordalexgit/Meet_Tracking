@@ -219,6 +219,40 @@ export default function RegistersPage() {
               </div>
             )}
 
+            {/*
+              Grouped by squad.
+
+              Fifty-two sessions worst-first is a list to work through; the
+              same fifty-two under eight squad headings is a page somebody can
+              scan and see that one squad is most of the problem. Each heading
+              carries its own registers taken against owed, so it can be read
+              without the rows beneath it.
+            */}
+            <div style={{ marginTop: '2rem' }}>
+              <h2 className="section-title">Squad by squad</h2>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.6rem' }}>
+                {data.bySquad.map(g => {
+                  const pct = g.expected > 0 ? Math.round(g.taken / g.expected * 100) : null;
+                  const colour = g.errors ? 'var(--accent-rose)'
+                    : g.flagged.length ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-emerald)';
+                  return (
+                    <div key={g.squad} className="glass-card"
+                      style={{ padding: '0.8rem 0.9rem', borderLeft: `3px solid ${colour}` }}
+                      title={`${g.taken} registers taken of ${g.expected} owed across ${g.sessions.length} sessions`}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1.3 }}>{g.squad}</div>
+                      <div style={{ fontSize: '1.3rem', fontWeight: 900, color: colour, marginTop: '0.3rem' }}>
+                        {pct === null ? '—' : `${pct}%`}
+                      </div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        {g.taken} of {g.expected} registers<br />
+                        {g.flagged.length} of {g.sessions.length} sessions flagged
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <div style={{ marginTop: '2rem' }}>
               <h2 className="section-title">Session by session</h2>
               {data.flagged.length === 0 && (
@@ -227,7 +261,16 @@ export default function RegistersPage() {
                   <p style={{ margin: '0.5rem 0 0', fontWeight: 700 }}>Every register looks like it was taken.</p>
                 </div>
               )}
-              {data.flagged.map(r => (
+              {data.bySquad.filter(g => g.flagged.length > 0).map(g => (
+                <div key={g.squad} className="reg-squad" style={{ marginBottom: '1.4rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.7rem', marginBottom: '0.5rem' }}>
+                    <h3 style={{ fontSize: '0.85rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent-cyan)', margin: 0 }}>{g.squad}</h3>
+                    <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                      {g.flagged.length} of {g.sessions.length} sessions · {g.taken} of {g.expected} registers
+                    </span>
+                    <span style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.1)' }} />
+                  </div>
+                  {g.flagged.map(r => (
                 <div key={r.sessionId} className="glass-card reg-row"
                   onClick={() => setOpenSession(openSession === r.sessionId ? null : r.sessionId)}
                   title="Click to see every night this session ran"
@@ -298,6 +341,8 @@ export default function RegistersPage() {
                       </div>
                     </div>
                   )}
+                </div>
+                  ))}
                 </div>
               ))}
             </div>

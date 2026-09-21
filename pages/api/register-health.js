@@ -22,14 +22,15 @@ export default async function handler(req, res) {
     const from = new Date(Date.now() - days * 86400000).toISOString().split('T')[0];
 
     const supabase = getServiceSupabase();
-    const [rawSessions, attendance, memberships, closures] = await Promise.all([
+    const [rawSessions, attendance, memberships, closures, squads] = await Promise.all([
       fetchAllRows(supabase, 'sessions'),
       fetchAllRows(supabase, 'training_attendance', {
         select: 'session_id, date, status',
         filter: q => q.gte('date', from).lte('date', to)
       }),
       fetchAllRows(supabase, 'session_memberships', { select: 'session_id' }),
-      fetchAllRows(supabase, 'club_exemptions')
+      fetchAllRows(supabase, 'club_exemptions'),
+      fetchAllRows(supabase, 'squads', { select: 'name, is_squad' })
     ]);
 
     // A retired session owes no register, so it is not judged for missing one.
@@ -54,7 +55,8 @@ export default async function handler(req, res) {
     });
 
     const report = assessRegisters({
-      sessions, marksBySession, rosterBySession, from, to, closures
+      sessions, marksBySession, rosterBySession, from, to, closures,
+      squadNames: squads.filter(q => q.is_squad).map(q => q.name)
     });
 
     return res.status(200).json({ success: true, days, report });

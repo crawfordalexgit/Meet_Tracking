@@ -18,7 +18,7 @@ test.describe('the register check', () => {
     test.setTimeout(120000);
     await page.goto('/registers');
     await expect(page.getByRole('heading', { name: 'Register Check' })).toBeVisible();
-    await expect(page.getByText('Sessions flagged')).toBeVisible();
+    await expect(page.getByText('Sessions flagged', { exact: true })).toBeVisible();
     await expect(page.getByText(/look fine/).first()).toBeVisible();
     await expect(page.getByText('Session by session')).toBeVisible();
 
@@ -43,12 +43,12 @@ test.describe('the register check', () => {
     test.setTimeout(120000);
     await page.goto('/registers?days=30');
     await expect(page.getByRole('heading', { name: 'Register Check' })).toBeVisible();
-    await expect(page.getByText('Sessions flagged')).toBeVisible();
+    await expect(page.getByText('Sessions flagged', { exact: true })).toBeVisible();
     const thirty = await page.getByText(/\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/).first().textContent();
 
     test.setTimeout(120000);
     await page.goto('/registers?days=365');
-    await expect(page.getByText('Sessions flagged')).toBeVisible();
+    await expect(page.getByText('Sessions flagged', { exact: true })).toBeVisible();
     const year = await page.getByText(/\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}/).first().textContent();
 
     expect(year, 'a different window reads differently').not.toBe(thirty);
@@ -96,5 +96,35 @@ test.describe('opening a finding', () => {
     const rows = page.locator('.reg-row');
     if (await rows.count() === 0) test.skip(true, 'nothing flagged');
     await expect(rows.first().locator('.reg-nights')).toBeVisible();
+  });
+});
+
+test.describe('grouped by squad', () => {
+  test('a card per squad, and the session list under squad headings', async ({ page }) => {
+    test.setTimeout(120000);
+    // Fifty-two sessions worst-first is a list to work through; the same
+    // fifty-two under squad headings is a page somebody can scan.
+    await page.goto('/registers?days=90');
+    await expect(page.getByText('Squad by squad')).toBeVisible({ timeout: 60000 });
+
+    const groups = page.locator('.reg-squad');
+    expect(await groups.count(), 'the flagged sessions sit under squad headings').toBeGreaterThan(1);
+
+    // Each heading is readable without the rows beneath it.
+    await expect(groups.first()).toContainText(/\d+ of \d+ sessions · \d+ of \d+ registers/);
+    // Every flagged row belongs to exactly one squad group.
+    const inGroups = await page.locator('.reg-squad .reg-row').count();
+    const all = await page.locator('.reg-row').count();
+    expect(inGroups).toBe(all);
+  });
+
+  test('squads with the most wrong come first', async ({ page }) => {
+    test.setTimeout(120000);
+    await page.goto('/registers?days=90');
+    await expect(page.getByText('Squad by squad')).toBeVisible({ timeout: 60000 });
+    const first = await page.locator('.reg-squad').first().innerText();
+    const last = await page.locator('.reg-squad').last().innerText();
+    const flagged = t => Number(t.match(/(\d+) of \d+ sessions/)[1]);
+    expect(flagged(first)).toBeGreaterThanOrEqual(flagged(last));
   });
 });
