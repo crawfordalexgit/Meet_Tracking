@@ -125,7 +125,13 @@ export default async function handler(req, res) {
 
     const [attendanceRes, resultsRes, membershipsRes, rankingsRes] = await Promise.all([
       fetchAll('training_attendance', '*', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
-      fetchAll('results', '*, meets(*)', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
+      // `meets(license)`, not `meets(*)`. The only meet field read from these
+      // rows is the licence, five hundred lines below, to tell a level 1 or 2
+      // gala from the rest. Embedding the whole meet fetched every column of
+      // every meet for each of ~2,800 results and took 9.7 seconds across the
+      // three pages — past the database's statement timeout, so /reports
+      // returned 500 rather than slowly. One column takes 1.1 seconds.
+      fetchAll('results', '*, meets(license)', q => q.in('swimmer_id', swimmerIds).gte('date', startStr).lte('date', endStr)),
       fetchAll('session_memberships', '*', q => q.in('swimmer_id', swimmerIds)),
       latestSnapshot
         ? fetchAll('rankings', '*', q => q.in('swimmer_id', swimmerIds).eq('snapshot_date', latestSnapshot))
