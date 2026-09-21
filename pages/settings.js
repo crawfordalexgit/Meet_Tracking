@@ -6,6 +6,12 @@ import { useRouter } from 'next/router';
 import toast from 'react-hot-toast';
 import { useTheme } from '../lib/ThemeContext';
 import { SYNC_JOBS } from '../lib/sync-jobs';
+import {
+  normalisePhases, validatePhases, laneHoursOf, describeLanes, toTime
+} from '../lib/session-lanes';
+import {
+  SUGGESTED_TERM_EXCLUSIONS, normaliseExclusions, daysInclusive
+} from '../lib/term-dates';
 
 export default function Settings({ session, scmApiKey }) {
   const router = useRouter();
@@ -91,6 +97,18 @@ export default function Settings({ session, scmApiKey }) {
   const [editingSession, setEditingSession] = useState(null); // { id, name, day_of_week, start_time, end_time, location, lanes_allocated, is_active }
   const [sharedSessionsConfig, setSharedSessionsConfig] = useState({});
   const [editingSessionSplits, setEditingSessionSplits] = useState({});
+  // Lane counts that change part-way through a session, e.g. Age keeping two
+  // lanes until eight and one after, when Masters take the other.
+  const [lanePhaseConfig, setLanePhaseConfig] = useState({});
+  // How many lanes each pool has. Without it the timetable cannot be checked
+  // against what a pool physically holds.
+  const [venueLanes, setVenueLanes] = useState({});
+  const [venueStatus, setVenueStatus] = useState(null);
+  // School holidays, so attendance can be read over term weeks only. See
+  // lib/term-dates.js for why a blended figure is the one that gets challenged.
+  const [termExclusions, setTermExclusions] = useState([]);
+  const [termStatus, setTermStatus] = useState(null);
+  const [editingLanePhases, setEditingLanePhases] = useState([]);
   const [timetableStatus, setTimetableStatus] = useState(null);
   const [showAddSession, setShowAddSession] = useState(false);
   const [newSession, setNewSession] = useState({ name: '', day_of_week: 'Monday', start_time: '', end_time: '', location: '', lanes_allocated: 6 });
@@ -305,6 +323,27 @@ export default function Settings({ session, scmApiKey }) {
     } catch (e) {
       console.warn("No shared sessions config found in DB.");
     }
+
+    // The three keys this page edits as whole objects.
+    //
+    // These were saved but never read back, so every editor opened from an
+    // empty {} and wrote that as the new whole value. Recording lane changes on
+    // one session therefore deleted them from every other session, and the
+    // Venues panel showed no lane counts however many were stored. Anything
+    // edited as a map has to be loaded before it can be saved.
+    try {
+      const { data: rows } = await supabase
+        .from('ai_brain_settings')
+        .select('key, value')
+        .in('key', ['venue_lanes', 'session_lane_phases', 'term_exclusions']);
+      (rows || []).forEach(r => {
+        if (r.key === 'venue_lanes' && r.value) setVenueLanes(r.value);
+        if (r.key === 'session_lane_phases' && r.value) setLanePhaseConfig(r.value);
+        if (r.key === 'term_exclusions' && Array.isArray(r.value)) setTermExclusions(r.value);
+      });
+    } catch (e) {
+      console.warn('Could not load venue, lane-phase or term settings.', e);
+    }
   };
 
   const saveAiSettings = async (e) => {
@@ -318,7 +357,7 @@ export default function Settings({ session, scmApiKey }) {
           key: 'pathway_transition',
           value: aiSettings,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'key' });
       if (error) throw error;
       setAiSettingsStatus({ type: 'success', text: 'AI Brain settings saved successfully!' });
       toast.success('AI Brain settings saved successfully!');
@@ -347,15 +386,30 @@ export default function Settings({ session, scmApiKey }) {
     });
     const existingSplits = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name] || {};
     setEditingSessionSplits(existingSplits);
+    const existingPhases = lanePhaseConfig?.[sess.id] || lanePhaseConfig?.[sess.scm_guid] || lanePhaseConfig?.[sess.name] || [];
+    setEditingLanePhases(Array.isArray(existingPhases) ? existingPhases : []);
   };
 
   const saveSession = async () => {
     if (!editingSession) return;
     setTimetableStatus({ type: 'info', text: 'Saving...' });
     const { id, scm_guid, ...fields } = editingSession;
-    const { error } = await supabase.from('sessions').update(fields).eq('id', id);
+    // Ask for the row back, and check one actually changed.
+    //
+    // An update that matches no row under RLS — an expired session, or a policy
+    // that filters it out — returns success with nothing written. Without this
+    // the page cheerfully reported "Session saved." while the club record was
+    // untouched, which is exactly how a day and venue typed into this form went
+    // missing with no sign anything was wrong.
+    const { data: updated, error } = await supabase
+      .from('sessions').update(fields).eq('id', id).select();
     if (error) {
       setTimetableStatus({ type: 'error', text: error.message });
+    } else if (!updated || updated.length === 0) {
+      setTimetableStatus({
+        type: 'error',
+        text: 'Nothing was saved — the database refused the change. Your sign-in may have expired: reload the page, sign in again and retry.'
+      });
     } else {
       // Update shared sessions config
       const updatedConfig = { ...sharedSessionsConfig };
@@ -375,7 +429,7 @@ export default function Settings({ session, scmApiKey }) {
           key: 'shared_sessions_config',
           value: updatedConfig,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'key' });
 
       if (settingsError) {
         console.error('Failed to save shared sessions config:', settingsError);
@@ -383,9 +437,37 @@ export default function Settings({ session, scmApiKey }) {
         setSharedSessionsConfig(updatedConfig);
       }
 
+      // Lane changes within the session, kept beside the splits and keyed the
+      // same way. A session with no changes stores nothing at all.
+      const updatedPhases = { ...lanePhaseConfig };
+      const keptPhases = normalisePhases(editingSession, editingLanePhases)
+        .map(ph => ({ from: toTime(ph.at), lanes: ph.lanes }));
+      if (keptPhases.length > 0) {
+        updatedPhases[id] = keptPhases;
+      } else {
+        delete updatedPhases[id];
+        if (scm_guid) delete updatedPhases[scm_guid];
+        delete updatedPhases[editingSession.name];
+      }
+
+      const { error: phaseError } = await supabase
+        .from('ai_brain_settings')
+        .upsert({
+          key: 'session_lane_phases',
+          value: updatedPhases,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'key' });
+
+      if (phaseError) {
+        console.error('Failed to save session lane phases:', phaseError);
+      } else {
+        setLanePhaseConfig(updatedPhases);
+      }
+
       setTimetableSessions(prev => prev.map(s => s.id === id ? { ...s, ...fields } : s));
       setEditingSession(null);
       setEditingSessionSplits({});
+      setEditingLanePhases([]);
       setTimetableStatus({ type: 'success', text: 'Session saved.' });
       setTimeout(() => setTimetableStatus(null), 3000);
     }
@@ -426,7 +508,7 @@ export default function Settings({ session, scmApiKey }) {
           key: 'shared_sessions_config',
           value: updatedConfig,
           updated_at: new Date().toISOString()
-        });
+        }, { onConflict: 'key' });
 
       if (settingsError) {
         console.error('Failed to update shared sessions config on delete:', settingsError);
@@ -1099,6 +1181,8 @@ export default function Settings({ session, scmApiKey }) {
           <SidebarItem id="meets" label="Meets" icon="🏊" />
           <SidebarItem id="squads" label="Squads" icon="📋" />
           <SidebarItem id="timetable" label="Timetable" icon="📆" />
+          <SidebarItem id="venues" label="Venues" icon="🏊" />
+          <SidebarItem id="terms" label="Term Dates" icon="🗓️" />
           <SidebarItem id="coaches" label="Coaches" icon="👔" />
           <SidebarItem id="appearance" label="Appearance" icon="🎨" />
           <SidebarItem id="aibrain" label="AI Brain" icon="🧠" />
@@ -1423,6 +1507,298 @@ export default function Settings({ session, scmApiKey }) {
             </div>
           )}
 
+          {activePanel === 'venues' && (() => {
+            /*
+              Venues, and how many lanes each pool actually has.
+              Recorded nowhere until now, which meant the planner could see that
+              a Tuesday evening booked twelve lanes but had no way of knowing
+              that pool holds six. Venue names come from the sessions themselves,
+              so this lists what the timetable actually uses rather than a second
+              list to keep in step.
+            */
+            const used = {};
+            timetableSessions.filter(s => s.is_active !== false).forEach(s => {
+              const v = s.location || '';
+              if (!v) return;
+              used[v] = used[v] || { sessions: 0, peak: 0 };
+              used[v].sessions += 1;
+              used[v].peak = Math.max(used[v].peak, Number(s.lanes_allocated) || 0);
+            });
+            const venues = Object.keys(used).sort();
+            const unrecorded = venues.filter(v => !Number.isFinite(Number(venueLanes[v])));
+
+            const saveVenues = async (next) => {
+              setVenueStatus({ type: 'info', text: 'Saving...' });
+              const { data, error } = await supabase
+                .from('ai_brain_settings')
+                .upsert({ key: 'venue_lanes', value: next, updated_at: new Date().toISOString() },
+                  { onConflict: 'key' })
+                .select();
+              if (error) {
+                setVenueStatus({ type: 'error', text: error.message });
+              } else if (!data || !data.length) {
+                setVenueStatus({ type: 'error', text: 'Nothing was saved — the database refused the change. Reload, sign in again and retry.' });
+              } else {
+                setVenueLanes(next);
+                setVenueStatus({ type: 'success', text: 'Venues saved.' });
+                setTimeout(() => setVenueStatus(null), 3000);
+              }
+            };
+
+            return (
+              <div className="panel-content">
+                <h1>Venues</h1>
+                <p className="mb-6" style={{ color: 'var(--text-secondary)' }}>
+                  How many lanes each pool has. The planner uses this to tell an over-booked
+                  pool from sessions that simply start at different times — without it, it can
+                  see that a Tuesday evening books twelve lanes but not that the pool holds six.
+                  Venues are read from the timetable, so rename one there and it appears here.
+                </p>
+
+                {venueStatus && (
+                  <div className={`alert ${venueStatus.type === 'error' ? 'alert-error' : venueStatus.type === 'success' ? 'alert-success' : 'alert-info'} mb-6`}>
+                    {venueStatus.text}
+                  </div>
+                )}
+
+                {unrecorded.length > 0 && (
+                  <div className="alert alert-info mb-6">
+                    {unrecorded.length} of {venues.length} venues have no lane count yet:{' '}
+                    <strong>{unrecorded.join(', ')}</strong>. Until they do, their timetable
+                    cannot be checked against what the pool holds.
+                  </div>
+                )}
+
+                <div className="card">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                        {['Venue', 'Lanes in the pool', 'Sessions a week', 'Most lanes any one session books'].map(h => (
+                          <th key={h} style={{ padding: '6px 12px', textAlign: 'left', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {venues.map(v => {
+                        const lanes = venueLanes[v];
+                        const busiest = used[v].peak;
+                        const tooSmall = Number.isFinite(Number(lanes)) && Number(lanes) > 0 && busiest > Number(lanes);
+                        return (
+                          <tr key={v} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td style={{ padding: '10px 12px', fontWeight: 600 }}>{v}</td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <input
+                                className="input-field m-0" type="number" min="0" max="20"
+                                style={{ width: '80px', textAlign: 'center' }}
+                                value={lanes ?? ''}
+                                placeholder="—"
+                                onChange={e => {
+                                  const n = parseInt(e.target.value, 10);
+                                  const next = { ...venueLanes };
+                                  if (Number.isFinite(n)) next[v] = n; else delete next[v];
+                                  setVenueLanes(next);
+                                }}
+                                onBlur={() => saveVenues(venueLanes)}
+                              />
+                            </td>
+                            <td style={{ padding: '10px 12px', opacity: 0.7 }}>{used[v].sessions}</td>
+                            <td style={{ padding: '10px 12px', color: tooSmall ? '#f59e0b' : 'inherit', fontWeight: tooSmall ? 700 : 400 }}>
+                              {busiest}
+                              {tooSmall && ' — more than the pool holds'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!venues.length && (
+                        <tr><td colSpan="4" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                          No venues yet — they appear once sessions have a location set on the Timetable.
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="mt-6" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  A change saves when you click away from the box. Leave it empty for a venue you
+                  do not want checked. This counts lanes in the pool, not lanes the club has
+                  booked — a six-lane pool where the club only ever hires four is still six here.
+                </p>
+              </div>
+            );
+          })()}
+
+          {activePanel === 'terms' && (() => {
+            /*
+              School holiday dates, so attendance can be read over term weeks only.
+
+              The club trains through the holidays, so this is not a list of
+              closures — every session still runs and every register is still
+              taken. It is a list of weeks whose turn-up does not describe term
+              time: across the last year this club runs at 63-80% in term and
+              44-57% in the holidays. A ninety-day window read in September is
+              nearly half holiday, and the "about half turn up" figure it
+              produces is the first thing a committee will pull apart.
+            */
+            /*
+              Store only the complete ranges, but keep what is on screen.
+
+              A row being typed into has no dates yet and must not be stored,
+              or a half-entered holiday would start excluding nothing from
+              nowhere. It must equally not be taken off the screen the moment
+              the label loses focus, which is what writing the stored list back
+              into state would do.
+            */
+            const saveTerms = async (next) => {
+              const clean = normaliseExclusions(next);
+              setTermStatus({ type: 'info', text: 'Saving...' });
+              const { data, error } = await supabase
+                .from('ai_brain_settings')
+                .upsert({ key: 'term_exclusions', value: clean, updated_at: new Date().toISOString() },
+                  { onConflict: 'key' })
+                .select();
+              if (error) {
+                setTermStatus({ type: 'error', text: error.message });
+              } else if (!data || !data.length) {
+                setTermStatus({ type: 'error', text: 'Nothing was saved — the database refused the change. Reload, sign in again and retry.' });
+              } else {
+                setTermExclusions(next);
+                const held = next.length - clean.length;
+                setTermStatus({
+                  type: 'success',
+                  text: held > 0
+                    ? `${clean.length} saved. ${held} not saved yet — ${held === 1 ? 'it needs' : 'they need'} both dates.`
+                    : 'Term dates saved. Attendance figures use them from now on.'
+                });
+                setTimeout(() => setTermStatus(null), 4000);
+              }
+            };
+
+            const update = (i, field, value) => {
+              const next = termExclusions.map((r, n) => (n === i ? { ...r, [field]: value } : r));
+              setTermExclusions(next);
+            };
+
+            const rows = termExclusions;
+            const invalid = rows.filter(r => r.from && r.to && r.to < r.from).length;
+
+            return (
+              <div className="panel-content">
+                <h1>Term Dates</h1>
+                <p className="mb-6" style={{ color: 'var(--text-secondary)' }}>
+                  School holidays, so attendance can be measured over term weeks only.
+                  This is <strong>not</strong> a list of weeks the club was shut — the club
+                  trains through the holidays and every register still counts. It is a list of
+                  weeks whose turn-up does not describe term time. Over the last year this club
+                  runs at 63–80% in term and 44–57% in the holidays, so a figure that blends the
+                  two describes neither.
+                </p>
+
+                {termStatus && (
+                  <div className={`alert ${termStatus.type === 'error' ? 'alert-error' : termStatus.type === 'success' ? 'alert-success' : 'alert-info'} mb-6`}>
+                    {termStatus.text}
+                  </div>
+                )}
+
+                {invalid > 0 && (
+                  <div className="alert alert-error mb-6">
+                    {invalid} {invalid === 1 ? 'range ends' : 'ranges end'} before {invalid === 1 ? 'it starts' : 'they start'}.
+                    Those will not be saved — correct the dates or remove the row.
+                  </div>
+                )}
+
+                {!rows.length && (
+                  <div className="alert alert-info mb-6">
+                    No school holidays recorded. Until some are, asking for term weeks only
+                    changes nothing, and attendance figures include the holidays.
+                  </div>
+                )}
+
+                <div className="card">
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                        {['What it is', 'First day off', 'Last day off', 'Days', ''].map(h => (
+                          <th key={h} style={{ padding: '6px 12px', textAlign: 'left', opacity: 0.5, fontWeight: 700, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.08em' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => {
+                        const days = daysInclusive(r.from, r.to);
+                        const bad = r.from && r.to && r.to < r.from;
+                        return (
+                          <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td style={{ padding: '8px 12px' }}>
+                              <input
+                                className="input-field m-0" type="text" style={{ width: '100%' }}
+                                value={r.label || ''} placeholder="Summer holidays 2026"
+                                onChange={e => update(i, 'label', e.target.value)}
+                                onBlur={() => saveTerms(termExclusions)}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <input
+                                className="input-field m-0" type="date" style={{ width: '160px' }}
+                                value={r.from || ''}
+                                onChange={e => update(i, 'from', e.target.value)}
+                                onBlur={() => saveTerms(termExclusions)}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <input
+                                className="input-field m-0" type="date" style={{ width: '160px' }}
+                                value={r.to || ''}
+                                onChange={e => update(i, 'to', e.target.value)}
+                                onBlur={() => saveTerms(termExclusions)}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 12px', opacity: 0.7, color: bad ? '#ef4444' : 'inherit' }}>
+                              {bad ? 'ends first' : (days === null ? '—' : days)}
+                            </td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                              <button
+                                className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '0.75rem' }}
+                                onClick={() => saveTerms(termExclusions.filter((_, n) => n !== i))}
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-6" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setTermExclusions([...termExclusions, { from: '', to: '', label: '' }])}
+                  >
+                    + Add a holiday
+                  </button>
+                  {!rows.length && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() => saveTerms(SUGGESTED_TERM_EXCLUSIONS.map(r => ({ ...r })))}
+                    >
+                      Start from the Kent 2025–26 calendar
+                    </button>
+                  )}
+                </div>
+
+                <p className="mt-6" style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  A change saves when you click away from the box. Both dates are included, so a
+                  half-term running Monday to Friday is the Monday and the Friday. Removing a
+                  holiday puts those weeks straight back into the attendance figures — nothing
+                  needs re-syncing and no register is altered, because the registers themselves
+                  are never touched. Every report names the holidays it removed, so a reader can
+                  check this page against the school calendar.
+                </p>
+              </div>
+            );
+          })()}
+
           {activePanel === 'timetable' && (() => {
             const sessionsByDay = DAY_ORDER.map(day => ({
               day,
@@ -1430,6 +1806,24 @@ export default function Settings({ session, scmApiKey }) {
                 .filter(s => s.day_of_week?.toLowerCase() === day.toLowerCase())
                 .sort((a,b) => (a.start_time||'').localeCompare(b.start_time||''))
             }));
+
+            // Anything that matched no day at all.
+            //
+            // The groups above are built by filtering on the weekday, so a
+            // session whose day_of_week is blank and whose name contains no
+            // weekday belonged to no group and simply never rendered. It was
+            // still in the club record, still counted in every total, and
+            // unreachable from any screen — which is how a land-training
+            // session sat in the pool timetable contributing six lane-hours of
+            // water with nobody able to see or correct it.
+            const placed = new Set(sessionsByDay.flatMap(g => g.sessions.map(s => s.id)));
+            const unscheduled = timetableSessions
+              .filter(s => !placed.has(s.id))
+              .sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
+
+            const groups = sessionsByDay.concat(
+              unscheduled.length ? [{ day: 'No day set', sessions: unscheduled, orphan: true }] : []
+            );
             return (
               <div className="panel-content">
                 <h1>Timetable</h1>
@@ -1443,12 +1837,20 @@ export default function Settings({ session, scmApiKey }) {
                   </div>
                 )}
 
-                {sessionsByDay.map(({ day, sessions }) => sessions.length === 0 ? null : (
-                  <div key={day} className="card mb-6">
-                    <h3 className="mb-4" style={{ color: 'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'8px' }}>
-                      <span style={{ fontSize:'1rem' }}>📆</span> {day}
+                {groups.map(({ day, sessions, orphan }) => sessions.length === 0 ? null : (
+                  <div key={day} className="card mb-6"
+                       style={orphan ? { borderColor: '#f59e0b' } : undefined}>
+                    <h3 className="mb-4" style={{ color: orphan ? '#f59e0b' : 'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'8px' }}>
+                      <span style={{ fontSize:'1rem' }}>{orphan ? '⚠️' : '📆'}</span> {day}
                       <span style={{ fontSize:'0.75rem', fontWeight:400, opacity:0.5, marginLeft:'4px' }}>{sessions.length} session{sessions.length !== 1 ? 's' : ''}</span>
                     </h3>
+                    {orphan && (
+                      <p style={{ fontSize:'0.8rem', lineHeight:1.6, color:'var(--text-secondary)', marginTop:'-8px', marginBottom:'16px' }}>
+                        These have no weekday set and none in their name, so they cannot be placed on a
+                        timetable and every restructuring plan leaves them out — while still counting
+                        toward the club&apos;s lane-hours. Press <strong>Edit</strong> and set the day to fix it.
+                      </p>
+                    )}
                     <div style={{ overflowX:'auto' }}>
                       <table style={{ width:'100%', borderCollapse:'collapse', fontSize:'0.85rem' }}>
                         <thead>
@@ -1480,8 +1882,19 @@ export default function Settings({ session, scmApiKey }) {
                                       onChange={e => setEditingSession(es => ({...es, location: e.target.value}))} />
                                   </td>
                                   <td style={{ padding:'8px 12px' }}>
-                                    <input className="input-field m-0" type="number" min="1" max="20" style={{width:'60px',textAlign:'center'}} value={editingSession.lanes_allocated||''}
-                                      onChange={e => setEditingSession(es => ({...es, lanes_allocated: parseInt(e.target.value)||null}))} />
+                                    {/*
+                                      0 has to survive. `parseInt(v) || null` turned a typed
+                                      zero straight back into null, and min="1" stopped it
+                                      being typed at all — so a session that uses no lanes
+                                      (land training sitting in the pool timetable) could not
+                                      be recorded as such, and kept counting as six.
+                                    */}
+                                    <input className="input-field m-0" type="number" min="0" max="20" style={{width:'60px',textAlign:'center'}}
+                                      value={editingSession.lanes_allocated ?? ''}
+                                      onChange={e => {
+                                        const n = parseInt(e.target.value, 10);
+                                        setEditingSession(es => ({ ...es, lanes_allocated: Number.isFinite(n) ? n : null }));
+                                      }} />
                                   </td>
                                   <td style={{ padding:'8px 12px' }}>
                                     <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer'}}>
@@ -1498,12 +1911,120 @@ export default function Settings({ session, scmApiKey }) {
                                 <tr style={{ background:'rgba(6,182,212,0.06)', borderBottom:'1px solid rgba(255,255,255,0.05)' }}>
                                   <td colSpan="7" style={{ padding:'12px 24px', borderTop:'1px dashed rgba(255,255,255,0.05)' }}>
                                     <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                                      {/*
+                                        The day lives here rather than in the table so the columns
+                                        stay as they were. Without it a session with no weekday could
+                                        not be given one from anywhere in the app, which left "Land
+                                        training" stranded: no day meant no group to render it in,
+                                        and no way to edit it into one.
+                                      */}
                                       <span style={{ fontSize:'0.75rem', fontWeight:800, color:'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'6px' }}>
+                                        📆 Day of the week
+                                      </span>
+                                      <div style={{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
+                                        <select
+                                          className="input-field m-0"
+                                          style={{ width:'170px' }}
+                                          value={editingSession.day_of_week || ''}
+                                          onChange={e => setEditingSession(es => ({ ...es, day_of_week: e.target.value }))}
+                                        >
+                                          <option value="">— not set —</option>
+                                          {DAY_ORDER.map(d => <option key={d} value={d}>{d}</option>)}
+                                        </select>
+                                        {!editingSession.day_of_week && (
+                                          <span style={{ fontSize:'0.7rem', color:'#f59e0b', fontWeight:700 }}>
+                                            Without a day this session cannot be placed on a timetable, and every
+                                            restructuring plan leaves it out.
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {/*
+                                        Lanes that change part-way through.
+                                        A session held one lane count for its whole length, which is
+                                        not how the club swims: Age keeps two lanes at Radnor House
+                                        from seven and one from eight, when Masters take the other.
+                                        Recorded as "2 lanes, 19:00-21:00" that is four lane-hours;
+                                        in the water it is three. Only the changes are recorded, so a
+                                        session that never changes needs nothing here.
+                                      */}
+                                      <span style={{ fontSize:'0.75rem', fontWeight:800, color:'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'6px', marginTop:'8px' }}>
+                                        🕐 Lane changes during this session
+                                      </span>
+                                      <span style={{ fontSize:'0.7rem', opacity:0.6 }}>
+                                        It starts on {editingSession.lanes_allocated ?? 0} lane{editingSession.lanes_allocated === 1 ? '' : 's'}.
+                                        Add a change only where the count moves part-way through — for example a squad
+                                        dropping to one lane when another squad comes in on the other.
+                                      </span>
+
+                                      {editingLanePhases.map((ph, i) => (
+                                        <div key={i} style={{ display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap' }}>
+                                          <span style={{ fontSize:'0.7rem', opacity:0.6 }}>from</span>
+                                          <input className="input-field m-0" type="time" style={{ width:'110px' }}
+                                            value={ph.from || ''}
+                                            onChange={e => setEditingLanePhases(list =>
+                                              list.map((x, j) => (j === i ? { ...x, from: e.target.value } : x)))} />
+                                          <input className="input-field m-0" type="number" min="0" max="20"
+                                            style={{ width:'70px', textAlign:'center' }}
+                                            value={ph.lanes ?? ''}
+                                            onChange={e => {
+                                              const n = parseInt(e.target.value, 10);
+                                              setEditingLanePhases(list =>
+                                                list.map((x, j) => (j === i ? { ...x, lanes: Number.isFinite(n) ? n : null } : x)));
+                                            }} />
+                                          <span style={{ fontSize:'0.7rem', opacity:0.6 }}>lane{ph.lanes === 1 ? '' : 's'}</span>
+                                          <button type="button" className="btn btn-secondary"
+                                            style={{ fontSize:'0.7rem', padding:'3px 10px' }}
+                                            onClick={() => setEditingLanePhases(list => list.filter((_, j) => j !== i))}>Remove</button>
+                                        </div>
+                                      ))}
+
+                                      <button type="button" className="btn btn-secondary"
+                                        style={{ fontSize:'0.7rem', padding:'3px 10px', alignSelf:'flex-start' }}
+                                        onClick={() => setEditingLanePhases(list => list.concat([{ from: '', lanes: 1 }]))}>
+                                        + Add a lane change
+                                      </button>
+
+                                      {(() => {
+                                        const problems = validatePhases(editingSession, editingLanePhases);
+                                        if (problems.length) {
+                                          return (
+                                            <span style={{ fontSize:'0.7rem', color:'#f59e0b', fontWeight:700 }}>
+                                              {problems.join(' ')}
+                                            </span>
+                                          );
+                                        }
+                                        if (!editingLanePhases.length) return null;
+                                        // Say back what was entered, in hours, so a mistake is obvious
+                                        // before it reaches the planner.
+                                        const lh = laneHoursOf(editingSession, editingLanePhases, editingSession.lanes_allocated ?? 0);
+                                        const flat = laneHoursOf(editingSession, [], editingSession.lanes_allocated ?? 0);
+                                        return (
+                                          <span style={{ fontSize:'0.7rem', color:'var(--accent-emerald)', fontWeight:700 }}>
+                                            {describeLanes(editingSession, editingLanePhases, editingSession.lanes_allocated ?? 0)}
+                                            {' '}— {Math.round(lh * 10) / 10} lane-hours
+                                            {lh !== flat && ` instead of ${Math.round(flat * 10) / 10}`}.
+                                          </span>
+                                        );
+                                      })()}
+
+                                      <span style={{ fontSize:'0.75rem', fontWeight:800, color:'var(--accent-cyan)', display:'flex', alignItems:'center', gap:'6px', marginTop:'12px' }}>
                                         🥞 Optional Shared Session Lane Splits
                                       </span>
                                       <span style={{ fontSize:'0.7rem', opacity:0.6 }}>
                                         Specify a portion of lanes for specific squads. Leave a squad at 0 or empty to not allocate specific lanes. Sum of splits must be less than or equal to total lanes ({editingSession.lanes_allocated || 6}).
+                                        {' '}A squad left out of a split gets no lanes at all, so clear the whole split rather than part of it if you want the session shared evenly again.
                                       </span>
+                                      {Object.keys(editingSessionSplits).length > 0 && (
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary"
+                                          style={{ fontSize:'0.7rem', padding:'3px 10px', alignSelf:'flex-start' }}
+                                          onClick={() => setEditingSessionSplits({})}
+                                        >
+                                          Clear all splits ({Object.keys(editingSessionSplits).length} set)
+                                        </button>
+                                      )}
                                       <div style={{ display:'flex', flexWrap:'wrap', gap:'12px', marginTop:'6px' }}>
                                         {squads.filter(s => s.is_squad).map(sq => {
                                           const val = editingSessionSplits[sq.id] || '';

@@ -383,3 +383,80 @@ VALUES ('pathway_transition', '{"struggling_consistency_threshold": 60, "struggl
 ON CONFLICT (key) DO NOTHING;
 
 
+
+-- 16. Squad Restructuring / Pool Time Scenario Planner
+-- Scenarios are a collection (listed, duplicated, compared), so they get a table
+-- rather than an ai_brain_settings key. The deciding factor is PDF export: the
+-- Puppeteer route re-renders the page from a URL, so a scenario must be
+-- addressable as /restructure?scenario=<uuid>&view=print. Unsaved React state
+-- cannot survive that round trip.
+CREATE TABLE IF NOT EXISTS public.planning_scenarios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    description TEXT,
+    -- Full editable input set: candidate slots, proposed squads, coach roster,
+    -- constraint policy, growth assumptions, solver weights. Everything the
+    -- solver needs, so a solve never silently depends on live tables shifting
+    -- underneath a saved scenario.
+    inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- Last computed solver output, cached so list and comparison views do not
+    -- re-solve every scenario on every page load. Always re-derivable.
+    last_result JSONB,
+    baseline_captured_at TIMESTAMPTZ,
+    is_baseline BOOLEAN DEFAULT false,
+    is_archived BOOLEAN DEFAULT false,
+    created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS planning_scenarios_updated_idx
+    ON public.planning_scenarios (is_archived, updated_at DESC);
+ALTER TABLE public.planning_scenarios ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow read for all authenticated" ON public.planning_scenarios;
+CREATE POLICY "Allow read for all authenticated" ON public.planning_scenarios FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Allow all for admins/headcoaches" ON public.planning_scenarios;
+CREATE POLICY "Allow all for admins/headcoaches" ON public.planning_scenarios FOR ALL TO authenticated USING (
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'headcoach')
+);
+GRANT ALL ON public.planning_scenarios TO service_role;
+GRANT ALL ON public.planning_scenarios TO authenticated;
+
+INSERT INTO public.ai_brain_settings (key, value)
+VALUES ('restructure_defaults', '{"maxLanesPerCoach": 3, "minCoachesPerSquadSession": 1, "minCoachesPerSquadSessionUnder14": 2, "defaultSwimmersPerLane": 8, "ltadTable": "unified", "venueTransitMinutes": 30, "weeksPerYear": 46}')
+ON CONFLICT (key) DO NOTHING;
+
+-- 17. Coach profiles (shared roster for the scenario planner)
+-- public.profiles carries only id, email and role, so a coach's name, level,
+-- lane limit, weekly hours and availability have nowhere to live. Scenarios can
+-- hold them, but a roster typed into five scenarios drifts into five different
+-- answers. This is the shared copy the planner loads from and saves back to.
+-- Field names mirror the scenario blob so moving between the two is a mapping,
+-- not a translation.
+CREATE TABLE IF NOT EXISTS public.coach_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- Null for a hypothetical coach invented for a recruitment what-if.
+    profile_id UUID UNIQUE REFERENCES public.profiles(id) ON DELETE CASCADE,
+    display_name TEXT NOT NULL,
+    level TEXT,                                  -- 'head' | 'L2' | 'L1' | 'volunteer'
+    max_lanes INTEGER DEFAULT 3,
+    max_hours_per_week NUMERIC,
+    -- [{ day: 'Monday', from: '17:00', to: '21:00' }]. An empty list means
+    -- "not stated", which the solver reads as available.
+    availability JSONB DEFAULT '[]'::jsonb,
+    venues JSONB DEFAULT '[]'::jsonb,
+    -- Coaches are retired rather than deleted, so a saved scenario that still
+    -- references one does not lose their details.
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS coach_profiles_active_idx ON public.coach_profiles (is_active);
+ALTER TABLE public.coach_profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow read for all authenticated" ON public.coach_profiles;
+CREATE POLICY "Allow read for all authenticated" ON public.coach_profiles FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "Allow all for admins/headcoaches" ON public.coach_profiles;
+CREATE POLICY "Allow all for admins/headcoaches" ON public.coach_profiles FOR ALL TO authenticated USING (
+    (SELECT role FROM public.profiles WHERE id = auth.uid()) IN ('admin', 'headcoach')
+);
+GRANT ALL ON public.coach_profiles TO service_role;
+GRANT ALL ON public.coach_profiles TO authenticated;
