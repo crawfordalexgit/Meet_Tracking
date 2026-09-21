@@ -202,6 +202,36 @@ export default function RegistersPage() {
               <Figure label="Never taken" value={s.byFlag.never || 0} sub="no register in this window" colour="var(--accent-rose)" />
             </div>
 
+            {/*
+              Days the whole club went quiet with no closure recorded.
+
+              This sits above every other finding because it changes what they
+              mean. If the club was shut for a week nobody wrote down, then a
+              week of "missing" registers below is not a coach's failing, and
+              acting on the list before fixing the closure sends somebody to
+              have eight conversations about a holiday.
+            */}
+            {(data.unrecordedClosures || []).length > 0 && (
+              <div style={{ marginTop: '2rem' }}>
+                <h2 className="section-title">The club went quiet, and no closure is recorded</h2>
+                {data.unrecordedClosures.map((c, i) => (
+                  <div key={i} className="glass-card" style={{ padding: '1.1rem 1.3rem', borderLeft: '3px solid var(--accent-amber, #f59e0b)', marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 900, fontSize: '0.9rem' }}>
+                      {c.from} to {c.to} — {c.days} days, not one mark anywhere
+                    </div>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.4rem 0 0.6rem', lineHeight: 1.6 }}>
+                      {c.detail}
+                    </p>
+                    <p style={{ fontSize: '0.75rem', margin: 0 }}>
+                      Until it is recorded in{' '}
+                      <a href="/settings" style={{ color: 'var(--accent-cyan)' }}>Settings → Exemptions</a>
+                      {' '}as a closure, these {c.days} days count against every session that runs in them.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {data.clusters.length > 0 && (
               <div style={{ marginTop: '2rem' }}>
                 <h2 className="section-title">Registers that stopped together</h2>

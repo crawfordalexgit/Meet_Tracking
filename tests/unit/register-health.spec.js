@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import {
   runDatesFor, assessSession, assessRegisters, findStoppedClusters,
-  squadNameFor, groupBySquad
+  squadNameFor, groupBySquad, findUnrecordedClosures
 } from '../../lib/register-health.js';
 
 /**
@@ -280,5 +280,146 @@ test.describe('gathering the findings under each squad', () => {
     const groups = groupBySquad([row('A', 'SILVER', 'ok', 13, 13)]);
     expect(groups[0].flagged).toEqual([]);
     expect(groups[0].clean).toBe(1);
+  });
+});
+
+/**
+ * A shutdown nobody wrote down.
+ *
+ * This is the real one. The club's summer shutdown was recorded for 1-14
+ * August 2025 and never rolled forward; in 2026 the club shut 1-8 August, so
+ * eight days of silence were being counted as fifty-two coaches all missing
+ * their register at once. The dates below are the club's own.
+ */
+const marksOn = (dates) => ({ s1: dates.map(d => ({ date: d, status: 'present' })) });
+const everyDayExcept = (from, to, skip) => {
+  const out = [];
+  for (let d = new Date(from + 'T00:00:00Z'); d <= new Date(to + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) {
+    const k = d.toISOString().slice(0, 10);
+    if (!skip.includes(k)) out.push(k);
+  }
+  return out;
+};
+const range = (from, to) => everyDayExcept(from, to, []);
+
+test.describe('a closure nobody recorded', () => {
+  const WINDOW = { from: '2026-07-20', to: '2026-08-20' };
+  const silent = range('2026-08-01', '2026-08-08');
+  const marksBySession = marksOn(everyDayExcept(WINDOW.from, WINDOW.to, silent));
+
+  test('eight silent days with no closure are reported as one stretch', () => {
+    const found = findUnrecordedClosures({ marksBySession, ...WINDOW, closures: [] });
+    expect(found).toHaveLength(1);
+    expect(found[0].from).toBe('2026-08-01');
+    expect(found[0].to).toBe('2026-08-08');
+    expect(found[0].days).toBe(8);
+  });
+
+  test('a closure recorded over those days is not reported', () => {
+    const found = findUnrecordedClosures({
+      marksBySession, ...WINDOW,
+      closures: [{ name: 'Summer Shutdown', type: 'exempt', start_date: '2026-08-01', end_date: '2026-08-08' }]
+    });
+    expect(found).toEqual([]);
+  });
+
+  test('the previous year dates are named, because correcting one beats adding one', () => {
+    // The club's actual record: the shutdown exists, dated 2025.
+    const found = findUnrecordedClosures({
+      marksBySession, ...WINDOW,
+      closures: [{ name: 'Annual TSC Summer Shutdown', type: 'exempt', start_date: '2025-08-01', end_date: '2025-08-14' }]
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0].likelyRepeatOf.name).toBe('Annual TSC Summer Shutdown');
+    expect(found[0].detail).toContain('about a year earlier');
+  });
+
+  test('a credit day is not a closure, so it does not excuse silence', () => {
+    // Bank holidays the club trains through are credits. Treating one as a
+    // closure is how 112 bank-holiday flags were wrongly cleared before.
+    const found = findUnrecordedClosures({
+      marksBySession, ...WINDOW,
+      closures: [{ name: 'Summer Bank Holiday', type: 'credit', start_date: '2026-08-01', end_date: '2026-08-08' }]
+    });
+    expect(found).toHaveLength(1);
+  });
+
+  test('a quiet weekend is not a shutdown', () => {
+    const twoDays = range('2026-08-01', '2026-08-02');
+    const found = findUnrecordedClosures({
+      marksBySession: marksOn(everyDayExcept(WINDOW.from, WINDOW.to, twoDays)),
+      ...WINDOW, closures: []
+    });
+    expect(found).toEqual([]);
+  });
+
+  test('only the part outside a recorded closure is reported', () => {
+    // A shutdown recorded three days short still shows the drift.
+    const found = findUnrecordedClosures({
+      marksBySession, ...WINDOW,
+      closures: [{ name: 'Summer Shutdown', type: 'exempt', start_date: '2026-08-01', end_date: '2026-08-05' }]
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0].from).toBe('2026-08-06');
+    expect(found[0].to).toBe('2026-08-08');
+  });
+
+  test('a club with no marks at all reports nothing rather than one long closure', () => {
+    // Nothing loaded is not the same as nothing happened.
+    expect(findUnrecordedClosures({ marksBySession: {}, ...WINDOW, closures: [] })).toEqual([]);
+  });
+
+  test('silence after today is not counted, because it has not happened yet', () => {
+    const found = findUnrecordedClosures({
+      marksBySession: marksOn(range('2026-07-20', '2026-07-31')),
+      ...WINDOW, closures: [], today: '2026-07-31'
+    });
+    expect(found).toEqual([]);
+  });
+
+  test('assessRegisters carries the finding', () => {
+    const report = assessRegisters({
+      sessions: [{ id: 's1', name: 'SILVER Monday', day: 'Monday' }],
+      marksBySession, rosterBySession: { s1: 10 }, ...WINDOW, closures: []
+    });
+    expect(report.unrecordedClosures).toHaveLength(1);
+    expect(report.unrecordedClosures[0].days).toBe(8);
+  });
+});
+
+test.describe('a shutdown with a few absences marked in it', () => {
+  // The club's own: three swimmers marked absent on 9, 11 and 13 August, in
+  // the middle of a fortnight when the pool was shut. Read as training days
+  // they cut a fourteen-day shutdown down to eight and hid the rest.
+  const WINDOW = { from: '2026-07-20', to: '2026-08-20' };
+  const inWater = (d) => ({ date: d, status: 'present' });
+  const open = [];
+  for (let d = new Date('2026-07-20T00:00:00Z'); d <= new Date('2026-08-20T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) {
+    const k = d.toISOString().slice(0, 10);
+    if (k < '2026-08-01' || k > '2026-08-14') open.push(inWater(k));
+  }
+  const marksBySession = {
+    s1: open,
+    s2: [
+      { date: '2026-08-09', status: 'absent' },
+      { date: '2026-08-11', status: 'absent' },
+      { date: '2026-08-13', status: 'absent' }
+    ]
+  };
+
+  test('absences alone do not make a day a training day', () => {
+    const found = findUnrecordedClosures({ marksBySession, ...WINDOW, closures: [] });
+    expect(found).toHaveLength(1);
+    expect(found[0].from).toBe('2026-08-01');
+    expect(found[0].to).toBe('2026-08-14');
+    expect(found[0].days).toBe(14);
+  });
+
+  test('one swimmer in the water does end the closure', () => {
+    const found = findUnrecordedClosures({
+      marksBySession: { ...marksBySession, s3: [inWater('2026-08-09')] },
+      ...WINDOW, closures: []
+    });
+    expect(found.map(c => `${c.from}..${c.to}`)).toEqual(['2026-08-01..2026-08-08', '2026-08-10..2026-08-14']);
   });
 });
