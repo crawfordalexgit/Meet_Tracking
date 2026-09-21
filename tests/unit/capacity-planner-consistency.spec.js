@@ -86,3 +86,97 @@ test.describe('squad capacity needs a weekly target', () => {
     expect(over(30, 100, 4)).toBe(true);
   });
 });
+
+/**
+ * A session holding no lanes provides no pool time.
+ *
+ * Age is recorded as a two-hour session plus a one-hour one on the same night,
+ * the second at zero lanes because its lanes are already counted on the first.
+ * Places were computed correctly — lanes times swimmers-per-lane is zero — but
+ * the hours and session count were not, so the card offered Age fifteen hours
+ * across nine sessions when it holds thirteen across seven. Two of those hours
+ * were water that does not exist.
+ */
+const poolTimeOf = (sessions, lanesFor) => {
+  const water = sessions.filter(s => lanesFor(s) > 0);
+  return {
+    hours: Math.round(water.reduce((sum, s) => sum + s.hours, 0) * 10) / 10,
+    sessionCount: water.length,
+    registerOnlyCount: sessions.length - water.length
+  };
+};
+
+test.describe('pool time excludes register-only sessions', () => {
+  const lanesFor = s => s.lanes;
+
+  test('a zero-lane session adds neither hours nor a session', () => {
+    const out = poolTimeOf([
+      { hours: 2, lanes: 3 }, { hours: 2, lanes: 2 }, { hours: 1, lanes: 0 }
+    ], lanesFor);
+    expect(out.hours).toBe(4);
+    expect(out.sessionCount).toBe(2);
+    expect(out.registerOnlyCount).toBe(1);
+  });
+
+  test("Age's real week, against what the card used to claim", () => {
+    const age = [
+      { hours: 2, lanes: 2 }, { hours: 2, lanes: 3 }, { hours: 2, lanes: 2 },
+      { hours: 2, lanes: 2 }, { hours: 2, lanes: 3 }, { hours: 1, lanes: 2 },
+      { hours: 2, lanes: 3 },
+      { hours: 1, lanes: 0 }, { hours: 1, lanes: 0 }
+    ];
+    const out = poolTimeOf(age, lanesFor);
+    expect(out.hours).toBe(13);
+    expect(out.sessionCount).toBe(7);
+    expect(out.registerOnlyCount).toBe(2);
+    // What it showed before: every session counted.
+    expect(age.reduce((s, x) => s + x.hours, 0)).toBe(15);
+    expect(age.length).toBe(9);
+  });
+
+  test('a squad with no register-only sessions is unchanged', () => {
+    const out = poolTimeOf([{ hours: 1, lanes: 2 }, { hours: 1.5, lanes: 3 }], lanesFor);
+    expect(out.hours).toBe(2.5);
+    expect(out.sessionCount).toBe(2);
+    expect(out.registerOnlyCount).toBe(0);
+  });
+
+  test('places already ignored zero-lane sessions, and still do', () => {
+    // lanes x swimmers-per-lane is zero, so this was never wrong.
+    const places = [{ lanes: 3 }, { lanes: 0 }].reduce((sum, s) => sum + s.lanes * 7, 0);
+    expect(places).toBe(21);
+  });
+});
+
+/**
+ * Only a closure makes attendance suspect.
+ *
+ * club_exemptions records two kinds of day: 'exempt' means the club was shut,
+ * 'credit' means the day is optional and nobody is marked down for missing it.
+ * The data health check tested only whether a date matched some exemption, so
+ * every swimmer who trained on a bank holiday the club had chosen to run was
+ * reported as an error — 112 of them across four dates, none of which was a
+ * closure. Training on a day you did not have to is not a data fault.
+ */
+const flagsAttendance = (exemption) => !!exemption && exemption.type === 'exempt';
+
+test.describe('attendance on an exempt date', () => {
+  test('a closure flags attendance', () => {
+    expect(flagsAttendance({ name: 'Christmas Shutdown', type: 'exempt' })).toBe(true);
+  });
+
+  test('a credit day does not', () => {
+    expect(flagsAttendance({ name: 'Summer Bank Holiday', type: 'credit' })).toBe(false);
+    expect(flagsAttendance({ name: 'Good Friday', type: 'credit' })).toBe(false);
+  });
+
+  test('no exemption at all flags nothing', () => {
+    expect(flagsAttendance(null)).toBe(false);
+    expect(flagsAttendance(undefined)).toBe(false);
+  });
+
+  test('an exemption with no type is not treated as a closure', () => {
+    // Safer to miss a flag than to accuse a swimmer of training in a shut pool.
+    expect(flagsAttendance({ name: 'Unspecified' })).toBe(false);
+  });
+});
