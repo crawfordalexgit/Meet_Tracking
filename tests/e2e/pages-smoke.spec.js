@@ -14,6 +14,7 @@ const STATIC_PAGES = [
   '/settings',
   '/feedback',
   '/sandbox/coacheseye',
+  '/restructure',
 ];
 
 async function visitAndCheck(page, path) {

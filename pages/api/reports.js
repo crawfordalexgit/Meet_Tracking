@@ -53,13 +53,24 @@ export default async function handler(req, res) {
     if (swimmersError) throw swimmersError;
 
     if (!swimmers || swimmers.length === 0) {
+      // An empty roster is a valid result, not a failure. Without `success` the
+      // client treats this payload as a failed compile and shows a misleading
+      // "failed to load" message instead of "no athletes".
       return res.status(200).json({
+        success: true,
+        swimmersEmpty: true,
         squads,
         swimmersData: [],
-        cohorts: { highEfficiency: [], lowEfficiency: [], overTraining: [], underTraining: [] },
+        cohorts: {
+          highEfficiency: [], lowEfficiency: [], overTraining: [], underTraining: [],
+          eliteResponders: [], stableElites: [], developingResponders: [], lowResponders: []
+        },
+        avgTEI: 0,
+        avgTEIDelta: 0,
         onTheCusp: [],
         benchmarksSummary: { countyCount: 0, regionalCount: 0, nationalCount: 0, total: 0 },
-        meetTemperament: { avgL1Points: 0, avgL3Points: 0, temperamentNote: 'No data' }
+        meetTemperament: { avgL1Points: 0, avgL3Points: 0, temperamentNote: 'No data' },
+        savedReports: []
       });
     }
 

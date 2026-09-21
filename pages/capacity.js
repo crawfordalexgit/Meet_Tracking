@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
 import { fetchAllRows } from '../lib/paginate';
 import { getSessionDuration, calculateReliability, isShutdownDate, isGalaDate, getWeekKey } from '../lib/analytics-utils';
+import { laneSegments, peakLanesOf } from '../lib/session-lanes';
 import { ComposedChart, BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { useRouter } from 'next/router';
 import CapacityReportModal from '../components/CapacityReportModal';
@@ -36,14 +37,60 @@ export default function CapacityDashboard({ session }) {
     printTheme: 'dark'
   });
   const [sharedSessionsConfig, setSharedSessionsConfig] = useState({});
+  const [lanePhaseConfig, setLanePhaseConfig] = useState({});
+
+  /**
+   * The lanes a session holds, distinguishing "never recorded" from "none".
+   *
+   * Ported from lanesOf in lib/restructure-baseline.js, which cannot be imported
+   * here because it opens a service-role client. `lanes_allocated || 6` cannot
+   * tell the two apart, so a session deliberately set to zero lanes — the club's
+   * land training, which uses no water — came back as six and put six phantom
+   * lane-hours into this page's totals while the planner correctly showed none.
+   */
+  const lanesOf = (session) => {
+    const raw = session?.lanes_allocated;
+    if (raw === null || raw === undefined || raw === '') return 6;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 6;
+  };
+
+  /** Lane changes recorded against a session, keyed as the splits config is. */
+  const phasesFor = (session) => (session && (
+    lanePhaseConfig?.[session.id]
+    || lanePhaseConfig?.[session.scm_guid]
+    || lanePhaseConfig?.[session.name]
+  )) || [];
+
+  /**
+   * The most lanes a session ever holds.
+   *
+   * What a squad needs room for, as distinct from the area under the whole
+   * session. A squad down to one lane for its last half hour still needs two
+   * lanes' worth of places while it has them, so capacity is sized on the peak
+   * and lane-hours on the integral — the same split the planner makes.
+   */
+  const peakLanes = (session) => peakLanesOf(session, phasesFor(session), lanesOf(session));
+
+  /**
+   * "4 L", or "2→1 L" where the count changes part-way through.
+   *
+   * A session that drops a lane mid-way is not a four-lane session, and showing
+   * only its peak would hide the very thing the club records.
+   */
+  const laneLabel = (session) => {
+    const segs = laneSegments(session, phasesFor(session), lanesOf(session));
+    if (segs.length <= 1) return `${lanesOf(session)} L`;
+    return `${segs.map(x => x.lanes).join('→')} L`;
+  };
 
   const getSessionLanesForSquad = (session, squadId) => {
-    if (!session || !squadId) return session?.lanes_allocated || 6;
+    if (!session || !squadId) return peakLanes(session);
     const config = sharedSessionsConfig?.[session.id] || sharedSessionsConfig?.[session.scm_guid] || sharedSessionsConfig?.[session.name];
     if (config && Object.keys(config).length > 0) {
       return config[squadId] !== undefined ? config[squadId] : 0;
     }
-    return session.lanes_allocated || 6;
+    return peakLanes(session);
   };
   
   const timeToMinutes = (timeStr) => {
@@ -164,7 +211,14 @@ export default function CapacityDashboard({ session }) {
     ]);
 
     if (sessRes.error) console.warn('[capacity] sessions error:', sessRes.error.message);
-    if (sessRes.data) setSessions(sessRes.data);
+    // Only sessions the club actually runs.
+    //
+    // This page had no active filter at all, so a session switched off in
+    // Settings carried on appearing here and counting towards capacity — Club 2
+    // Monday was marked inactive and still showed a lane allocated. Filtered
+    // here rather than in the query so a row with no is_active recorded is kept,
+    // which is the convention the rest of the app follows.
+    if (sessRes.data) setSessions(sessRes.data.filter(s => s.is_active !== false));
     if (allMemberships) setMemberships(allMemberships);
     if (allAttendance) setAttendance(allAttendance);
     if (swimRes.data) setSwimmers(swimRes.data);
@@ -184,6 +238,8 @@ export default function CapacityDashboard({ session }) {
     if (settingsRes && settingsRes.data) {
       const row = settingsRes.data.find(r => r.key === 'shared_sessions_config');
       if (row && row.value) setSharedSessionsConfig(row.value);
+      const phaseRow = settingsRes.data.find(r => r.key === 'session_lane_phases');
+      if (phaseRow && phaseRow.value) setLanePhaseConfig(phaseRow.value);
     }
     setLoading(false);
   };
@@ -685,7 +741,7 @@ export default function CapacityDashboard({ session }) {
 
   const squadCapacityMetrics = useMemo(() => {
     if (!targetModellingSquad || squadModellingSessions.length === 0) return null;
-    const maxPerLane = targetModellingSquad.max_swimmers_per_lane || targetModellingSquad.swimmers_per_lane || 5;
+    const maxPerLane = targetModellingSquad.swimmers_per_lane || targetModellingSquad.max_swimmers_per_lane || 8;
     const targetSessions = targetModellingSquad.target_sessions_per_week || 1;
     const totalWeeklySlots = squadModellingSessions.reduce((sum, s) => {
       const lanes = getSessionLanesForSquad(s, targetModellingSquad.id);
@@ -716,7 +772,7 @@ export default function CapacityDashboard({ session }) {
         return false;
       });
       const sqSwimmerCount = swimmers.filter(sw => sw.squads?.id === sq.id).length;
-      const maxPerLane = sq.max_swimmers_per_lane || sq.swimmers_per_lane || 5;
+      const maxPerLane = sq.swimmers_per_lane || sq.max_swimmers_per_lane || 8;
       const targetSess = sq.target_sessions_per_week || 1;
       const totalWeeklySlots = sqSessions.reduce((sum, s) => {
         const lanes = getSessionLanesForSquad(s, sq.id);
@@ -1010,7 +1066,7 @@ export default function CapacityDashboard({ session }) {
         return true;
       }).length;
 
-      let lanes = sess.lanes_allocated || 6;
+      let lanes = peakLanes(sess);
       if (globalSquadFilter !== 'All' && matchingSquads.length > 0) {
         const config = sharedSessionsConfig?.[sess.id] || sharedSessionsConfig?.[sess.scm_guid] || sharedSessionsConfig?.[sess.name];
         if (config && Object.keys(config).length > 0) {
@@ -1876,7 +1932,7 @@ export default function CapacityDashboard({ session }) {
                                         </div>
                                         <div className="flex justify-between items-center mt-2 text-[9px] text-white/40 font-semibold">
                                           <span>{sess.start_time}</span>
-                                          <span>{sess.lanes_allocated || 6} L</span>
+                                          <span>{laneLabel(sess)}</span>
                                         </div>
                                         
                                         <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" style={{ boxShadow: `0 0 10px ${sess.shadowGlow}` }} />
@@ -1960,7 +2016,7 @@ export default function CapacityDashboard({ session }) {
                       </div>
                     ) : (
                       filteredDetailedSessions.map(sess => {
-                      const lanes = sess.lanes_allocated || 6;
+                      const lanes = peakLanes(sess);
                       const maxCapacity = sess.maxCapacity;
                       const activeSwimmers = sess.activeSwimmers;
                       const rosterDensity = sess.rosterDensity;
@@ -2166,7 +2222,7 @@ export default function CapacityDashboard({ session }) {
                     // 2. Map True Physical Capacities (Using Historical Session Yield)
                     let sessionSimCapacities = sortedSessions.map(sess => {
                       const activeRoster = memberships.filter(m => m.session_id === sess.id || m.session_id === sess.scm_guid).length;
-                      const physicalCap = (sess.lanes_allocated || 6) * getSwimmersPerLaneForSession(sess.name);
+                      const physicalCap = peakLanes(sess) * getSwimmersPerLaneForSession(sess.name);
 
                       const sessionAtt = attendance.filter(a => a.session_id === sess.id || a.session_id === sess.scm_guid);
                       const dates = [...new Set(sessionAtt.map(a => a.date))];
@@ -4059,7 +4115,7 @@ export default function CapacityDashboard({ session }) {
                         <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '12px', marginBottom: '1.5rem', border: '1px solid rgba(255,255,255,0.05)' }}>
                             <div className="section-title" style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Squad Variables</div>
                             <div className="flex justify-between mt-2">
-                                <div style={{ fontSize: '0.9rem' }}>Max Swimmers Per Lane: <strong style={{ color: 'white' }}>{activeSquad?.max_swimmers_per_lane || activeSquad?.swimmers_per_lane || 5}</strong></div>
+                                <div style={{ fontSize: '0.9rem' }}>Swimmers Per Lane: <strong style={{ color: 'white' }}>{activeSquad?.swimmers_per_lane || activeSquad?.max_swimmers_per_lane || 8}</strong></div>
                                 <div style={{ fontSize: '0.9rem' }}>Target Sessions/Week: <strong style={{ color: 'white' }}>{activeSquad?.target_sessions_per_week || 1}</strong></div>
                             </div>
                         </div>
@@ -4068,7 +4124,7 @@ export default function CapacityDashboard({ session }) {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '2rem' }}>
                             {squadSessions.map(session => {
                                 const lanes = getSessionLanesForSquad(session, activeSquad?.id);
-                                const maxPerLane = activeSquad?.max_swimmers_per_lane || activeSquad?.swimmers_per_lane || 5;
+                                const maxPerLane = activeSquad?.swimmers_per_lane || activeSquad?.max_swimmers_per_lane || 8;
                                 const slots = lanes * maxPerLane;
                                 return (
                                     <div key={session.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
