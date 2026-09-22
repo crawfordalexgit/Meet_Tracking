@@ -173,3 +173,46 @@ test.describe('a pool the club did not have', () => {
     expect(r + g + b, 'printed dark, like the rest of the reports').toBeLessThan(200);
   });
 });
+
+test.describe('what the missing registers would add', () => {
+  /**
+   * The estimate fills each unregistered night with that session's own
+   * average. It exists because two thirds of this club's registers are taken,
+   * so a squad whose coach marks the sheet looks worse than one whose coach
+   * does not — but it is a model, and the page has to keep saying so.
+   */
+  test('the measured figure is shown beside the estimate, never replaced by it', async ({ page }) => {
+    await page.goto('/registers?days=180');
+    await expect(page.getByText('Squad by squad')).toBeVisible();
+
+    const panel = page.locator('h2.section-title')
+      .filter({ hasText: 'What the missing registers would add' })
+      .locator('xpath=following-sibling::div').first();
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Measured');
+    await expect(panel).toContainText('Estimated');
+    await expect(panel).toContainText('swimmer-nights actually recorded');
+  });
+
+  test('it says plainly that it is a model and changes no record', async ({ page }) => {
+    await page.goto('/registers?days=180');
+    await expect(page.getByText('Squad by squad')).toBeVisible();
+    const panel = page.locator('h2.section-title')
+      .filter({ hasText: 'What the missing registers would add' })
+      .locator('xpath=following-sibling::div').first();
+    await expect(panel).toContainText('a model, not a measurement');
+    await expect(panel).toContainText('Nothing here is written to the club record');
+  });
+
+  test('a session with no register at all is named as unknown, not estimated', async ({ page }) => {
+    // Two Masters sessions have never been registered. An average of nothing
+    // is not an average, and a zero there would be the original fault again.
+    await page.goto('/registers?days=180');
+    await expect(page.getByText('Squad by squad')).toBeVisible();
+    const panel = page.locator('h2.section-title')
+      .filter({ hasText: 'What the missing registers would add' })
+      .locator('xpath=following-sibling::div').first();
+    await expect(panel).toContainText('Sessions this cannot reach');
+    await expect(panel).toContainText('unknown, not zero');
+  });
+});

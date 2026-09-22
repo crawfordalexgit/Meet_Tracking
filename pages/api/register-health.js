@@ -4,6 +4,7 @@ import { requireAuth } from '../../lib/api-auth';
 import { extractSessionDay } from '../../lib/analytics-utils';
 import { assessRegisters } from '../../lib/register-health';
 import { excuseMarks, normaliseVenue } from '../../lib/venue-closures';
+import { estimateSession, estimateTotal } from '../../lib/attendance-estimate';
 import { resolveAttendanceDays } from '../../lib/restructure-glossary';
 
 /**
@@ -78,6 +79,21 @@ export default async function handler(req, res) {
       squadNames: squads.filter(q => q.is_squad).map(q => q.name)
     });
 
+    // What the registers would have said, had they been taken.
+    //
+    // Two thirds of this club's registers are taken, so every attendance
+    // figure it publishes is roughly two thirds of the truth, and a squad
+    // whose coach marks the sheet looks worse than one whose coach does not.
+    // An estimate, returned beside the measured figure and never in place of
+    // it, and never written back to the database.
+    const estimates = report.rows.map(r => estimateSession({
+      name: r.name,
+      headcounts: r.nights.filter(n => n.taken).map(n => n.present),
+      expected: r.expected,
+      rosterCount: r.rosterCount
+    }));
+    const estimate = estimateTotal(estimates);
+
     // Every venue closure touching the window, with how much water it took.
     const sessionsAtVenue = venue => sessions
       .filter(s => normaliseVenue(s.location) === normaliseVenue(venue)).length;
@@ -94,7 +110,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true, days,
-      report: { ...report, venueClosures, marksExcused: excused.length }
+      report: { ...report, venueClosures, marksExcused: excused.length, estimate }
     });
   } catch (error) {
     console.error('register-health failed:', error);

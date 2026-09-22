@@ -434,6 +434,63 @@ export default function RegistersPage() {
               ))}
             </div>
 
+            {/*
+              What the missing registers would have said.
+
+              An estimate, and it sits below the measured figures rather than
+              replacing them. The club's attendance is understated by however
+              much of the register is missing, which quietly penalises the
+              squads whose coaches do mark the sheet — but filling the gaps
+              with an average is a model, and a page that blurs the two is
+              worse than one that undercounts honestly.
+            */}
+            {data.estimate && data.estimate.estimatedSessions > 0 && (
+              <div style={{ marginTop: '2rem' }}>
+                <h2 className="section-title">What the missing registers would add</h2>
+                <div className="glass-card" style={{ padding: '1.2rem 1.4rem', borderLeft: '3px dashed var(--accent-cyan)' }}>
+                  <div style={{ display: 'flex', gap: '2.5rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+                    <div>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-secondary)' }}>Measured</div>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 900 }}>{data.estimate.measured.toLocaleString()}</div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>swimmer-nights actually recorded</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--accent-cyan)' }}>Estimated</div>
+                      <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-cyan)' }}>
+                        {Math.round(data.estimate.estimated).toLocaleString()}
+                        <span style={{ fontSize: '0.8rem', fontWeight: 700, opacity: 0.7 }}> ± {Math.round(data.estimate.uncertainty)}</span>
+                      </div>
+                      <div style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
+                        {Math.round(data.estimate.filledIn).toLocaleString()} filled in across {data.estimate.estimatedSessions} sessions
+                      </div>
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', margin: '0.9rem 0 0', lineHeight: 1.6 }}>
+                    Each night with no register is filled with that session&apos;s own average. This is a
+                    model, not a measurement: it assumes a register goes missing for reasons unrelated
+                    to how many swimmers turned up, which nothing in the data can confirm. The ± covers
+                    how much attendance varies night to night and nothing else. Nothing here is written
+                    to the club record.
+                  </p>
+                  {data.estimate.unreachable.length > 0 && (
+                    <div style={{ marginTop: '0.9rem', paddingTop: '0.8rem', borderTop: '1px solid var(--glass-border)' }}>
+                      <div style={{ fontSize: '0.6rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                        Sessions this cannot reach ({data.estimate.unreachable.length})
+                      </div>
+                      {data.estimate.unreachable.map((u, i) => (
+                        <div key={i} style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                          <strong style={{ color: '#fff' }}>{u.name}</strong> — {u.taken} of {u.expected} nights registered.{' '}
+                          {u.basis === 'unknown'
+                            ? 'No register at all, so there is no average to use. Its attendance is unknown, not zero.'
+                            : 'Too few registers to average from.'}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{ marginTop: '2rem' }}>
               <h2 className="section-title">Registers that look fine ({s.clean})</h2>
               <div className="glass-card" style={{ padding: '1rem 1.2rem', fontSize: '0.78rem', lineHeight: 1.9, color: 'var(--text-secondary)' }}>
