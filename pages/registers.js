@@ -25,6 +25,28 @@ const SEVERITY = {
   ok: { colour: 'var(--accent-emerald)', label: 'Fine' }
 };
 
+/**
+ * How a coverage figure is coloured.
+ *
+ * Severity and coverage are two different questions and were being answered in
+ * one colour: a squad with one bad session printed its 81% in red while a squad
+ * with none printed 80% in green, so the colour contradicted the number sitting
+ * inside it. Coverage colours the coverage figure; severity stays on the border
+ * and is now also written out in words, because a reader who cannot separate
+ * red from green should not have to.
+ *
+ * The bands are strict on purpose. A register is taken or it is not, and four
+ * nights in five is not a good record — it is one squad night a week with no
+ * idea who was there.
+ */
+const COVERAGE_BANDS = [
+  { at: 95, colour: 'var(--accent-emerald)' },
+  { at: 80, colour: 'var(--accent-amber, #f59e0b)' },
+  { at: 0, colour: 'var(--accent-rose)' }
+];
+const coverageColour = pct =>
+  pct === null ? 'var(--text-secondary)' : COVERAGE_BANDS.find(b => pct >= b.at).colour;
+
 function Figure({ label, value, sub, colour }) {
   return (
     <div className="glass-card" style={{ padding: '1.25rem', borderTop: `3px solid ${colour || 'var(--accent-cyan)'}` }}>
@@ -263,19 +285,22 @@ export default function RegistersPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: '0.6rem' }}>
                 {data.bySquad.map(g => {
                   const pct = g.expected > 0 ? Math.round(g.taken / g.expected * 100) : null;
-                  const colour = g.errors ? 'var(--accent-rose)'
-                    : g.flagged.length ? 'var(--accent-amber, #f59e0b)' : 'var(--accent-emerald)';
+                  const severity = g.errors ? 'error' : g.flagged.length ? 'warning' : 'ok';
+                  const colour = SEVERITY[severity].colour;
                   return (
                     <div key={g.squad} className="glass-card"
                       style={{ padding: '0.8rem 0.9rem', borderLeft: `3px solid ${colour}` }}
                       title={`${g.taken} registers taken of ${g.expected} owed across ${g.sessions.length} sessions`}>
                       <div style={{ fontSize: '0.68rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em', lineHeight: 1.3 }}>{g.squad}</div>
-                      <div style={{ fontSize: '1.3rem', fontWeight: 900, color: colour, marginTop: '0.3rem' }}>
+                      <div style={{ fontSize: '1.3rem', fontWeight: 900, color: coverageColour(pct), marginTop: '0.3rem' }}>
                         {pct === null ? '—' : `${pct}%`}
                       </div>
                       <div style={{ fontSize: '0.66rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                         {g.taken} of {g.expected} registers<br />
                         {g.flagged.length} of {g.sessions.length} sessions flagged
+                      </div>
+                      <div className="reg-squad-severity" style={{ fontSize: '0.62rem', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.06em', color: colour, marginTop: '0.35rem' }}>
+                        {SEVERITY[severity].label}
                       </div>
                     </div>
                   );

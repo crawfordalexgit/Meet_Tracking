@@ -228,11 +228,21 @@ test.describe('which squad a session belongs to', () => {
     expect(squadNameFor('TECHNICAL DEVELOPMENT Friday pm', SQUADS)).toBe('TECHNICAL DEVELOPMENT SQUAD');
   });
 
-  test('learn to swim and land training belong to no squad', () => {
-    // Forcing them into one would put their registers on a squad's record.
-    expect(squadNameFor('LTS 3/4 Friday', SQUADS)).toBeNull();
-    expect(squadNameFor('LTS 5/6 Friday', SQUADS)).toBeNull();
-    expect(squadNameFor('Land training', SQUADS)).toBeNull();
+  test('learn to swim and land training are named, not filed under no squad', () => {
+    // They are not squads, but they are groups with coaches and registers of
+    // their own. Returning null put five of this club's sessions under a
+    // heading that reads like a data fault, and one of them had the second
+    // worst coverage on the page.
+    expect(squadNameFor('LTS 3/4 Friday', SQUADS)).toBe('Learn to Swim');
+    expect(squadNameFor('LTS 5/6 Friday', SQUADS)).toBe('Learn to Swim');
+    expect(squadNameFor('LTS 5-6 Sunday pm', SQUADS)).toBe('Learn to Swim');
+    expect(squadNameFor('Land training', SQUADS)).toBe('Land training');
+  });
+
+  test('their registers stay off a squad record', () => {
+    // Naming them must not quietly fold them into a squad's figures.
+    const names = ['LTS 3/4 Friday', 'Land training'].map(n => squadNameFor(n, SQUADS));
+    names.forEach(n => expect(SQUADS).not.toContain(n));
   });
 
   test('an unrecognised session is left unattributed rather than guessed', () => {
