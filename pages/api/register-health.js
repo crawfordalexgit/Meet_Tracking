@@ -49,16 +49,23 @@ export default async function handler(req, res) {
     // Marks recorded in water the club did not have.
     //
     // When a pool goes some coaches cancel and some open the register anyway
-    // and mark the squad absent. Those absences are not attendance, and left
-    // in they land on a swimmer's record instead of the pool's, so they come
-    // out here rather than at each of the places that reads them.
+    // and mark the squad absent. Those absences are not attendance: left in,
+    // they land on a swimmer's record instead of the pool's.
+    //
+    // They are counted, not removed, because this report answers a different
+    // question from the swimmer's. "Was a register taken" and "was the swimmer
+    // there" are not the same, and stripping the marks answered the second at
+    // the cost of the first: the one coach who did open a register during the
+    // closure lost it, their last register fell back eight weeks, and the
+    // report accused them of having stopped. A closure shortens the list of
+    // nights owed. It does not unmake a register somebody took.
     const venueById = {};
     sessions.forEach(s => { venueById[s.id] = s.location; });
-    const { kept, excused } = excuseMarks(
+    const { excused } = excuseMarks(
       attendance, m => (m.session_id in venueById ? venueById[m.session_id] : null), closures);
 
     const marksBySession = {};
-    kept.forEach(r => {
+    attendance.forEach(r => {
       (marksBySession[r.session_id] = marksBySession[r.session_id] || []).push(r);
     });
     const rosterBySession = {};

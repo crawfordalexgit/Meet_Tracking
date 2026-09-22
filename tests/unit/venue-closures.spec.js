@@ -166,3 +166,44 @@ test.describe('the register check under a venue closure', () => {
     expect(row.expected).toBe(4);
   });
 });
+
+test.describe('a register taken while the pool was shut', () => {
+  // The trap this walked into once. LTS 5/6 Friday opened its register on 18
+  // September, inside the closure. Discounting that mark along with the
+  // absences pushed the session's last register back to 24 July and the report
+  // accused the one coach who did turn up of having stopped eight weeks
+  // earlier.
+  //
+  // A closure shortens the list of nights owed. It does not unmake a register
+  // somebody took, and "was a register taken" is not the question that
+  // "was the swimmer there" answers.
+  const WINDOW = { from: '2026-07-01', to: '2026-09-30' };
+
+  test('it still counts as taken, and the coach is not called stopped', () => {
+    const session = {
+      id: 'lts', name: 'LTS 5/6 Friday', day: 'Friday', location: 'Tonbridge Town Pool'
+    };
+    const marks = [
+      { date: '2026-07-24', status: 'present' },
+      { date: '2026-09-18', status: 'present' }
+    ];
+    const row = assessSession(session, marks, {
+      ...WINDOW, closures: [TOWN], rosterCount: 13, today: '2026-09-22'
+    });
+    expect(row.lastDate).toBe('2026-09-18');
+    expect(row.flags.map(f => f.key)).not.toContain('stopped');
+  });
+
+  test('the same marks are still discounted for the swimmer', () => {
+    // Both things are true at once: the register was taken, and nobody in it
+    // was in the water. excuseMarks answers the second and nothing else.
+    const marks = [
+      { date: '2026-09-18', session_id: 'lts', status: 'absent' },
+      { date: '2026-07-24', session_id: 'lts', status: 'absent' }
+    ];
+    const { kept, excused } = excuseMarks(marks, () => 'Tonbridge Town Pool', [TOWN]);
+    expect(excused).toHaveLength(1);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].date).toBe('2026-07-24');
+  });
+});
