@@ -1,4 +1,4 @@
-import { useEffect, useState, Fragment } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import Layout from '../components/Layout';
 import { supabase } from '../lib/supabase';
 import { authedFetch } from '../lib/api-client';
@@ -53,7 +53,7 @@ export default function Settings({ session, scmApiKey }) {
   
   const [debugLog, setDebugLog] = useState(null);
   const [clubExemptions, setClubExemptions] = useState([]);
-  const [newExemption, setNewExemption] = useState({ name: '', start_date: '', end_date: '', type: 'credit', squad_id: '' });
+  const [newExemption, setNewExemption] = useState({ name: '', start_date: '', end_date: '', type: 'credit', squad_id: '', venue: '' });
 
   const [activePanel, setActivePanel] = useState('system');
   const { theme, toggleTheme, themes } = useTheme();
@@ -94,6 +94,12 @@ export default function Settings({ session, scmApiKey }) {
 
   // Timetable
   const [timetableSessions, setTimetableSessions] = useState([]);
+  // Every pool the timetable actually names, so a closure is recorded against
+  // a venue that exists rather than one somebody typed. Spelling has to match
+  // exactly for a closure to find its sessions.
+  const venueOptions = useMemo(() => Array.from(
+    new Set((timetableSessions || []).map(s => s.location).filter(Boolean))
+  ).sort(), [timetableSessions]);
   const [editingSession, setEditingSession] = useState(null); // { id, name, day_of_week, start_time, end_time, location, lanes_allocated, is_active }
   const [sharedSessionsConfig, setSharedSessionsConfig] = useState({});
   const [editingSessionSplits, setEditingSessionSplits] = useState({});
@@ -567,7 +573,7 @@ export default function Settings({ session, scmApiKey }) {
       const { data, error } = await supabase.from('club_exemptions').insert([toInsert]).select('*, squads(name)');
       if (error) throw error;
       setClubExemptions(prev => [...(data || []), ...prev]);
-      setNewExemption({ name: '', start_date: '', end_date: '', type: 'credit', squad_id: '' });
+      setNewExemption({ name: '', start_date: '', end_date: '', type: 'credit', squad_id: '', venue: '' });
       setDebugLog(`Successfully added club exemption.`);
     } catch (e) { setDebugLog(`ERROR: ${e.message}`); }
   };
@@ -2671,19 +2677,27 @@ export default function Settings({ session, scmApiKey }) {
                       {squads.filter(s => s.is_squad).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
+                  <div style={{ width: '200px' }}>
+                    <label className="text-xs uppercase tracking-widest opacity-50 block mb-2">Venue</label>
+                    <select className="input-field m-0" value={newExemption.venue} onChange={e => setNewExemption({...newExemption, venue: e.target.value})}>
+                      <option value="">Every Pool</option>
+                      {venueOptions.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </div>
                   <button onClick={addClubExemption} className="btn btn-primary" style={{ padding: '12px 24px' }}>Add Entry</button>
                 </div>
 
                 {clubExemptions.length > 0 && (
                   <div className="mt-8">
                     <table className="stats-table">
-                      <thead><tr><th>Name</th><th>Period</th><th>Squad</th><th>Type</th><th className="text-center">Action</th></tr></thead>
+                      <thead><tr><th>Name</th><th>Period</th><th>Squad</th><th>Venue</th><th>Type</th><th className="text-center">Action</th></tr></thead>
                       <tbody>
                         {clubExemptions.map(ex => (
                           <tr key={ex.id}>
                             <td style={{ fontWeight: 600 }}>{ex.name}</td>
                             <td>{new Date(ex.start_date).toLocaleDateString()} - {new Date(ex.end_date).toLocaleDateString()}</td>
                             <td><span className="badge">{ex.squads?.name || 'Whole Club'}</span></td>
+                            <td><span className="badge">{ex.venue || 'Every Pool'}</span></td>
                             <td><span className={`badge ${ex.type === 'credit' ? 'success' : 'info'}`}>{ex.type === 'credit' ? '100% Credit' : 'Exempted'}</span></td>
                             <td className="text-center">
                               <button onClick={() => deleteClubExemption(ex.id)} className="btn btn-secondary" style={{ padding: '4px 12px', fontSize: '0.75rem', color: 'var(--danger-color)' }}>Delete</button>

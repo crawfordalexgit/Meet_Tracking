@@ -225,6 +225,30 @@ export default function RegistersPage() {
             </div>
 
             {/*
+              Closures that took a pool rather than the club.
+
+              Named up front because they change who owes what below: a coach
+              whose pool was gone has nothing to answer for, and the report
+              should say so before it lists anything.
+            */}
+            {(data.venueClosures || []).length > 0 && (
+              <div style={{ marginTop: '2rem' }}>
+                <h2 className="section-title">Pools the club did not have</h2>
+                {data.venueClosures.map((c, i) => (
+                  <div key={i} className="glass-card" style={{ padding: '1.1rem 1.3rem', borderLeft: '3px solid var(--accent-cyan)', marginBottom: '0.75rem' }}>
+                    <div style={{ fontWeight: 900, fontSize: '0.9rem' }}>
+                      {c.venue} — {c.from} to {c.to}
+                    </div>
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.4rem 0 0', lineHeight: 1.6 }}>
+                      {c.name}. {c.sessions} {c.sessions === 1 ? 'session is' : 'sessions are'} in that water.
+                      No register is owed for those nights and no swimmer is counted absent.
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/*
               Days the whole club went quiet with no closure recorded.
 
               This sits above every other finding because it changes what they
@@ -343,6 +367,14 @@ export default function RegistersPage() {
                       {' · '}{r.lastDate ? `last ${r.lastDate}` : 'never taken'}
                     </div>
                   </div>
+                  {(r.excusedByVenue || []).map((c, i) => (
+                    <div key={i} style={{ marginTop: '0.5rem', fontSize: '0.73rem', lineHeight: 1.55, color: 'var(--accent-cyan)' }}>
+                      <span style={{ fontWeight: 900, textTransform: 'uppercase', fontSize: '0.6rem', letterSpacing: '0.08em', marginRight: '0.5rem' }}>
+                        Pool closed
+                      </span>
+                      <span style={{ color: 'var(--text-secondary)' }}>{c.detail}</span>
+                    </div>
+                  ))}
                   <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                     {r.flags.map(f => (
                       <div key={f.key} style={{ fontSize: '0.76rem', lineHeight: 1.55 }}>
